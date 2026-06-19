@@ -66,10 +66,16 @@ if [ "$MODE_PLAYMODE" = false ] && [ "$MODE_EDITMODE" = false ]; then
   MODE_EDITMODE=true
 fi
 
-# Detect if Unity is running via UnityLockfile
+# Detect if Unity is running for this specific project
 IS_RUNNING=false
 if [ -f "Temp/UnityLockfile" ] || [ -f "Temp/UnityLockFile" ]; then
-  IS_RUNNING=true
+  # Try to delete the lockfile. If Unity is running, it holds an exclusive lock
+  # and the OS will prevent deletion. If Unity is not running, the delete will succeed.
+  if rm "Temp/UnityLockfile" 2>/dev/null || rm "Temp/UnityLockFile" 2>/dev/null; then
+    IS_RUNNING=false
+  else
+    IS_RUNNING=true
+  fi
 fi
 
 # Function to find Unity path
@@ -230,6 +236,13 @@ run_offline_tests() {
     return 0
   else
     echo "Unity Response: FAILURE"
+    if [ -f "$bash_log_file" ]; then
+      echo "------------------------------------------------------------"
+      echo "Last 50 lines of Unity batch log ($bash_log_file):"
+      echo "------------------------------------------------------------"
+      tail -n 50 "$bash_log_file"
+      echo "------------------------------------------------------------"
+    fi
     return 1
   fi
 }
@@ -281,6 +294,10 @@ if [ "$IS_RUNNING" = true ]; then
     if [ "$response" = "READY" ]; then
       echo " Unity is ready!"
       break
+    elif [ "$response" = "COMPILATION_ERROR" ]; then
+      echo ""
+      echo "Error: Unity compilation failed. Check the Unity Editor Console for details."
+      exit 1
     else
       echo -n "."
     fi

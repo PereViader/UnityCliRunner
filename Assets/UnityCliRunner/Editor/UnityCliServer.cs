@@ -23,6 +23,7 @@ namespace UnityCliRunner
 
         private static volatile bool s_IsCompiling;
         private static volatile bool s_IsUpdating;
+        private static volatile bool s_ScriptCompilationFailed;
 
         static UnityCliServer()
         {
@@ -84,6 +85,7 @@ namespace UnityCliRunner
         {
             s_IsCompiling = EditorApplication.isCompiling;
             s_IsUpdating = EditorApplication.isUpdating;
+            s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
 
             while (MainThreadQueue.TryDequeue(out var action))
             {
@@ -181,6 +183,10 @@ namespace UnityCliRunner
                         {
                             writer.WriteLine("UPDATING");
                         }
+                        else if (s_ScriptCompilationFailed)
+                        {
+                            writer.WriteLine("COMPILATION_ERROR");
+                        }
                         else
                         {
                             writer.WriteLine("READY");
@@ -188,6 +194,12 @@ namespace UnityCliRunner
                         break;
 
                     case "RUN_TESTS":
+                        if (s_ScriptCompilationFailed)
+                        {
+                            writer.WriteLine("FAILURE Compilation failed");
+                            break;
+                        }
+
                         if (parts.Length < 2)
                         {
                             writer.WriteLine("ERROR: Missing test mode (playmode/editmode)");
