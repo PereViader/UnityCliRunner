@@ -205,9 +205,10 @@ parse_and_print_compilation_results() {
     return 1
   fi
 
-  # Extract lines matching compiler error/warning pattern, and deduplicate preserving order
+  # Extract lines matching compiler error/warning pattern from the last 1000 lines of the file,
+  # and deduplicate preserving order
   local lines
-  lines=$(grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "$log_file" | awk '!seen[$0]++')
+  lines=$(tail -n 1000 "$log_file" | grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' | awk '!seen[$0]++')
 
   if [ -z "$lines" ]; then
     return 1
@@ -359,8 +360,8 @@ if [ "$IS_RUNNING" = true ]; then
       break
     elif [ "$response" = "COMPILATION_ERROR" ]; then
       echo ""
-      if [ -f "Temp/unity_compilation_errors.txt" ]; then
-        parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
+      if [ -f "Temp/unity_compilation_errors.txt" ] && parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"; then
+        :
       else
         echo "Error: Unity compilation failed. Check the Unity Editor Console for details."
       fi

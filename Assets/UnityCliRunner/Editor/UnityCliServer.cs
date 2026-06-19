@@ -185,6 +185,18 @@ namespace UnityCliRunner
                         }
                         else if (s_ScriptCompilationFailed)
                         {
+                            var evt = new ManualResetEvent(false);
+                            MainThreadQueue.Enqueue(() => {
+                                try
+                                {
+                                    UnityCliCompilationTracker.WriteActiveErrorsToFile();
+                                }
+                                finally
+                                {
+                                    evt.Set();
+                                }
+                            });
+                            evt.WaitOne(2000);
                             writer.WriteLine("COMPILATION_ERROR");
                         }
                         else
