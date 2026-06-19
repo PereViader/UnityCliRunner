@@ -157,6 +157,18 @@ send_socket_cmd() {
   return 1
 }
 
+# Function to print failed tests in dotnet test format
+print_failed_tests() {
+  local failures_file="Temp/unity_test_failures.txt"
+  local results_file="Temp/unity_test_results.json"
+
+  if [ -f "$failures_file" ]; then
+    cat "$failures_file"
+    rm -f "$failures_file"
+    rm -f "$results_file" 2>/dev/null
+  fi
+}
+
 # Function to run tests via socket (Online)
 run_online_tests() {
   local mode="$1"
@@ -187,6 +199,7 @@ run_online_tests() {
     elif [[ "$response" == FAILURE* ]]; then
       echo " Done!"
       echo "Unity Response: $response"
+      print_failed_tests
       return 1
     else
       # If IDLE or ERROR
@@ -304,14 +317,15 @@ run_offline_tests() {
       tail -n 50 "$bash_log_file"
       echo "------------------------------------------------------------"
     fi
+    print_failed_tests
     return 1
   fi
 }
 
 # --- Main Execution ---
 
-# Clean up stale compilation errors file
-rm -f Temp/unity_compilation_errors.txt 2>/dev/null
+# Clean up stale compilation errors, results, and failures files
+rm -f Temp/unity_compilation_errors.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
 
 if [ "$IS_RUNNING" = true ]; then
   echo "Detected running Unity instance (via UnityLockfile)."

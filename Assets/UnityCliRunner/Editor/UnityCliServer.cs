@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
@@ -267,7 +268,6 @@ namespace UnityCliRunner
                                 {
                                     writer.WriteLine($"FAILURE {res.failCount} failed, {res.passCount} passed");
                                 }
-                                File.Delete(resultsPath);
                             }
                             catch (Exception ex)
                             {
@@ -392,18 +392,32 @@ namespace UnityCliRunner
     }
 
     [Serializable]
+    public class FailedTestInfo
+    {
+        public string name;
+        public string fullName;
+        public string message;
+        public string stackTrace;
+        public double duration;
+    }
+
+    [Serializable]
     public class UnityTestRunResult
     {
         public bool success;
         public int failCount;
         public int passCount;
         public string resultState;
+        public List<FailedTestInfo> failedTests;
     }
 
     public class MyTestCallbacks : ScriptableObject, ICallbacks
     {
+        private List<FailedTestInfo> m_FailedTests = new List<FailedTestInfo>();
+
         public void RunStarted(ITestAdaptor testsToRun)
         {
+            m_FailedTests.Clear();
         }
 
         public void RunFinished(ITestResultAdaptor result)
@@ -413,10 +427,44 @@ namespace UnityCliRunner
                 string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
                 string runningPath = Path.Combine(tempDir, "unity_test_running.txt");
                 string resultsPath = Path.Combine(tempDir, "unity_test_results.json");
+                string failuresPath = Path.Combine(tempDir, "unity_test_failures.txt");
 
                 if (File.Exists(runningPath))
                 {
                     File.Delete(runningPath);
+                }
+                if (File.Exists(failuresPath))
+                {
+                    File.Delete(failuresPath);
+                }
+
+                if (result.FailCount > 0)
+                {
+                    var sb = new StringBuilder();
+                    foreach (var test in m_FailedTests)
+                    {
+                        int durationMs = (int)Math.Round(test.duration * 1000);
+                        string durationStr = durationMs < 1 ? "< 1 ms" : $"{durationMs} ms";
+                        sb.AppendLine($"  \u001b[31mFailed\u001b[0m {test.fullName} [{durationStr}]");
+                        sb.AppendLine("  Error Message:");
+                        if (!string.IsNullOrEmpty(test.message))
+                        {
+                            foreach (var line in test.message.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
+                            {
+                                sb.AppendLine($"   {line}");
+                            }
+                        }
+                        sb.AppendLine("  Stack Trace:");
+                        if (!string.IsNullOrEmpty(test.stackTrace))
+                        {
+                            foreach (var line in test.stackTrace.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
+                            {
+                                sb.AppendLine($"   {line}");
+                            }
+                        }
+                        sb.AppendLine();
+                    }
+                    File.WriteAllText(failuresPath, sb.ToString(), new UTF8Encoding(false));
                 }
 
                 var runResult = new UnityTestRunResult
@@ -424,7 +472,8 @@ namespace UnityCliRunner
                     success = result.FailCount == 0,
                     failCount = result.FailCount,
                     passCount = result.PassCount,
-                    resultState = result.ResultState
+                    resultState = result.ResultState,
+                    failedTests = new List<FailedTestInfo>(m_FailedTests)
                 };
 
                 string json = JsonUtility.ToJson(runResult, true);
@@ -443,6 +492,17 @@ namespace UnityCliRunner
 
         public void TestFinished(ITestResultAdaptor result)
         {
+            if (!result.HasChildren && result.TestStatus == TestStatus.Failed)
+            {
+                m_FailedTests.Add(new FailedTestInfo
+                {
+                    name = result.Name,
+                    fullName = result.FullName,
+                    message = result.Message,
+                    stackTrace = result.StackTrace,
+                    duration = result.Duration
+                });
+            }
         }
     }
 }
