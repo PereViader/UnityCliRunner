@@ -195,26 +195,22 @@ run_offline_tests() {
 
   echo "Running $mode tests in batchmode..."
   
-  local results_file="Temp/test-results-${mode}.xml"
-  rm -f "$results_file"
+  # Local relative paths for bash operations
+  local bash_results_file="Temp/test-results-${mode}.xml"
+  local bash_log_file="Temp/unity_batch_log.txt"
 
-  local proj_path
-  if command -v cygpath >/dev/null 2>&1; then
-    proj_path=$(cygpath -w "$(pwd)")
-  else
-    proj_path=$(pwd)
-  fi
+  rm -f "$bash_results_file"
+  rm -f "$bash_log_file"
+
+  # Use absolute paths with forward slashes for Windows Unity.exe execution.
+  # This avoids any backslash-escaping issues when passing args from bash to Windows.
+  local abs_proj_path="$(pwd)"
+  local abs_results_file="$(pwd)/$bash_results_file"
+  local abs_log_file="$(pwd)/$bash_log_file"
 
   mkdir -p Temp
-  local log_file="Temp/unity_batch_log.txt"
-  rm -f "$log_file"
-  touch "$log_file"
 
-  # Stream logs in background
-  tail -f "$log_file" &
-  tail_pid=$!
-
-  local args=(-batchmode -runTests -projectPath "$proj_path" -testPlatform "$platform" -testResults "$results_file" -logFile "$log_file")
+  local args=(-batchmode -runTests -projectPath "$abs_proj_path" -testPlatform "$platform" -testResults "$abs_results_file" -logFile "$abs_log_file")
   if [ -n "$FILTER" ]; then
     args+=(-testFilter "$FILTER")
   fi
@@ -223,15 +219,11 @@ run_offline_tests() {
   "$UNITY_EXE" "${args[@]}"
   local unity_exit=$?
 
-  # Kill tail process
-  kill "$tail_pid" 2>/dev/null
-  wait "$tail_pid" 2>/dev/null
-  tail_pid=""
-
-  echo "Unity batchmode finished with exit code $unity_exit"
   if [ $unity_exit -eq 0 ]; then
+    echo "Unity Response: SUCCESS"
     return 0
   else
+    echo "Unity Response: FAILURE"
     return 1
   fi
 }
@@ -242,12 +234,15 @@ if [ "$IS_RUNNING" = true ]; then
   echo "Detected running Unity instance (via UnityLockfile)."
   
   # Step 1: Trigger AssetDatabase refresh
-  echo "Triggering AssetDatabase refresh..."
-  # Try to send REFRESH
-  if ! send_socket_cmd "REFRESH" >/dev/null; then
-    echo "Error: Failed to connect to Unity socket server. Falling back to batchmode..."
-    IS_RUNNING=false
-  fi
+  echo -n "Triggering AssetDatabase refresh..."
+  while true; do
+    if send_socket_cmd "REFRESH" >/dev/null; then
+      echo " Done!"
+      break
+    fi
+    echo -n "."
+    sleep 1
+  done
 fi
 
 if [ "$IS_RUNNING" = true ]; then
