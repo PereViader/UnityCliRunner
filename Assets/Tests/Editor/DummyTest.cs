@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 
 namespace Tests
@@ -7,13 +8,21 @@ namespace Tests
         [Test]
         public void PassTest()
         {
-            Assert.Pass();
+            Assert.Fail("This is not good!");
         }
 
         [Test]
         public void AnotherTest()
         {
+            throw new Exception("Potato");
             Assert.AreEqual(2, 1 + 1);
+        }
+
+        [Test]
+        [Ignore("This test is skipped intentionally for testing purposes.")]
+        public void IgnoreTest()
+        {
+            Assert.Pass();
         }
     }
 }

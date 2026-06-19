@@ -260,13 +260,14 @@ namespace UnityCliRunner
                             {
                                 string content = File.ReadAllText(resultsPath);
                                 var res = JsonUtility.FromJson<UnityTestRunResult>(content);
+                                string skipStr = res.skipCount > 0 ? $", {res.skipCount} skipped" : "";
                                 if (res.success)
                                 {
-                                    writer.WriteLine($"SUCCESS {res.passCount} passed");
+                                    writer.WriteLine($"SUCCESS {res.passCount} passed{skipStr}");
                                 }
                                 else
                                 {
-                                    writer.WriteLine($"FAILURE {res.failCount} failed, {res.passCount} passed");
+                                    writer.WriteLine($"FAILURE {res.failCount} failed, {res.passCount} passed{skipStr}");
                                 }
                             }
                             catch (Exception ex)
@@ -407,6 +408,7 @@ namespace UnityCliRunner
         public bool success;
         public int failCount;
         public int passCount;
+        public int skipCount;
         public string resultState;
         public List<FailedTestInfo> failedTests;
     }
@@ -438,7 +440,7 @@ namespace UnityCliRunner
                     File.Delete(failuresPath);
                 }
 
-                if (result.FailCount > 0)
+                if (m_FailedTests.Count > 0)
                 {
                     var sb = new StringBuilder();
                     foreach (var test in m_FailedTests)
@@ -464,6 +466,7 @@ namespace UnityCliRunner
                         }
                         sb.AppendLine();
                     }
+
                     File.WriteAllText(failuresPath, sb.ToString(), new UTF8Encoding(false));
                 }
 
@@ -472,13 +475,14 @@ namespace UnityCliRunner
                     success = result.FailCount == 0,
                     failCount = result.FailCount,
                     passCount = result.PassCount,
+                    skipCount = result.SkipCount,
                     resultState = result.ResultState,
                     failedTests = new List<FailedTestInfo>(m_FailedTests)
                 };
 
                 string json = JsonUtility.ToJson(runResult, true);
                 File.WriteAllText(resultsPath, json);
-                Debug.Log($"UnityCliRunner: Playmode/Editmode tests completed. Success: {runResult.success}, Failed: {runResult.failCount}, Passed: {runResult.passCount}");
+                Debug.Log($"UnityCliRunner: Playmode/Editmode tests completed. Success: {runResult.success}, Failed: {runResult.failCount}, Passed: {runResult.passCount}, Skipped: {runResult.skipCount}");
             }
             catch (Exception ex)
             {
