@@ -197,6 +197,60 @@ run_online_tests() {
   done
 }
 
+# Function to parse compilation errors and warnings from a log file
+# and print them in dotnet build format.
+parse_and_print_compilation_results() {
+  local log_file="$1"
+  if [ ! -f "$log_file" ]; then
+    return 1
+  fi
+
+  # Extract lines matching compiler error/warning pattern, and deduplicate preserving order
+  local lines
+  lines=$(grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "$log_file" | awk '!seen[$0]++')
+
+  if [ -z "$lines" ]; then
+    return 1
+  fi
+
+  local error_count=0
+  local warning_count=0
+
+  # ANSI color codes
+  local red=$'\e[31m'
+  local yellow=$'\e[33m'
+  local reset=$'\e[0m'
+
+  # Read line by line to count and format
+  while IFS= read -r line; do
+    if [ -z "$line" ]; then
+      continue
+    fi
+    if [[ "$line" =~ \):\ error\  ]]; then
+      ((error_count++))
+      echo "${line/error /${red}error${reset} }"
+    elif [[ "$line" =~ \):\ warning\  ]]; then
+      ((warning_count++))
+      echo "${line/warning /${yellow}warning${reset} }"
+    else
+      echo "$line"
+    fi
+  done <<< "$lines"
+
+  echo ""
+  if [ $error_count -gt 0 ]; then
+    echo "${red}Build FAILED.${reset}"
+    echo "    $warning_count Warning(s)"
+    echo "    $error_count Error(s)"
+    return 0 # compilation failed
+  else
+    echo "${yellow}Build succeeded with warnings.${reset}"
+    echo "    $warning_count Warning(s)"
+    echo "    $error_count Error(s)"
+    return 2 # compilation succeeded but with warnings
+  fi
+}
+
 # Function to run tests in batchmode (Offline)
 run_offline_tests() {
   local mode="$1"
@@ -237,6 +291,12 @@ run_offline_tests() {
   else
     echo "Unity Response: FAILURE"
     if [ -f "$bash_log_file" ]; then
+      parse_and_print_compilation_results "$bash_log_file"
+      local parse_status=$?
+      if [ $parse_status -eq 0 ]; then
+        return 2
+      fi
+      
       echo "------------------------------------------------------------"
       echo "Last 50 lines of Unity batch log ($bash_log_file):"
       echo "------------------------------------------------------------"
@@ -248,6 +308,9 @@ run_offline_tests() {
 }
 
 # --- Main Execution ---
+
+# Clean up stale compilation errors file
+rm -f Temp/unity_compilation_errors.txt 2>/dev/null
 
 if [ "$IS_RUNNING" = true ]; then
   echo "Detected running Unity instance (via UnityLockfile)."
@@ -296,7 +359,11 @@ if [ "$IS_RUNNING" = true ]; then
       break
     elif [ "$response" = "COMPILATION_ERROR" ]; then
       echo ""
-      echo "Error: Unity compilation failed. Check the Unity Editor Console for details."
+      if [ -f "Temp/unity_compilation_errors.txt" ]; then
+        parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
+      else
+        echo "Error: Unity compilation failed. Check the Unity Editor Console for details."
+      fi
       exit 1
     else
       echo -n "."
@@ -340,14 +407,20 @@ else
   TESTS_FAILED=false
   if [ "$MODE_EDITMODE" = true ]; then
     run_offline_tests "editmode"
-    if [ $? -ne 0 ]; then
+    exit_status=$?
+    if [ $exit_status -eq 2 ]; then
+      exit 1
+    elif [ $exit_status -ne 0 ]; then
       TESTS_FAILED=true
     fi
   fi
 
   if [ "$MODE_PLAYMODE" = true ]; then
     run_offline_tests "playmode"
-    if [ $? -ne 0 ]; then
+    exit_status=$?
+    if [ $exit_status -eq 2 ]; then
+      exit 1
+    elif [ $exit_status -ne 0 ]; then
       TESTS_FAILED=true
     fi
   fi
