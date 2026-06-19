@@ -310,13 +310,18 @@ run_offline_tests() {
       if [ $parse_status -eq 0 ]; then
         return 2
       fi
-      
+    fi
+
+    # Only print the Unity log tail if we don't have formatted test failures to print
+    # (e.g. if Unity crashed or failed to run tests at all).
+    if [ ! -f "Temp/unity_test_failures.txt" ] && [ -f "$bash_log_file" ]; then
       echo "------------------------------------------------------------"
       echo "Last 50 lines of Unity batch log ($bash_log_file):"
       echo "------------------------------------------------------------"
       tail -n 50 "$bash_log_file"
       echo "------------------------------------------------------------"
     fi
+
     print_failed_tests
     return 1
   fi
