@@ -156,33 +156,39 @@ run_online_tests() {
   local mode="$1"
   echo "Sending command to run $mode tests..."
 
-  # Read port
-  local port=""
-  if [ -f "Temp/unity_cli_port.txt" ]; then
-    port=$(cat "Temp/unity_cli_port.txt")
-  fi
-
-  if [ -z "$port" ]; then
-    echo "Error: Temp/unity_cli_port.txt not found."
-    return 2
-  fi
-
   local response=""
-  # Timeout of 600 seconds (10 minutes) for running tests
-  response=$(send_socket_cmd "RUN_TESTS $mode $FILTER" 600)
-  local exit_val=$?
+  # Trigger test execution. The server responds "RUNNING" immediately and closes the socket.
+  # If a domain reload begins instantly, the connection might close without response, which we also treat as started.
+  response=$(send_socket_cmd "RUN_TESTS $mode $FILTER" 10)
+  
+  echo -n "Waiting for tests to complete"
+  while true; do
+    sleep 1
 
-  if [ $exit_val -ne 0 ] || [ -z "$response" ]; then
-    echo "Error: Connection lost or timed out while running tests."
-    return 2
-  fi
+    # Re-read port/query status. The connection will fail during domain reloads, which is expected.
+    response=$(send_socket_cmd "POLL_TESTS" 5)
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+      echo -n "."
+      continue
+    fi
 
-  echo "Unity Response: $response"
-  if [[ "$response" == SUCCESS* ]]; then
-    return 0
-  else
-    return 1
-  fi
+    if [ "$response" = "RUNNING" ]; then
+      echo -n "."
+    elif [[ "$response" == SUCCESS* ]]; then
+      echo " Done!"
+      echo "Unity Response: $response"
+      return 0
+    elif [[ "$response" == FAILURE* ]]; then
+      echo " Done!"
+      echo "Unity Response: $response"
+      return 1
+    else
+      # If IDLE or ERROR
+      echo " Done!"
+      echo "Unity Response: $response"
+      return 2
+    fi
+  done
 }
 
 # Function to run tests in batchmode (Offline)

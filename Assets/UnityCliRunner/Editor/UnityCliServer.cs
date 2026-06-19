@@ -21,11 +21,6 @@ namespace UnityCliRunner
         private static readonly ConcurrentQueue<Action> MainThreadQueue = new ConcurrentQueue<Action>();
         private static MyTestCallbacks s_Callbacks;
 
-        private static readonly object s_Lock = new object();
-        private static TcpClient s_ActiveClient;
-        private static NetworkStream s_ActiveStream;
-        private static StreamWriter s_ActiveWriter;
-
         private static volatile bool s_IsCompiling;
         private static volatile bool s_IsUpdating;
 
@@ -82,7 +77,6 @@ namespace UnityCliRunner
             }
 
             DeletePortFile();
-            CleanupActiveClient();
             Debug.Log("UnityCliRunner: Socket server stopped.");
         }
 
@@ -147,13 +141,15 @@ namespace UnityCliRunner
             NetworkStream stream = null;
             StreamReader reader = null;
             StreamWriter writer = null;
-            bool keepOpen = false;
 
             try
             {
                 stream = client.GetStream();
                 reader = new StreamReader(stream, Encoding.UTF8);
-                writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+                // We use new UTF8Encoding(false) to disable emitting a UTF-8 Byte Order Mark (BOM).
+                // Emitting a BOM (\xEF\xBB\xBF in bytes) is non-standard for sockets and would be prepended
+                // to our responses, breaking string comparisons (e.g. [ "$response" = "READY" ]) in the bash script.
+                writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
 
                 string line = reader.ReadLine();
                 if (string.IsNullOrEmpty(line))
@@ -215,15 +211,49 @@ namespace UnityCliRunner
                             break;
                         }
 
-                        keepOpen = true; // Keep connection open for test results
-                        
-                        var capturedClient = client;
-                        var capturedStream = stream;
-                        var capturedWriter = writer;
+                        // Write running state files synchronously
+                        WriteTestRunningState();
 
                         MainThreadQueue.Enqueue(() => {
-                            RunTests(mode, filter, capturedClient, capturedWriter, capturedStream);
+                            RunTests(mode, filter);
                         });
+
+                        writer.WriteLine("RUNNING");
+                        break;
+
+                    case "POLL_TESTS":
+                        string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
+                        string resultsPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_results.json");
+
+                        if (File.Exists(runningPath))
+                        {
+                            writer.WriteLine("RUNNING");
+                        }
+                        else if (File.Exists(resultsPath))
+                        {
+                            try
+                            {
+                                string content = File.ReadAllText(resultsPath);
+                                var res = JsonUtility.FromJson<UnityTestRunResult>(content);
+                                if (res.success)
+                                {
+                                    writer.WriteLine($"SUCCESS {res.passCount} passed");
+                                }
+                                else
+                                {
+                                    writer.WriteLine($"FAILURE {res.failCount} failed, {res.passCount} passed");
+                                }
+                                File.Delete(resultsPath);
+                            }
+                            catch (Exception ex)
+                            {
+                                writer.WriteLine($"ERROR: {ex.Message}");
+                            }
+                        }
+                        else
+                        {
+                            writer.WriteLine("IDLE");
+                        }
                         break;
 
                     default:
@@ -241,17 +271,38 @@ namespace UnityCliRunner
             }
             finally
             {
-                if (!keepOpen)
-                {
-                    reader?.Dispose();
-                    writer?.Dispose();
-                    stream?.Dispose();
-                    client.Close();
-                }
+                reader?.Dispose();
+                writer?.Dispose();
+                stream?.Dispose();
+                client.Close();
             }
         }
 
-        private static void RunTests(TestMode mode, string filterText, TcpClient client, StreamWriter writer, NetworkStream stream)
+        private static void WriteTestRunningState()
+        {
+            try
+            {
+                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                if (!Directory.Exists(tempDir))
+                {
+                    Directory.CreateDirectory(tempDir);
+                }
+                string runningPath = Path.Combine(tempDir, "unity_test_running.txt");
+                string resultsPath = Path.Combine(tempDir, "unity_test_results.json");
+
+                if (File.Exists(resultsPath))
+                {
+                    File.Delete(resultsPath);
+                }
+                File.WriteAllText(runningPath, DateTime.UtcNow.ToString("o"));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to write test running state: {ex}");
+            }
+        }
+
+        private static void RunTests(TestMode mode, string filterText)
         {
             try
             {
@@ -266,87 +317,18 @@ namespace UnityCliRunner
                 }
 
                 var settings = new ExecutionSettings(filter);
-                
-                lock (s_Lock)
-                {
-                    CleanupActiveClient();
-                    s_ActiveClient = client;
-                    s_ActiveStream = stream;
-                    s_ActiveWriter = writer;
-                }
-
                 Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}'...");
                 api.Execute(settings);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to start tests: {ex}");
-                try
+                // Clean up state so we don't hang polling
+                string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
+                if (File.Exists(runningPath))
                 {
-                    writer.WriteLine($"ERROR: Failed to start tests: {ex.Message}");
-                    writer.Dispose();
-                    stream.Dispose();
-                    client.Close();
+                    File.Delete(runningPath);
                 }
-                catch { }
-                
-                lock (s_Lock)
-                {
-                    if (s_ActiveClient == client)
-                    {
-                        s_ActiveClient = null;
-                        s_ActiveStream = null;
-                        s_ActiveWriter = null;
-                    }
-                }
-            }
-        }
-
-        public static void ReportTestResults(bool success, int failCount, int passCount)
-        {
-            lock (s_Lock)
-            {
-                if (s_ActiveWriter != null)
-                {
-                    try
-                    {
-                        if (success)
-                        {
-                            s_ActiveWriter.WriteLine($"SUCCESS {passCount} passed");
-                        }
-                        else
-                        {
-                            s_ActiveWriter.WriteLine($"FAILURE {failCount} failed, {passCount} passed");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"UnityCliRunner: Failed to write test results to client: {ex}");
-                    }
-                    finally
-                    {
-                        CleanupActiveClient();
-                    }
-                }
-            }
-        }
-
-        private static void CleanupActiveClient()
-        {
-            if (s_ActiveWriter != null)
-            {
-                try { s_ActiveWriter.Dispose(); } catch { }
-                s_ActiveWriter = null;
-            }
-            if (s_ActiveStream != null)
-            {
-                try { s_ActiveStream.Dispose(); } catch { }
-                s_ActiveStream = null;
-            }
-            if (s_ActiveClient != null)
-            {
-                try { s_ActiveClient.Close(); } catch { }
-                s_ActiveClient = null;
             }
         }
 
@@ -385,6 +367,15 @@ namespace UnityCliRunner
         }
     }
 
+    [Serializable]
+    public class UnityTestRunResult
+    {
+        public bool success;
+        public int failCount;
+        public int passCount;
+        public string resultState;
+    }
+
     public class MyTestCallbacks : ScriptableObject, ICallbacks
     {
         public void RunStarted(ITestAdaptor testsToRun)
@@ -393,7 +384,33 @@ namespace UnityCliRunner
 
         public void RunFinished(ITestResultAdaptor result)
         {
-            UnityCliServer.ReportTestResults(result.FailCount == 0, result.FailCount, result.PassCount);
+            try
+            {
+                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                string runningPath = Path.Combine(tempDir, "unity_test_running.txt");
+                string resultsPath = Path.Combine(tempDir, "unity_test_results.json");
+
+                if (File.Exists(runningPath))
+                {
+                    File.Delete(runningPath);
+                }
+
+                var runResult = new UnityTestRunResult
+                {
+                    success = result.FailCount == 0,
+                    failCount = result.FailCount,
+                    passCount = result.PassCount,
+                    resultState = result.ResultState
+                };
+
+                string json = JsonUtility.ToJson(runResult, true);
+                File.WriteAllText(resultsPath, json);
+                Debug.Log($"UnityCliRunner: Playmode/Editmode tests completed. Success: {runResult.success}, Failed: {runResult.failCount}, Passed: {runResult.passCount}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Exception in RunFinished callback: {ex}");
+            }
         }
 
         public void TestStarted(ITestAdaptor test)
