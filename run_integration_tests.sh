@@ -220,24 +220,29 @@ for tc in "${TEST_CASES[@]}"; do
   
   normalize_output "$raw_out" "$norm_out"
   
-  expected_file="IntegrationTests/$tc/ExpectedOutput_Online.txt"
+  expected_file="IntegrationTests/$tc/output.online.verified.txt"
+  received_file="IntegrationTests/$tc/output.online.received.txt"
   
   if [ "${BOOTSTRAP:-false}" = "true" ]; then
     cp "$norm_out" "$expected_file"
+    rm -f "$received_file"
     echo "Bootstrapped $expected_file"
   else
     if [ ! -f "$expected_file" ]; then
       echo "Error: Expected file $expected_file does not exist. Run with BOOTSTRAP=true to generate."
+      cp "$norm_out" "$received_file"
       FAILED_TESTS=$((FAILED_TESTS + 1))
     else
       if diff -u "$expected_file" "$norm_out"; then
         echo "SUCCESS: Output matches $expected_file"
+        rm -f "$received_file"
       else
         echo "FAILURE: Output does not match $expected_file"
         echo "Raw output was:"
         cat "$raw_out"
         echo "Normalized output was:"
         cat "$norm_out"
+        cp "$norm_out" "$received_file"
         FAILED_TESTS=$((FAILED_TESTS + 1))
       fi
     fi
@@ -303,24 +308,29 @@ for tc in "${TEST_CASES[@]}"; do
   
   normalize_output "$raw_out" "$norm_out"
   
-  expected_file="IntegrationTests/$tc/ExpectedOutput_Offline.txt"
+  expected_file="IntegrationTests/$tc/output.offline.verified.txt"
+  received_file="IntegrationTests/$tc/output.offline.received.txt"
   
   if [ "${BOOTSTRAP:-false}" = "true" ]; then
     cp "$norm_out" "$expected_file"
+    rm -f "$received_file"
     echo "Bootstrapped $expected_file"
   else
     if [ ! -f "$expected_file" ]; then
       echo "Error: Expected file $expected_file does not exist. Run with BOOTSTRAP=true to generate."
+      cp "$norm_out" "$received_file"
       FAILED_TESTS=$((FAILED_TESTS + 1))
     else
       if diff -u "$expected_file" "$norm_out"; then
         echo "SUCCESS: Output matches $expected_file"
+        rm -f "$received_file"
       else
         echo "FAILURE: Output does not match $expected_file"
         echo "Raw output was:"
         cat "$raw_out"
         echo "Normalized output was:"
         cat "$norm_out"
+        cp "$norm_out" "$received_file"
         FAILED_TESTS=$((FAILED_TESTS + 1))
       fi
     fi
