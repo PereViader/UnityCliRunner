@@ -127,19 +127,29 @@ normalize_output() {
   escaped_proj_path_win=$(echo "$abs_proj_path" | sed 's/\//\\\\/g' | sed 's/[].[^$*?+\\|()]/\\&/g')
 
   sed -E \
-    -e 's/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g' \
+    -e 's|\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]||g' \
     -e "s|$escaped_proj_path|PROJECT_PATH|gI" \
     -e "s|$escaped_proj_path_win|PROJECT_PATH|gI" \
-    -e 's/\[[0-9]+ ms\]/[DURATION]/g' \
-    -e 's/\[< 1 ms\]/[DURATION]/g' \
-    -e 's/Waiting for tests to complete\.* Done!/Waiting for tests to complete. Done!/g' \
-    -e 's/Waiting for AssetDatabase refresh\/compilation to finish\.* Unity is ready!/Waiting for AssetDatabase refresh\/compilation to finish. Unity is ready!/g' \
-    -e 's/Triggering AssetDatabase refresh\.* Done!/Triggering AssetDatabase refresh. Done!/g' \
+    -e 's|\[[0-9]+ ms\]|[DURATION]|g' \
+    -e 's|\[< 1 ms\]|[DURATION]|g' \
+    -e 's|Waiting for tests to complete\.* Done!|Waiting for tests to complete. Done!|g' \
+    -e 's|Waiting for AssetDatabase refresh/compilation to finish\.* Unity is ready!|Waiting for AssetDatabase refresh/compilation to finish. Unity is ready!|g' \
+    -e 's|Triggering AssetDatabase refresh\.* Done!|Triggering AssetDatabase refresh. Done!|g' \
+    -e 's|Waiting for method execution to complete\.* Done!|Waiting for method execution to complete. Done!|g' \
+    -e 's|Connecting\.* Connected successfully!|Connecting... Connected successfully!|g' \
     -e 's|Found Unity at: .*|Found Unity at: UNITY_EXE|g' \
     -e 's|PROJECT_PATH\\|PROJECT_PATH/|g' \
     -e 's|c:/program files/unity/hub/editor/[^/]+/editor/unity.exe|UNITY_EXE|gI' \
     -e 's|c:\\program files\\unity\\hub\\editor\\[^\\]+\\editor\\unity.exe|UNITY_EXE|gI' \
-    -e 's/\r//g' \
+    -e 's|id=[a-f0-9]+|id=ASSET_DB_ID|g' \
+    -e 's|[0-9.]+[[:space:]]*ms|DURATIONms|g' \
+    -e 's|[0-9.]+[[:space:]]*seconds|DURATIONseconds|g' \
+    -e 's|[0-9.]+ (MB\|KB\|GB)|SIZE_MB|g' \
+    -e 's|Unloading [0-9]+ unused Assets|Unloading UNUSED_ASSETS unused Assets|g' \
+    -e 's|Loaded Objects now: [0-9]+|Loaded Objects now: LOADED_OBJECTS|g' \
+    -e 's|##utp:\{.*\}|##utp:JSON|g' \
+    -e 's|Scanning for USB devices : USB_DURATIONms|Scanning for USB devices : USB_DURATION|g' \
+    -e 's|\r||g' \
     "$input_file" > "$output_file"
 }
 
@@ -199,29 +209,34 @@ TEST_CASES=(
 
 FAILED_TESTS=0
 
-echo "============================================="
-echo "PHASE 1: Running integration tests in ONLINE mode"
-echo "============================================="
+run_integration_case() {
+  local tc="$1"
+  local cmd_args="$2"
+  local mode="$3" # "online" or "offline"
 
-for tc in "${TEST_CASES[@]}"; do
-  echo "--- Running test case: $tc (Online) ---"
+  echo "--- Running test case: $tc ($mode) with command: ./unitycli.sh $cmd_args ---"
   
-  cp "IntegrationTests/$tc/DummyTest.cs" "$DUMMY_TEST_PATH"
-  sleep 2
+  if [ -f "IntegrationTests/$tc/DummyTest.cs" ]; then
+    cp "IntegrationTests/$tc/DummyTest.cs" "$DUMMY_TEST_PATH"
+    # Sleep to allow Unity to detect compilation change in online mode
+    if [ "$mode" = "online" ]; then
+      sleep 2
+    fi
+  fi
   
-  raw_out="IntegrationTests/Temp/raw_out_online.txt"
-  norm_out="IntegrationTests/Temp/norm_out_online.txt"
+  local raw_out="IntegrationTests/Temp/raw_out_${mode}.txt"
+  local norm_out="IntegrationTests/Temp/norm_out_${mode}.txt"
   rm -f "$raw_out" "$norm_out"
   
-  ./run_tests.sh --editmode > "$raw_out" 2>&1
-  exit_code=$?
+  ./unitycli.sh $cmd_args > "$raw_out" 2>&1
+  local exit_code=$?
   
   echo "EXIT_CODE: $exit_code" >> "$raw_out"
   
   normalize_output "$raw_out" "$norm_out"
   
-  expected_file="IntegrationTests/$tc/output.online.verified.txt"
-  received_file="IntegrationTests/$tc/output.online.received.txt"
+  local expected_file="IntegrationTests/$tc/output.${mode}.verified.txt"
+  local received_file="IntegrationTests/$tc/output.${mode}.received.txt"
   
   if [ "${BOOTSTRAP:-false}" = "true" ]; then
     cp "$norm_out" "$expected_file"
@@ -247,7 +262,24 @@ for tc in "${TEST_CASES[@]}"; do
       fi
     fi
   fi
+}
+
+echo "============================================="
+echo "PHASE 1: Running integration tests in ONLINE mode"
+echo "============================================="
+
+for tc in "${TEST_CASES[@]}"; do
+  run_integration_case "$tc" "test --editmode" "online"
 done
+
+# executemethod tests (online)
+run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
+run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "online"
+run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "online"
+run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
+
+# check-connection test (online)
+run_integration_case "TestCheckConnection" "check-connection" "online"
 
 # Close Unity
 echo "Closing Unity..."
@@ -292,50 +324,17 @@ echo "PHASE 2: Running integration tests in OFFLINE mode"
 echo "============================================="
 
 for tc in "${TEST_CASES[@]}"; do
-  echo "--- Running test case: $tc (Offline) ---"
-  
-  cp "IntegrationTests/$tc/DummyTest.cs" "$DUMMY_TEST_PATH"
-  sleep 2
-  
-  raw_out="IntegrationTests/Temp/raw_out_offline.txt"
-  norm_out="IntegrationTests/Temp/norm_out_offline.txt"
-  rm -f "$raw_out" "$norm_out"
-  
-  ./run_tests.sh --editmode > "$raw_out" 2>&1
-  exit_code=$?
-  
-  echo "EXIT_CODE: $exit_code" >> "$raw_out"
-  
-  normalize_output "$raw_out" "$norm_out"
-  
-  expected_file="IntegrationTests/$tc/output.offline.verified.txt"
-  received_file="IntegrationTests/$tc/output.offline.received.txt"
-  
-  if [ "${BOOTSTRAP:-false}" = "true" ]; then
-    cp "$norm_out" "$expected_file"
-    rm -f "$received_file"
-    echo "Bootstrapped $expected_file"
-  else
-    if [ ! -f "$expected_file" ]; then
-      echo "Error: Expected file $expected_file does not exist. Run with BOOTSTRAP=true to generate."
-      cp "$norm_out" "$received_file"
-      FAILED_TESTS=$((FAILED_TESTS + 1))
-    else
-      if diff -u "$expected_file" "$norm_out"; then
-        echo "SUCCESS: Output matches $expected_file"
-        rm -f "$received_file"
-      else
-        echo "FAILURE: Output does not match $expected_file"
-        echo "Raw output was:"
-        cat "$raw_out"
-        echo "Normalized output was:"
-        cat "$norm_out"
-        cp "$norm_out" "$received_file"
-        FAILED_TESTS=$((FAILED_TESTS + 1))
-      fi
-    fi
-  fi
+  run_integration_case "$tc" "test --editmode" "offline"
 done
+
+# executemethod tests (offline)
+run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
+run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "offline"
+run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "offline"
+run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
+
+# check-connection test (offline)
+run_integration_case "TestCheckConnection" "check-connection" "offline"
 
 echo "============================================="
 if [ $FAILED_TESTS -eq 0 ]; then

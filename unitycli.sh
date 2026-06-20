@@ -14,57 +14,104 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Default options
+SUBCOMMAND=""
 MODE_PLAYMODE=false
 MODE_EDITMODE=false
 FILTER=""
+EXECUTE_METHOD=""
 
 # Helper for usage
 show_usage() {
-  echo "Usage: $0 [--playmode] [--editmode] [--filter <filter>]"
-  echo "  --playmode          Run PlayMode tests"
-  echo "  --editmode          Run EditMode tests"
-  echo "  --filter <filter>   Filter tests by name (regex/substring)"
+  echo "Usage: $0 <command> [options]"
+  echo "Commands:"
+  echo "  test [options]          Run tests (defaults to running both EditMode and PlayMode)"
+  echo "    --playmode            Run PlayMode tests"
+  echo "    --editmode            Run EditMode tests"
+  echo "    --filter <filter>     Filter tests by name (regex/substring)"
+  echo "  executemethod <method>  Execute a custom static parameterless method returning void"
+  echo "                          (e.g., Namespace.Class.Method)"
+  echo "  check-connection        Check if Unity is running and wait for connection"
+  echo "  -h, --help              Show this help message"
   exit 1
 }
 
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --playmode)
-      MODE_PLAYMODE=true
-      shift
-      ;;
-    --editmode)
-      MODE_EDITMODE=true
-      shift
-      ;;
-    --filter)
-      if [ -z "${2:-}" ]; then
-        echo "Error: --filter requires an argument"
-        show_usage
-      fi
-      FILTER="$2"
-      shift 2
-      ;;
-    --filter=*)
-      FILTER="${1#*=}"
-      shift
-      ;;
-    -h|--help)
-      show_usage
-      ;;
-    *)
-      echo "Unknown option: $1"
-      show_usage
-      ;;
-  esac
-done
-
-# If neither mode is specified, default to running both
-if [ "$MODE_PLAYMODE" = false ] && [ "$MODE_EDITMODE" = false ]; then
-  MODE_PLAYMODE=true
-  MODE_EDITMODE=true
+if [ $# -eq 0 ]; then
+  show_usage
 fi
+
+SUBCOMMAND="$1"
+shift
+
+case "$SUBCOMMAND" in
+  test)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --playmode)
+          MODE_PLAYMODE=true
+          shift
+          ;;
+        --editmode)
+          MODE_EDITMODE=true
+          shift
+          ;;
+        --filter)
+          if [ -z "${2:-}" ]; then
+            echo "Error: --filter requires an argument"
+            show_usage
+          fi
+          FILTER="$2"
+          shift 2
+          ;;
+        --filter=*)
+          FILTER="${1#*=}"
+          shift
+          ;;
+        -h|--help)
+          show_usage
+          ;;
+        *)
+          echo "Unknown option for test subcommand: $1"
+          show_usage
+          ;;
+      esac
+    done
+
+    # If neither mode is specified, default to running both
+    if [ "$MODE_PLAYMODE" = false ] && [ "$MODE_EDITMODE" = false ]; then
+      MODE_PLAYMODE=true
+      MODE_EDITMODE=true
+    fi
+    ;;
+
+  executemethod)
+    if [ $# -eq 0 ]; then
+      echo "Error: executemethod requires a method name argument (e.g., Namespace.Class.Method)"
+      show_usage
+    fi
+    if [ $# -gt 1 ]; then
+      echo "Error: executemethod does not accept flags or multiple arguments"
+      show_usage
+    fi
+    EXECUTE_METHOD="$1"
+    shift
+    ;;
+
+  check-connection)
+    if [ $# -gt 0 ]; then
+      echo "Error: check-connection does not accept options or arguments"
+      show_usage
+    fi
+    ;;
+
+  -h|--help|help)
+    show_usage
+    ;;
+
+  *)
+    echo "Unknown command: $SUBCOMMAND"
+    show_usage
+    ;;
+esac
 
 # Detect if Unity is running for this specific project
 IS_RUNNING=false
@@ -212,6 +259,46 @@ run_online_tests() {
   done
 }
 
+# Function to run a method via socket (Online)
+run_online_method() {
+  echo "Sending command to run method $EXECUTE_METHOD..."
+
+  local response=""
+  response=$(send_socket_cmd "EXECUTE_METHOD $EXECUTE_METHOD" 10)
+  if [ $? -ne 0 ] || [[ "$response" == ERROR* ]]; then
+    echo "Error starting method execution: $response"
+    return 1
+  fi
+
+  echo -n "Waiting for method execution to complete"
+  while true; do
+    sleep 1
+
+    response=$(send_socket_cmd "POLL_EXECUTE" 5)
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+      echo -n "."
+      continue
+    fi
+
+    if [ "$response" = "RUNNING" ]; then
+      echo -n "."
+    elif [[ "$response" == SUCCESS* ]]; then
+      echo " Done!"
+      echo "Unity Response: SUCCESS"
+      return 0
+    elif [[ "$response" == FAILURE* ]]; then
+      echo " Done!"
+      echo "Unity Response: FAILURE"
+      echo "${response#FAILURE }"
+      return 1
+    else
+      echo " Done!"
+      echo "Unity Response: $response"
+      return 2
+    fi
+  done
+}
+
 # Function to parse compilation errors and warnings from a log file
 # and print them in dotnet build format.
 parse_and_print_compilation_results() {
@@ -329,10 +416,70 @@ run_offline_tests() {
   fi
 }
 
+# Function to run method in batchmode (Offline)
+run_offline_method() {
+  echo "Running method $EXECUTE_METHOD in batchmode..."
+  
+  local bash_log_file="Temp/unity_batch_log.txt"
+  rm -f "$bash_log_file"
+
+  local abs_proj_path="$(pwd)"
+  local abs_log_file="$(pwd)/$bash_log_file"
+
+  mkdir -p Temp
+
+  local args=(-batchmode -projectPath "$abs_proj_path" -executeMethod "$EXECUTE_METHOD" -logFile "$abs_log_file" -quit)
+
+  "$UNITY_EXE" "${args[@]}"
+  local unity_exit=$?
+
+  if [ $unity_exit -eq 0 ]; then
+    echo "Unity Response: SUCCESS"
+    return 0
+  else
+    echo "Unity Response: FAILURE"
+    if [ -f "$bash_log_file" ]; then
+      parse_and_print_compilation_results "$bash_log_file"
+      local parse_status=$?
+      if [ $parse_status -eq 0 ]; then
+        return 2
+      fi
+    fi
+
+    if [ -f "$bash_log_file" ]; then
+      echo "------------------------------------------------------------"
+      echo "Last 50 lines of Unity batch log ($bash_log_file):"
+      echo "------------------------------------------------------------"
+      tail -n 50 "$bash_log_file"
+      echo "------------------------------------------------------------"
+    fi
+
+    return 1
+  fi
+}
+
 # --- Main Execution ---
 
-# Clean up stale compilation errors, results, and failures files
+# Clean up stale compilation errors, results, and failures files, and execute files
 rm -f Temp/unity_compilation_errors.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
+rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
+
+if [ "$SUBCOMMAND" = "check-connection" ]; then
+  if [ "$IS_RUNNING" = false ]; then
+    echo "Error: Unity is not running for this project."
+    exit 1
+  fi
+
+  echo -n "Unity is running. Connecting..."
+  while true; do
+    if send_socket_cmd "PING" 2 >/dev/null; then
+      echo " Connected successfully!"
+      exit 0
+    fi
+    echo -n "."
+    sleep 1
+  done
+fi
 
 if [ "$IS_RUNNING" = true ]; then
   echo "Detected running Unity instance (via UnityLockfile)."
@@ -392,28 +539,41 @@ if [ "$IS_RUNNING" = true ]; then
     fi
   done
 
-  # Step 3: Run online tests
-  TESTS_FAILED=false
-  if [ "$MODE_EDITMODE" = true ]; then
-    run_online_tests "editmode"
-    if [ $? -ne 0 ]; then
-      TESTS_FAILED=true
+  # Step 3: Action Execution
+  if [ "$SUBCOMMAND" = "executemethod" ]; then
+    run_online_method
+    exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+      echo "Method execution failed."
+      exit 1
+    else
+      echo "Method execution succeeded."
+      exit 0
     fi
-  fi
-
-  if [ "$MODE_PLAYMODE" = true ]; then
-    run_online_tests "playmode"
-    if [ $? -ne 0 ]; then
-      TESTS_FAILED=true
-    fi
-  fi
-
-  if [ "$TESTS_FAILED" = true ]; then
-    echo "Some tests failed."
-    exit 1
   else
-    echo "All tests passed."
-    exit 0
+    # SUBCOMMAND is test
+    TESTS_FAILED=false
+    if [ "$MODE_EDITMODE" = true ]; then
+      run_online_tests "editmode"
+      if [ $? -ne 0 ]; then
+        TESTS_FAILED=true
+      fi
+    fi
+
+    if [ "$MODE_PLAYMODE" = true ]; then
+      run_online_tests "playmode"
+      if [ $? -ne 0 ]; then
+        TESTS_FAILED=true
+      fi
+    fi
+
+    if [ "$TESTS_FAILED" = true ]; then
+      echo "Some tests failed."
+      exit 1
+    else
+      echo "All tests passed."
+      exit 0
+    fi
   fi
 
 else
@@ -426,32 +586,47 @@ else
   fi
   echo "Found Unity at: $UNITY_EXE"
 
-  TESTS_FAILED=false
-  if [ "$MODE_EDITMODE" = true ]; then
-    run_offline_tests "editmode"
+  if [ "$SUBCOMMAND" = "executemethod" ]; then
+    run_offline_method
     exit_status=$?
     if [ $exit_status -eq 2 ]; then
       exit 1
     elif [ $exit_status -ne 0 ]; then
-      TESTS_FAILED=true
-    fi
-  fi
-
-  if [ "$MODE_PLAYMODE" = true ]; then
-    run_offline_tests "playmode"
-    exit_status=$?
-    if [ $exit_status -eq 2 ]; then
+      echo "Batchmode method execution failed."
       exit 1
-    elif [ $exit_status -ne 0 ]; then
-      TESTS_FAILED=true
+    else
+      echo "Batchmode method execution succeeded."
+      exit 0
     fi
-  fi
-
-  if [ "$TESTS_FAILED" = true ]; then
-    echo "Some batchmode tests failed."
-    exit 1
   else
-    echo "All batchmode tests passed."
-    exit 0
+    # SUBCOMMAND is test
+    TESTS_FAILED=false
+    if [ "$MODE_EDITMODE" = true ]; then
+      run_offline_tests "editmode"
+      exit_status=$?
+      if [ $exit_status -eq 2 ]; then
+        exit 1
+      elif [ $exit_status -ne 0 ]; then
+        TESTS_FAILED=true
+      fi
+    fi
+
+    if [ "$MODE_PLAYMODE" = true ]; then
+      run_offline_tests "playmode"
+      exit_status=$?
+      if [ $exit_status -eq 2 ]; then
+        exit 1
+      elif [ $exit_status -ne 0 ]; then
+        TESTS_FAILED=true
+      fi
+    fi
+
+    if [ "$TESTS_FAILED" = true ]; then
+      echo "Some batchmode tests failed."
+      exit 1
+    else
+      echo "All batchmode tests passed."
+      exit 0
+    fi
   fi
 fi

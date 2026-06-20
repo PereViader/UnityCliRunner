@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -281,6 +282,97 @@ namespace UnityCliRunner
                         }
                         break;
 
+                    case "PING":
+                        writer.WriteLine("PONG");
+                        break;
+
+                    case "EXECUTE_METHOD":
+                        if (s_ScriptCompilationFailed)
+                        {
+                            writer.WriteLine("FAILURE Compilation failed");
+                            break;
+                        }
+
+                        string methodArgs = line.Length > 14 ? line.Substring(14).Trim() : "";
+                        if (string.IsNullOrEmpty(methodArgs))
+                        {
+                            writer.WriteLine("ERROR: Missing method name");
+                            break;
+                        }
+
+                        int lastDot = methodArgs.LastIndexOf('.');
+                        if (lastDot == -1)
+                        {
+                            writer.WriteLine($"ERROR: Invalid method format: '{methodArgs}'. Expected FullyQualifiedType.Method");
+                            break;
+                        }
+
+                        string typeName = methodArgs.Substring(0, lastDot);
+                        string methodName = methodArgs.Substring(lastDot + 1);
+
+                        var targetType = FindType(typeName);
+                        if (targetType == null)
+                        {
+                            writer.WriteLine($"ERROR: Type not found: '{typeName}'");
+                            break;
+                        }
+
+                        var targetMethod = targetType.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (targetMethod == null)
+                        {
+                            writer.WriteLine($"ERROR: Static method '{methodName}' not found in type '{typeName}'");
+                            break;
+                        }
+
+                        if (targetMethod.ReturnType != typeof(void) || targetMethod.GetParameters().Length > 0)
+                        {
+                            writer.WriteLine($"ERROR: Method '{typeName}.{methodName}' must return void and take no parameters");
+                            break;
+                        }
+
+                        WriteExecuteRunningState();
+
+                        MainThreadQueue.Enqueue(() => {
+                            ExecuteMethod(targetMethod);
+                        });
+
+                        writer.WriteLine("RUNNING");
+                        break;
+
+                    case "POLL_EXECUTE":
+                        string executeRunningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_running.txt");
+                        string executeResultPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_result.json");
+
+                        if (File.Exists(executeRunningPath))
+                        {
+                            writer.WriteLine("RUNNING");
+                        }
+                        else if (File.Exists(executeResultPath))
+                        {
+                            try
+                            {
+                                string content = File.ReadAllText(executeResultPath);
+                                var res = JsonUtility.FromJson<UnityExecuteResult>(content);
+                                if (res.success)
+                                {
+                                    writer.WriteLine("SUCCESS");
+                                }
+                                else
+                                {
+                                    writer.WriteLine($"FAILURE {res.message}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                writer.WriteLine($"ERROR: {ex.Message}");
+                            }
+                        }
+                        else
+                        {
+                            writer.WriteLine("IDLE");
+                        }
+                        break;
+
                     default:
                         writer.WriteLine($"ERROR: Unknown command: {command}");
                         break;
@@ -390,6 +482,96 @@ namespace UnityCliRunner
                 Debug.LogError($"UnityCliRunner: Failed to delete port file: {e}");
             }
         }
+
+        private static void WriteExecuteRunningState()
+        {
+            try
+            {
+                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                if (!Directory.Exists(tempDir))
+                {
+                    Directory.CreateDirectory(tempDir);
+                }
+                string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
+                string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
+
+                if (File.Exists(resultsPath))
+                {
+                    File.Delete(resultsPath);
+                }
+                File.WriteAllText(runningPath, DateTime.UtcNow.ToString("o"));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to write execute running state: {ex}");
+            }
+        }
+
+        private static void ExecuteMethod(System.Reflection.MethodInfo method)
+        {
+            string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+            string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
+            string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            bool success = false;
+            string errorMsg = "";
+
+            try
+            {
+                Debug.Log($"UnityCliRunner: Executing method '{method.DeclaringType.FullName}.{method.Name}'...");
+                method.Invoke(null, null);
+                success = true;
+            }
+            catch (TargetInvocationException tie)
+            {
+                errorMsg = tie.InnerException != null ? tie.InnerException.ToString() : tie.ToString();
+                Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
+            }
+            catch (Exception ex)
+            {
+                errorMsg = ex.ToString();
+                Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                if (File.Exists(runningPath))
+                {
+                    try { File.Delete(runningPath); } catch { }
+                }
+
+                try
+                {
+                    var runResult = new UnityExecuteResult
+                    {
+                        success = success,
+                        message = errorMsg,
+                        duration = stopwatch.Elapsed.TotalSeconds
+                    };
+                    string json = JsonUtility.ToJson(runResult, true);
+                    File.WriteAllText(resultsPath, json);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"UnityCliRunner: Failed to write execute result: {ex}");
+                }
+            }
+        }
+
+        private static Type FindType(string fullName)
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    var type = assembly.GetType(fullName);
+                    if (type != null) return type;
+                }
+                catch { }
+            }
+            return null;
+        }
     }
 
     [Serializable]
@@ -411,6 +593,14 @@ namespace UnityCliRunner
         public int skipCount;
         public string resultState;
         public List<FailedTestInfo> failedTests;
+    }
+
+    [Serializable]
+    public class UnityExecuteResult
+    {
+        public bool success;
+        public string message;
+        public double duration;
     }
 
     public class MyTestCallbacks : ScriptableObject, ICallbacks

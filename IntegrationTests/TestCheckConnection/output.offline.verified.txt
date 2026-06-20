@@ -1,0 +1,2 @@
+Error: Unity is not running for this project.
+EXIT_CODE: 1
