@@ -1,5 +1,11 @@
 {
   "dependencies": {
+    "com.pereviader.unityclirunner": {
+      "version": "file:com.pereviader.unityclirunner",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
     "com.unity.2d.animation": {
       "version": "10.2.2",
       "depth": 1,

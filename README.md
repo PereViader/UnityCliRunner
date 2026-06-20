@@ -23,16 +23,31 @@ This project is especially useful for **AI coding workflows** (utilizing tools/m
 
 ## How to install it
 
-1. **Add C# scripts to your Unity project**:
-   Copy the `Assets/UnityCliRunner` folder into your Unity project's `Assets` directory (e.g., `Assets/UnityCliRunner`).
-   > **Note**: The folder contains C# scripts inside an `Editor` folder (`UnityCliServer.cs` and `UnityCliCompilationTracker.cs`) along with an assembly definition file (`UnityCliRunner.Editor.asmdef`). It will run automatically when the Unity Editor loads.
+### Option 1: Install as a Package (Recommended)
 
-2. **Add the test runner script**:
-   Copy the `run_tests.sh` script to the root directory of your Unity project.
+You can add this project directly as a Unity Package using Unity Package Manager (UPM):
 
-3. **Requirements**:
-   - A shell environment capable of running Bash (e.g., Git Bash on Windows, macOS/Linux terminal).
-   - PowerShell installed (used internally by `run_tests.sh` on Windows to handle socket communication cleanly without subshell socket limitations).
+1. Open your Unity project's `Packages/manifest.json` file.
+2. Add the following line to the `dependencies` block:
+   ```json
+   "com.pereviader.unityclirunner": "https://github.com/PereViader/UnityCliRunner.git?path=Packages/com.pereviader.unityclirunner"
+   ```
+3. Alternatively, in the Unity Editor, open **Window > Package Manager**, click the **+** icon in the top left, select **Add package from git URL...**, and paste:
+   `https://github.com/PereViader/UnityCliRunner.git?path=Packages/com.pereviader.unityclirunner`
+
+### Option 2: Manual Installation (Legacy)
+
+1. Copy the `Packages/com.pereviader.unityclirunner` folder from this repository into your Unity project's `Assets` directory (e.g., `Assets/UnityCliRunner`).
+   > **Note**: It contains C# scripts inside an `Editor` folder (`UnityCliServer.cs` and `UnityCliCompilationTracker.cs`) along with an assembly definition file (`UnityCliRunner.Editor.asmdef`). It will run automatically when the Unity Editor loads.
+
+---
+
+### Step 2: Add the test runner script
+Copy the `run_tests.sh` script to the root directory of your Unity project.
+
+### Step 3: Requirements
+- A shell environment capable of running Bash (e.g., Git Bash on Windows, macOS/Linux terminal).
+- PowerShell installed (used internally by `run_tests.sh` on Windows to handle socket communication cleanly without subshell socket limitations).
 
 ---
 

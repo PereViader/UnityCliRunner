@@ -1,0 +1,11 @@
+{
+  "name": "com.pereviader.unityclirunner",
+  "version": "1.0.0",
+  "displayName": "Unity CLI Runner",
+  "description": "A lightweight tool to compile Unity code and run tests from the command line, enabling fast iteration cycles for both local developers and automated/AI workflows.",
+  "unity": "2021.3",
+  "author": {
+    "name": "Pere Viader"
+  },
+  "dependencies": {}
+}
