@@ -149,7 +149,9 @@ send_socket_cmd() {
 
   if [ $? -eq 0 ] && [ -n "$response" ]; then
     # Strip carriage returns and trim whitespace
-    response=$(echo "$response" | tr -d '\r' | xargs)
+    response=$(echo "$response" | tr -d '\r')
+    response="${response#"${response%%[![:space:]]*}"}"
+    response="${response%"${response##*[![:space:]]}"}"
     echo "$response"
     return 0
   fi

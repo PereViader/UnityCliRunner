@@ -1,0 +1,13 @@
+Unity is not running. Running in batchmode...
+Found Unity at: UNITY_EXE
+Running editmode tests in batchmode...
+Unity Response: FAILURE
+  Failed Tests.DummyTest.FailTest [DURATION]
+  Error Message:
+   This test failed intentionally.
+  Stack Trace:
+   at Tests.DummyTest.FailTest () [0x00000] in C:\Users\perev\Code\UnityCliRunner\Assets\Tests\Editor\DummyTest.cs:10
+   
+
+Some batchmode tests failed.
+EXIT_CODE: 1

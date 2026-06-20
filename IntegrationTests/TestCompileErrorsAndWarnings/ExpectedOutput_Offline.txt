@@ -1,0 +1,14 @@
+Unity is not running. Running in batchmode...
+Found Unity at: UNITY_EXE
+Running editmode tests in batchmode...
+
+Aborting batchmode due to failure:
+Scripts have compiler errors.
+
+Unity Response: FAILURE
+Assets\Tests\Editor\DummyTest.cs(15,29): error CS1002: ; expected
+
+Build FAILED.
+    0 Warning(s)
+    1 Error(s)
+EXIT_CODE: 1
