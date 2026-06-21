@@ -33,9 +33,8 @@ show_usage() {
   echo "    --category <category> Filter tests by category"
   echo "  executemethod <method>  Execute a custom static parameterless method returning void"
   echo "                          (e.g., Namespace.Class.Method)"
-  echo "  check-connection        Check if Unity is running and wait for connection"
-  echo "  background <action>     Start or stop a background Unity instance"
-  echo "                          (action: start | stop)"
+  echo "  background <action>     Manage a background Unity instance"
+  echo "                          (action: start | stop | wait-ready)"
   echo "  -h, --help              Show this help message"
   exit 1
 }
@@ -113,21 +112,14 @@ case "$SUBCOMMAND" in
     shift
     ;;
 
-  check-connection)
-    if [ $# -gt 0 ]; then
-      echo "Error: check-connection does not accept options or arguments"
-      show_usage
-    fi
-    ;;
-
   background)
     if [ $# -eq 0 ]; then
-      echo "Error: background subcommand requires an argument (start|stop)"
+      echo "Error: background subcommand requires an argument (start|stop|wait-ready)"
       show_usage
     fi
     BG_ACTION="$1"
-    if [ "$BG_ACTION" != "start" ] && [ "$BG_ACTION" != "stop" ]; then
-      echo "Error: background subcommand action must be start or stop"
+    if [ "$BG_ACTION" != "start" ] && [ "$BG_ACTION" != "stop" ] && [ "$BG_ACTION" != "wait-ready" ]; then
+      echo "Error: background subcommand action must be start, stop or wait-ready"
       show_usage
     fi
     shift
@@ -618,24 +610,22 @@ if [ "$SUBCOMMAND" = "background" ]; then
 
     echo " Stopped."
     exit 0
-  fi
-fi
-
-if [ "$SUBCOMMAND" = "check-connection" ]; then
-  if [ "$IS_RUNNING" = false ]; then
-    echo "Error: Unity is not running for this project."
-    exit 1
-  fi
-
-  echo -n "Unity is running. Connecting..."
-  while true; do
-    if send_socket_cmd "PING" 2 >/dev/null; then
-      echo " Connected successfully!"
-      exit 0
+  elif [ "$BG_ACTION" = "wait-ready" ]; then
+    if [ "$IS_RUNNING" = false ]; then
+      echo "Error: Unity is not running for this project."
+      exit 1
     fi
-    echo -n "."
-    sleep 1
-  done
+
+    echo -n "Unity is running. Connecting..."
+    while true; do
+      if send_socket_cmd "PING" 2 >/dev/null; then
+        echo " Connected successfully!"
+        exit 0
+      fi
+      echo -n "."
+      sleep 1
+    done
+  fi
 fi
 
 if [ "$IS_RUNNING" = true ]; then

@@ -89,8 +89,14 @@ Run `unitycli.sh` from the root directory of your Unity project:
 # Execute a custom static parameterless method returning void
 ./unitycli.sh executemethod Namespace.Class.Method
 
+# Start a background Unity instance
+./unitycli.sh background start
+
+# Stop a background Unity instance
+./unitycli.sh background stop
+
 # Check if Unity is running and block/wait until the connection is fully ready
-./unitycli.sh check-connection
+./unitycli.sh background wait-ready
 
 # Show help output
 ./unitycli.sh --help

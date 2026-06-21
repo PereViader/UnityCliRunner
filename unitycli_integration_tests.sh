@@ -289,8 +289,8 @@ run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass
 run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "online"
 run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
 
-# check-connection test (online)
-run_integration_case "TestCheckConnection" "check-connection" "online"
+# background wait-ready test (online)
+run_integration_case "TestCheckConnection" "background wait-ready" "online"
 
 # filter test (online)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
@@ -318,8 +318,8 @@ run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass
 run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "offline"
 run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
 
-# check-connection test (offline)
-run_integration_case "TestCheckConnection" "check-connection" "offline"
+# background wait-ready test (offline)
+run_integration_case "TestCheckConnection" "background wait-ready" "offline"
 
 # filter test (offline)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "offline"
