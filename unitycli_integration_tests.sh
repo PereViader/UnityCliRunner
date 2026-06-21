@@ -204,7 +204,7 @@ fi
 
 run_setup "online"
 if [ "$IS_RUNNING" = false ]; then
-  ./unitycli.sh background start
+  ./unitycli.sh background start batchmode
 else
   echo "Unity is already running."
 fi
@@ -296,7 +296,7 @@ run_integration_case "TestCheckConnection" "background wait-ready" "online"
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
 
 # background tests (online)
-run_integration_case "TestBackgroundStartAlreadyRunning" "background start" "online"
+run_integration_case "TestBackgroundStartAlreadyRunning" "background start batchmode" "online"
 
 # Close Unity
 run_teardown "online"
@@ -326,7 +326,7 @@ run_integration_case "TestFilterCategory" "test --editmode --category !LongRunni
 
 # background tests (offline)
 run_integration_case "TestBackgroundStopAlreadyStopped" "background stop" "offline"
-run_integration_case "TestBackgroundStart" "background start" "offline"
+run_integration_case "TestBackgroundStart" "background start batchmode" "offline"
 run_integration_case "TestBackgroundStop" "background stop" "offline"
 
 run_teardown "offline"

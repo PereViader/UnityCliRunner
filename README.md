@@ -89,8 +89,11 @@ Run `unitycli.sh` from the root directory of your Unity project:
 # Execute a custom static parameterless method returning void
 ./unitycli.sh executemethod Namespace.Class.Method
 
-# Start a background Unity instance
-./unitycli.sh background start
+# Start a background Unity instance in batchmode
+./unitycli.sh background start batchmode
+
+# Start a background Unity instance in interactive mode (opens Unity Editor GUI)
+./unitycli.sh background start interactive
 
 # Stop a background Unity instance
 ./unitycli.sh background stop

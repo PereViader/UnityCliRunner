@@ -21,6 +21,7 @@ FILTER=""
 CATEGORY=""
 EXECUTE_METHOD=""
 BG_ACTION=""
+BG_MODE=""
 
 # Helper for usage
 show_usage() {
@@ -34,7 +35,8 @@ show_usage() {
   echo "  executemethod <method>  Execute a custom static parameterless method returning void"
   echo "                          (e.g., Namespace.Class.Method)"
   echo "  background <action>     Manage a background Unity instance"
-  echo "                          (action: start | stop | wait-ready)"
+  echo "                          (action: start <mode> | stop | wait-ready)"
+  echo "                          (mode: batchmode | interactive)"
   echo "  -h, --help              Show this help message"
   exit 1
 }
@@ -123,6 +125,18 @@ case "$SUBCOMMAND" in
       show_usage
     fi
     shift
+    if [ "$BG_ACTION" = "start" ]; then
+      if [ $# -eq 0 ]; then
+        echo "Error: start action requires a mode (batchmode|interactive)"
+        show_usage
+      fi
+      BG_MODE="$1"
+      if [ "$BG_MODE" != "batchmode" ] && [ "$BG_MODE" != "interactive" ]; then
+        echo "Error: start action mode must be batchmode or interactive"
+        show_usage
+      fi
+      shift
+    fi
     if [ $# -gt 0 ]; then
       echo "Error: background subcommand does not accept extra arguments"
       show_usage
@@ -514,9 +528,13 @@ if [ "$SUBCOMMAND" = "background" ]; then
     echo -n "Starting Unity background instance..."
     mkdir -p Temp
     
-    # Run Unity in batchmode in the background
+    # Run Unity in background (batchmode or interactive)
     abs_proj_path="$(pwd)"
-    "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+    if [ "$BG_MODE" = "batchmode" ]; then
+      "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+    else
+      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+    fi
 
     started=false
     # Wait up to 90 seconds (45 iterations * 2s sleep)
