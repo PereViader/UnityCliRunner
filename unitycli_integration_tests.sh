@@ -137,6 +137,9 @@ normalize_output() {
     -e 's|Triggering AssetDatabase refresh\.* Done!|Triggering AssetDatabase refresh. Done!|g' \
     -e 's|Waiting for method execution to complete\.* Done!|Waiting for method execution to complete. Done!|g' \
     -e 's|Connecting\.* Connected successfully!|Connecting... Connected successfully!|g' \
+    -e 's|^Starting Unity background instance\.* Started successfully!$|Starting Unity background instance. Started successfully!|g' \
+    -e 's|^Stopping Unity background instance\.* Stopped cleanly\.$|Stopping Unity background instance. Stopped cleanly.|g' \
+    -e 's|^Stopping Unity background instance\.* Stopped\.$|Stopping Unity background instance. Stopped.|g' \
     -e 's|Found Unity at: .*|Found Unity at: UNITY_EXE|g' \
     -e 's|PROJECT_PATH\\|PROJECT_PATH/|g' \
     -e 's|c:/program files/unity/hub/editor/[^/]+/editor/unity.exe|UNITY_EXE|gI' \
@@ -151,6 +154,34 @@ normalize_output() {
     -e 's|Scanning for USB devices : USB_DURATIONms|Scanning for USB devices : USB_DURATION|g' \
     -e 's|\r||g' \
     "$input_file" > "$output_file"
+}
+
+run_setup() {
+  local phase="$1"
+  if [ -f "IntegrationTests/setup.sh" ]; then
+    echo "Running global setup..."
+    chmod +x "IntegrationTests/setup.sh" 2>/dev/null || true
+    ./IntegrationTests/setup.sh
+  fi
+  if [ -f "IntegrationTests/setup.${phase}.sh" ]; then
+    echo "Running ${phase} setup..."
+    chmod +x "IntegrationTests/setup.${phase}.sh" 2>/dev/null || true
+    ./IntegrationTests/setup.${phase}.sh
+  fi
+}
+
+run_teardown() {
+  local phase="$1"
+  if [ -f "IntegrationTests/teardown.${phase}.sh" ]; then
+    echo "Running ${phase} teardown..."
+    chmod +x "IntegrationTests/teardown.${phase}.sh" 2>/dev/null || true
+    ./IntegrationTests/teardown.${phase}.sh
+  fi
+  if [ -f "IntegrationTests/teardown.sh" ]; then
+    echo "Running global teardown..."
+    chmod +x "IntegrationTests/teardown.sh" 2>/dev/null || true
+    ./IntegrationTests/teardown.sh
+  fi
 }
 
 abs_proj_path="$(pwd)"
@@ -171,29 +202,9 @@ if [ -z "$UNITY_EXE" ]; then
   exit 1
 fi
 
+run_setup "online"
 if [ "$IS_RUNNING" = false ]; then
-  echo "Unity is not running. Launching Unity in the background..."
-  "$UNITY_EXE" -projectPath "$abs_proj_path" >/dev/null 2>&1 &
-  
-  # Wait for Unity to start and register the TCP port
-  echo "Waiting for Unity CLI server to start..."
-  started=false
-  for i in {1..90}; do
-    if [ -f "Temp/unity_cli_port.txt" ]; then
-      if send_socket_cmd "POLL_REFRESH" 2 >/dev/null 2>&1; then
-        echo "Unity is ready and socket server is running."
-        started=true
-        break
-      fi
-    fi
-    echo -n "."
-    sleep 2
-  done
-  echo ""
-  if [ "$started" = false ]; then
-    echo "Error: Unity failed to start or TCP server did not become ready in time."
-    exit 1
-  fi
+  ./unitycli.sh background start
 else
   echo "Unity is already running."
 fi
@@ -284,47 +295,18 @@ run_integration_case "TestCheckConnection" "check-connection" "online"
 # filter test (online)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
 
-# Close Unity
-echo "Closing Unity..."
-lockfile=""
-if [ -f "Temp/UnityLockfile" ]; then
-  lockfile="Temp/UnityLockfile"
-elif [ -f "Temp/UnityLockFile" ]; then
-  lockfile="Temp/UnityLockFile"
-fi
+# background tests (online)
+run_integration_case "TestBackgroundStartAlreadyRunning" "background start" "online"
 
-  if [ -n "$lockfile" ]; then
-    pid=""
-    pid=$(powershell -NoProfile -Command "[System.IO.File]::ReadAllText('$lockfile')" 2>/dev/null | tr -d '\r')
-    pid="${pid#"${pid%%[![:space:]]*}"}"
-    pid="${pid%"${pid##*[![:space:]]}"}"
-    if [ -z "$pid" ]; then
-      pid=$(cat "$lockfile" 2>/dev/null)
-      pid="${pid#"${pid%%[![:space:]]*}"}"
-      pid="${pid%"${pid##*[![:space:]]}"}"
-    fi
-  
-  if [[ "$pid" =~ ^[0-9]+$ ]]; then
-    echo "Stopping Unity editor (PID: $pid)..."
-    taskkill //PID "$pid" //F >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1
-  else
-    echo "Stopping Unity editor by process name..."
-    taskkill //IM Unity.exe //F >/dev/null 2>&1
-  fi
-  
-  echo "Waiting for Unity lockfile to disappear..."
-  for i in {1..30}; do
-    if [ ! -f "$lockfile" ]; then
-      break
-    fi
-    sleep 1
-  done
-  sleep 3
-fi
+# Close Unity
+run_teardown "online"
+./unitycli.sh background stop
 
 echo "============================================="
 echo "PHASE 2: Running integration tests in OFFLINE mode"
 echo "============================================="
+
+run_setup "offline"
 
 for tc in "${TEST_CASES[@]}"; do
   run_integration_case "$tc" "test --editmode" "offline"
@@ -341,6 +323,13 @@ run_integration_case "TestCheckConnection" "check-connection" "offline"
 
 # filter test (offline)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "offline"
+
+# background tests (offline)
+run_integration_case "TestBackgroundStopAlreadyStopped" "background stop" "offline"
+run_integration_case "TestBackgroundStart" "background start" "offline"
+run_integration_case "TestBackgroundStop" "background stop" "offline"
+
+run_teardown "offline"
 
 echo "============================================="
 if [ $FAILED_TESTS -eq 0 ]; then

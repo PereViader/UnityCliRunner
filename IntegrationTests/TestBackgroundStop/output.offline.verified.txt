@@ -1,0 +1,2 @@
+Stopping Unity background instance. Stopped cleanly.
+EXIT_CODE: 0

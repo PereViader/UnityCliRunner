@@ -176,6 +176,14 @@ namespace UnityCliRunner
                         writer.WriteLine("REFRESHING");
                         break;
 
+                    case "EXIT":
+                        writer.WriteLine("EXITING");
+                        MainThreadQueue.Enqueue(() => {
+                            Debug.Log("UnityCliRunner: Shutdown requested via socket.");
+                            EditorApplication.Exit(0);
+                        });
+                        break;
+
                     case "POLL_REFRESH":
                         if (s_IsCompiling)
                         {

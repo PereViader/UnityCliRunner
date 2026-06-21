@@ -20,6 +20,7 @@ MODE_EDITMODE=false
 FILTER=""
 CATEGORY=""
 EXECUTE_METHOD=""
+BG_ACTION=""
 
 # Helper for usage
 show_usage() {
@@ -33,6 +34,8 @@ show_usage() {
   echo "  executemethod <method>  Execute a custom static parameterless method returning void"
   echo "                          (e.g., Namespace.Class.Method)"
   echo "  check-connection        Check if Unity is running and wait for connection"
+  echo "  background <action>     Start or stop a background Unity instance"
+  echo "                          (action: start | stop)"
   echo "  -h, --help              Show this help message"
   exit 1
 }
@@ -113,6 +116,23 @@ case "$SUBCOMMAND" in
   check-connection)
     if [ $# -gt 0 ]; then
       echo "Error: check-connection does not accept options or arguments"
+      show_usage
+    fi
+    ;;
+
+  background)
+    if [ $# -eq 0 ]; then
+      echo "Error: background subcommand requires an argument (start|stop)"
+      show_usage
+    fi
+    BG_ACTION="$1"
+    if [ "$BG_ACTION" != "start" ] && [ "$BG_ACTION" != "stop" ]; then
+      echo "Error: background subcommand action must be start or stop"
+      show_usage
+    fi
+    shift
+    if [ $# -gt 0 ]; then
+      echo "Error: background subcommand does not accept extra arguments"
       show_usage
     fi
     ;;
@@ -485,6 +505,121 @@ run_offline_method() {
 # Clean up stale compilation errors, results, and failures files, and execute files
 rm -f Temp/unity_compilation_errors.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
 rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
+
+if [ "$SUBCOMMAND" = "background" ]; then
+  if [ "$BG_ACTION" = "start" ]; then
+    if [ "$IS_RUNNING" = true ] || send_socket_cmd "PING" 2 >/dev/null 2>&1; then
+      echo "Unity is already running."
+      exit 0
+    fi
+
+    UNITY_EXE=$(find_unity_path)
+    if [ -z "$UNITY_EXE" ]; then
+      echo "Error: Unity executable not found."
+      exit 1
+    fi
+
+    echo -n "Starting Unity background instance..."
+    mkdir -p Temp
+    
+    # Run Unity in batchmode in the background
+    abs_proj_path="$(pwd)"
+    "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+
+    started=false
+    # Wait up to 90 seconds (45 iterations * 2s sleep)
+    for i in {1..45}; do
+      if [ -f "Temp/unity_cli_port.txt" ]; then
+        if send_socket_cmd "PING" 2 >/dev/null 2>&1; then
+          response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
+          if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
+            echo " Started successfully!"
+            started=true
+            break
+          fi
+        fi
+      fi
+      echo -n "."
+      sleep 2
+    done
+
+    if [ "$started" = false ]; then
+      echo " Failed to start background Unity instance."
+      exit 1
+    fi
+    exit 0
+
+  elif [ "$BG_ACTION" = "stop" ]; then
+    running=false
+    if [ "$IS_RUNNING" = true ] || send_socket_cmd "PING" 2 >/dev/null 2>&1; then
+      running=true
+    fi
+
+    if [ "$running" = false ]; then
+      echo "Unity background instance is not running."
+      exit 0
+    fi
+
+    echo -n "Stopping Unity background instance..."
+
+    stopped=false
+    if [ -f "Temp/unity_cli_port.txt" ]; then
+      response=$(send_socket_cmd "EXIT" 5 2>/dev/null)
+      if [ "$response" = "EXITING" ]; then
+        # Wait up to 15 seconds for lockfile to clear
+        for i in {1..15}; do
+          if [ ! -f "Temp/UnityLockfile" ] && [ ! -f "Temp/UnityLockFile" ]; then
+            stopped=true
+            break
+          fi
+          sleep 1
+        done
+      fi
+    fi
+
+    if [ "$stopped" = true ]; then
+      echo " Stopped cleanly."
+      exit 0
+    fi
+
+    # Fallback to process kill
+    lockfile=""
+    if [ -f "Temp/UnityLockfile" ]; then
+      lockfile="Temp/UnityLockfile"
+    elif [ -f "Temp/UnityLockFile" ]; then
+      lockfile="Temp/UnityLockFile"
+    fi
+
+    if [ -n "$lockfile" ]; then
+      pid=""
+      pid=$(powershell -NoProfile -Command "[System.IO.File]::ReadAllText('$lockfile')" 2>/dev/null | tr -d '\r')
+      pid="${pid#"${pid%%[![:space:]]*}"}"
+      pid="${pid%"${pid##*[![:space:]]}"}"
+      if [ -z "$pid" ]; then
+        pid=$(cat "$lockfile" 2>/dev/null)
+        pid="${pid#"${pid%%[![:space:]]*}"}"
+        pid="${pid%"${pid##*[![:space:]]}"}"
+      fi
+
+      if [[ "$pid" =~ ^[0-9]+$ ]]; then
+        taskkill //PID "$pid" //F >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1
+      else
+        taskkill //IM Unity.exe //F >/dev/null 2>&1
+      fi
+
+      # Wait up to 5 seconds for lockfile to disappear
+      for i in {1..5}; do
+        if [ ! -f "$lockfile" ]; then
+          break
+        fi
+        sleep 1
+      done
+    fi
+
+    echo " Stopped."
+    exit 0
+  fi
+fi
 
 if [ "$SUBCOMMAND" = "check-connection" ]; then
   if [ "$IS_RUNNING" = false ]; then
