@@ -35,7 +35,7 @@ show_usage() {
   echo "  executemethod <method>  Execute a custom static parameterless method returning void"
   echo "                          (e.g., Namespace.Class.Method)"
   echo "  background <action>     Manage a background Unity instance"
-  echo "                          (action: start <mode> | stop | wait-ready)"
+  echo "                          (action: start <mode> | stop | wait-ready | status)"
   echo "                          (mode: batchmode | interactive)"
   echo "  -h, --help              Show this help message"
   exit 1
@@ -116,12 +116,12 @@ case "$SUBCOMMAND" in
 
   background)
     if [ $# -eq 0 ]; then
-      echo "Error: background subcommand requires an argument (start|stop|wait-ready)"
+      echo "Error: background subcommand requires an argument (start|stop|wait-ready|status)"
       show_usage
     fi
     BG_ACTION="$1"
-    if [ "$BG_ACTION" != "start" ] && [ "$BG_ACTION" != "stop" ] && [ "$BG_ACTION" != "wait-ready" ]; then
-      echo "Error: background subcommand action must be start, stop or wait-ready"
+    if [ "$BG_ACTION" != "start" ] && [ "$BG_ACTION" != "stop" ] && [ "$BG_ACTION" != "wait-ready" ] && [ "$BG_ACTION" != "status" ]; then
+      echo "Error: background subcommand action must be start, stop, wait-ready or status"
       show_usage
     fi
     shift
@@ -654,6 +654,20 @@ if [ "$SUBCOMMAND" = "background" ]; then
       echo -n "."
       sleep 1
     done
+  elif [ "$BG_ACTION" = "status" ]; then
+    if [ "$IS_RUNNING" = false ]; then
+      echo "Status: Not Running"
+      exit 0
+    fi
+
+    response=""
+    response=$(send_socket_cmd "PING" 2 2>/dev/null)
+    if [ $? -eq 0 ] && [ "$response" = "PONG" ]; then
+      echo "Status: Ready"
+    else
+      echo "Status: Running Unreachable"
+    fi
+    exit 0
   fi
 fi
 

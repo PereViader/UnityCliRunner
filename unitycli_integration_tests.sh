@@ -295,6 +295,7 @@ run_integration_case "TestCheckConnection" "background wait-ready" "online"
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
 
 # background tests (online)
+run_integration_case "TestBackgroundStatusOnline" "background status" "online"
 run_integration_case "TestBackgroundStartAlreadyRunning" "background start batchmode" "online"
 
 # Close Unity
@@ -324,6 +325,7 @@ run_integration_case "TestCheckConnection" "background wait-ready" "offline"
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "offline"
 
 # background tests (offline)
+run_integration_case "TestBackgroundStatusOffline" "background status" "offline"
 run_integration_case "TestBackgroundStopAlreadyStopped" "background stop" "offline"
 run_integration_case "TestBackgroundStart" "background start batchmode" "offline"
 run_integration_case "TestBackgroundStop" "background stop" "offline"
