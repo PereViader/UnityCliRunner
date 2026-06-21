@@ -281,6 +281,9 @@ run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecute
 # check-connection test (online)
 run_integration_case "TestCheckConnection" "check-connection" "online"
 
+# filter test (online)
+run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
+
 # Close Unity
 echo "Closing Unity..."
 lockfile=""
@@ -335,6 +338,9 @@ run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecute
 
 # check-connection test (offline)
 run_integration_case "TestCheckConnection" "check-connection" "offline"
+
+# filter test (offline)
+run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "offline"
 
 echo "============================================="
 if [ $FAILED_TESTS -eq 0 ]; then

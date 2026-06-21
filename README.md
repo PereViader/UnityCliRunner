@@ -20,7 +20,7 @@ It operates in two distinct modes depending on whether the editor is open:
 - ⚡ **Sub-Second Compilation Loop**: Keep Unity open, modify C# files, and run tests or methods instantly via TCP sockets without restarting the editor.
 - 🤖 **Perfect for AI & CI/CD Workflows**: Headless tools can trigger compilations and check status without interacting with the graphical interface.
 - 🎨 **Beautiful Compiler Output**: Extracts C# warnings and errors from Unity compilation log/tracker and prints them in a clean, `dotnet build` format with ANSI colors (warnings in yellow, errors in red).
-- 🧪 **Flexible Test Runner**: Run EditMode or PlayMode tests (or both) and filter specific tests by name. Failed tests are printed in a clean `dotnet test` format.
+- 🧪 **Flexible Test Runner**: Run EditMode or PlayMode tests (or both), filter specific tests by name, or filter by category. Failed tests are printed in a clean `dotnet test` format.
 - ⚙️ **Execute Custom Methods**: Run arbitrary static parameterless methods returning void (e.g., build scripts, setup methods) in both online and offline modes.
 - 🔌 **Dynamic Port Assignment**: Avoids port conflicts by dynamically binding to a free loopback port on startup and writing it to `Temp/unity_cli_port.txt`.
 - 🪟 **PowerShell Socket Bridge**: Uses PowerShell socket communication internally on Windows to avoid the subshell socket inheritance issues common in Git Bash.
@@ -83,6 +83,9 @@ Run `unitycli.sh` from the root directory of your Unity project:
 # Run tests matching a specific name filter (regex/substring)
 ./unitycli.sh test --filter "MyNamespace.MyTestClass"
 
+# Run tests matching a specific category filter
+./unitycli.sh test --category "LongRunning"
+
 # Execute a custom static parameterless method returning void
 ./unitycli.sh executemethod Namespace.Class.Method
 
@@ -109,7 +112,7 @@ External tools communicate using a line-based text protocol:
 - `PING`: Responds `PONG`. Used to verify connection health.
 - `REFRESH`: Triggers `AssetDatabase.Refresh()` on the Unity main thread.
 - `POLL_REFRESH`: Returns compilation state (`COMPILING`, `UPDATING`, `COMPILATION_ERROR`, or `READY`).
-- `RUN_TESTS <mode> [filter]`: Triggers EditMode or PlayMode tests.
+- `RUN_TESTS <mode> [--filter <filter>] [--category <category>]`: Triggers EditMode or PlayMode tests.
 - `POLL_TESTS`: Returns test running state (`RUNNING`, `SUCCESS <details>`, `FAILURE <details>`, `IDLE`, or `ERROR`).
 - `EXECUTE_METHOD <method>`: Enqueues execution of a static parameterless void method.
 - `POLL_EXECUTE`: Returns method running state (`RUNNING`, `SUCCESS`, `FAILURE <details>`, `IDLE`, or `ERROR`).

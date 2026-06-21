@@ -18,6 +18,7 @@ SUBCOMMAND=""
 MODE_PLAYMODE=false
 MODE_EDITMODE=false
 FILTER=""
+CATEGORY=""
 EXECUTE_METHOD=""
 
 # Helper for usage
@@ -28,6 +29,7 @@ show_usage() {
   echo "    --playmode            Run PlayMode tests"
   echo "    --editmode            Run EditMode tests"
   echo "    --filter <filter>     Filter tests by name (regex/substring)"
+  echo "    --category <category> Filter tests by category"
   echo "  executemethod <method>  Execute a custom static parameterless method returning void"
   echo "                          (e.g., Namespace.Class.Method)"
   echo "  check-connection        Check if Unity is running and wait for connection"
@@ -64,6 +66,18 @@ case "$SUBCOMMAND" in
           ;;
         --filter=*)
           FILTER="${1#*=}"
+          shift
+          ;;
+        --category)
+          if [ -z "${2:-}" ]; then
+            echo "Error: --category requires an argument"
+            show_usage
+          fi
+          CATEGORY="$2"
+          shift 2
+          ;;
+        --category=*)
+          CATEGORY="${1#*=}"
           shift
           ;;
         -h|--help)
@@ -224,9 +238,14 @@ run_online_tests() {
   echo "Sending command to run $mode tests..."
 
   local response=""
-  # Trigger test execution. The server responds "RUNNING" immediately and closes the socket.
-  # If a domain reload begins instantly, the connection might close without response, which we also treat as started.
-  response=$(send_socket_cmd "RUN_TESTS $mode $FILTER" 10)
+  local cmd="RUN_TESTS $mode"
+  if [ -n "$FILTER" ]; then
+    cmd="$cmd --filter \"$FILTER\""
+  fi
+  if [ -n "$CATEGORY" ]; then
+    cmd="$cmd --category \"$CATEGORY\""
+  fi
+  response=$(send_socket_cmd "$cmd" 10)
   
   echo -n "Waiting for tests to complete"
   while true; do
@@ -382,6 +401,9 @@ run_offline_tests() {
   local args=(-batchmode -runTests -projectPath "$abs_proj_path" -testPlatform "$platform" -testResults "$abs_results_file" -logFile "$abs_log_file")
   if [ -n "$FILTER" ]; then
     args+=(-testFilter "$FILTER")
+  fi
+  if [ -n "$CATEGORY" ]; then
+    args+=(-testCategory "$CATEGORY")
   fi
 
   # Run Unity

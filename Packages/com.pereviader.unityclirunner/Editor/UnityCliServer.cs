@@ -163,7 +163,7 @@ namespace UnityCliRunner
                 }
 
                 line = line.Trim();
-                string[] parts = line.Split(new[] { ' ' }, 3);
+                string[] parts = line.Split(new[] { ' ' }, 2);
                 string command = parts[0].ToUpperInvariant();
 
                 switch (command)
@@ -216,11 +216,34 @@ namespace UnityCliRunner
 
                         if (parts.Length < 2)
                         {
+                            writer.WriteLine("ERROR: Missing arguments");
+                            break;
+                        }
+
+                        string[] args = SplitArguments(parts[1]);
+                        if (args.Length < 1)
+                        {
                             writer.WriteLine("ERROR: Missing test mode (playmode/editmode)");
                             break;
                         }
-                        string modeStr = parts[1].ToLowerInvariant();
-                        string filter = parts.Length > 2 ? parts[2] : "";
+
+                        string modeStr = args[0].ToLowerInvariant();
+                        string filter = "";
+                        string category = "";
+
+                        for (int i = 1; i < args.Length; i++)
+                        {
+                            if (args[i] == "--filter" && i + 1 < args.Length)
+                            {
+                                filter = args[i + 1];
+                                i++;
+                            }
+                            else if (args[i] == "--category" && i + 1 < args.Length)
+                            {
+                                category = args[i + 1];
+                                i++;
+                            }
+                        }
 
                         TestMode mode;
                         if (modeStr == "playmode")
@@ -241,7 +264,7 @@ namespace UnityCliRunner
                         WriteTestRunningState();
 
                         MainThreadQueue.Enqueue(() => {
-                            RunTests(mode, filter);
+                            RunTests(mode, filter, category);
                         });
 
                         writer.WriteLine("RUNNING");
@@ -419,7 +442,7 @@ namespace UnityCliRunner
             }
         }
 
-        private static void RunTests(TestMode mode, string filterText)
+        private static void RunTests(TestMode mode, string filterText, string categoryText)
         {
             try
             {
@@ -433,8 +456,13 @@ namespace UnityCliRunner
                     filter.groupNames = new[] { filterText };
                 }
 
+                if (!string.IsNullOrEmpty(categoryText))
+                {
+                    filter.categoryNames = new[] { categoryText };
+                }
+
                 var settings = new ExecutionSettings(filter);
-                Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}'...");
+                Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}' and category '{categoryText}'...");
                 api.Execute(settings);
             }
             catch (Exception ex)
@@ -447,6 +475,43 @@ namespace UnityCliRunner
                     File.Delete(runningPath);
                 }
             }
+        }
+
+        private static string[] SplitArguments(string commandLine)
+        {
+            var args = new List<string>();
+            if (string.IsNullOrEmpty(commandLine))
+            {
+                return args.ToArray();
+            }
+
+            var current = new StringBuilder();
+            bool inQuotes = false;
+            for (int i = 0; i < commandLine.Length; i++)
+            {
+                char c = commandLine[i];
+                if (c == '"')
+                {
+                    inQuotes = !inQuotes;
+                }
+                else if (c == ' ' && !inQuotes)
+                {
+                    if (current.Length > 0)
+                    {
+                        args.Add(current.ToString());
+                        current.Clear();
+                    }
+                }
+                else
+                {
+                    current.Append(c);
+                }
+            }
+            if (current.Length > 0)
+            {
+                args.Add(current.ToString());
+            }
+            return args.ToArray();
         }
 
         private static void WritePortFile(int port)
