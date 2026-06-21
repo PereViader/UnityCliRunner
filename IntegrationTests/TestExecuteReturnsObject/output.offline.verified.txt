@@ -1,0 +1,6 @@
+Unity is not running. Running in batchmode...
+Found Unity at: UNITY_EXE
+Running method Tests.DummyExecuteClass.Something in batchmode...
+{"Value":4}
+Batchmode method execution succeeded.
+EXIT_CODE: 0

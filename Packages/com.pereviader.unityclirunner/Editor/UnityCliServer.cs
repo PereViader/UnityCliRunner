@@ -355,9 +355,9 @@ namespace UnityCliRunner
                             break;
                         }
 
-                        if (targetMethod.ReturnType != typeof(void) || targetMethod.GetParameters().Length > 0)
+                        if (targetMethod.GetParameters().Length > 0)
                         {
-                            writer.WriteLine($"ERROR: Method '{typeName}.{methodName}' must return void and take no parameters");
+                            writer.WriteLine($"ERROR: Method '{typeName}.{methodName}' must take no parameters");
                             break;
                         }
 
@@ -386,7 +386,14 @@ namespace UnityCliRunner
                                 var res = JsonUtility.FromJson<UnityExecuteResult>(content);
                                 if (res.success)
                                 {
-                                    writer.WriteLine("SUCCESS");
+                                    if (!string.IsNullOrEmpty(res.payload))
+                                    {
+                                        writer.WriteLine($"SUCCESS {res.payload}");
+                                    }
+                                    else
+                                    {
+                                        writer.WriteLine("SUCCESS");
+                                    }
                                 }
                                 else
                                 {
@@ -589,12 +596,33 @@ namespace UnityCliRunner
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             bool success = false;
             string errorMsg = "";
+            string payload = null;
 
             try
             {
                 Debug.Log($"UnityCliRunner: Executing method '{method.DeclaringType.FullName}.{method.Name}'...");
-                method.Invoke(null, null);
+                object result = method.Invoke(null, null);
                 success = true;
+
+                if (method.ReturnType != typeof(void))
+                {
+                    if (result == null)
+                    {
+                        payload = "null";
+                    }
+                    else if (result is bool boolVal)
+                    {
+                        payload = boolVal ? "true" : "false";
+                    }
+                    else if (result.GetType().IsPrimitive || result is string || result is decimal)
+                    {
+                        payload = result.ToString();
+                    }
+                    else
+                    {
+                        payload = JsonUtility.ToJson(result);
+                    }
+                }
             }
             catch (TargetInvocationException tie)
             {
@@ -620,7 +648,8 @@ namespace UnityCliRunner
                     {
                         success = success,
                         message = errorMsg,
-                        duration = stopwatch.Elapsed.TotalSeconds
+                        duration = stopwatch.Elapsed.TotalSeconds,
+                        payload = payload
                     };
                     string json = JsonUtility.ToJson(runResult, true);
                     File.WriteAllText(resultsPath, json);
@@ -629,6 +658,91 @@ namespace UnityCliRunner
                 {
                     Debug.LogError($"UnityCliRunner: Failed to write execute result: {ex}");
                 }
+            }
+        }
+
+        public static void ExecuteMethodFromCommandLine()
+        {
+            try
+            {
+                string[] args = System.Environment.GetCommandLineArgs();
+                string targetMethodName = null;
+                for (int i = 0; i < args.Length - 1; i++)
+                {
+                    if (args[i] == "-executeMethodName")
+                    {
+                        targetMethodName = args[i + 1];
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(targetMethodName))
+                {
+                    Debug.LogError("UnityCliRunner: Missing -executeMethodName argument.");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
+                int lastDot = targetMethodName.LastIndexOf('.');
+                if (lastDot == -1)
+                {
+                    Debug.LogError($"UnityCliRunner: Invalid method format: '{targetMethodName}'. Expected FullyQualifiedType.Method");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
+                string typeName = targetMethodName.Substring(0, lastDot);
+                string methodName = targetMethodName.Substring(lastDot + 1);
+
+                var targetType = FindType(typeName);
+                if (targetType == null)
+                {
+                    Debug.LogError($"UnityCliRunner: Type not found: '{typeName}'");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
+                var targetMethod = targetType.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                if (targetMethod == null)
+                {
+                    Debug.LogError($"UnityCliRunner: Static method '{methodName}' not found in type '{typeName}'");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
+                if (targetMethod.GetParameters().Length > 0)
+                {
+                    Debug.LogError($"UnityCliRunner: Method '{typeName}.{methodName}' must take no parameters");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
+                WriteExecuteRunningState();
+                
+                ExecuteMethod(targetMethod);
+
+                string resultsPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_result.json");
+                if (File.Exists(resultsPath))
+                {
+                    try
+                    {
+                        string content = File.ReadAllText(resultsPath);
+                        var res = JsonUtility.FromJson<UnityExecuteResult>(content);
+                        if (res.success)
+                        {
+                            EditorApplication.Exit(0);
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+
+                EditorApplication.Exit(1);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Exception in ExecuteMethodFromCommandLine: {ex}");
+                EditorApplication.Exit(1);
             }
         }
 
@@ -674,6 +788,7 @@ namespace UnityCliRunner
         public bool success;
         public string message;
         public double duration;
+        public string payload;
     }
 
     public class MyTestCallbacks : ScriptableObject, ICallbacks

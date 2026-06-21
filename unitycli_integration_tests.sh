@@ -151,6 +151,25 @@ normalize_output() {
     -e 's|Loaded Objects now: [0-9]+|Loaded Objects now: LOADED_OBJECTS|g' \
     -e 's|##utp:\{.*\}|##utp:JSON|g' \
     -e 's|Scanning for USB devices : USB_DURATIONms|Scanning for USB devices : USB_DURATION|g' \
+    -e '/Cleanup mono/d' \
+    -e '/Shut down\./d' \
+    -e '/Physics::Module/d' \
+    -e '/Input System module/d' \
+    -e '/Input System polling thread/d' \
+    -e '/Licensing::IpcConnector/d' \
+    -e '/AcceleratorClientConnectionCallback/d' \
+    -e '/RiderPlugin/d' \
+    -e '/ThreadAbortException/d' \
+    -e '/Accept_icall/d' \
+    -e '/Accept_internal/d' \
+    -e '/Socket\.Accept/d' \
+    -e '/TcpListener\.AcceptTcpClient/d' \
+    -e '/UnityCliServer\.ServerLoop/d' \
+    -e '/abort_threads/d' \
+    -e '/debugger-agent/d' \
+    -e '/Curl error 42/d' \
+    -e 's|UnityCliServer\.cs:[0-9]+|UnityCliServer.cs:LINE|g' \
+    -e 's|UnityCliServer\.cs Line: [0-9]+|UnityCliServer.cs Line: LINE|g' \
     -e 's|\r||g' \
     "$input_file" > "$output_file"
 }
@@ -287,6 +306,8 @@ run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass
 run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "online"
 run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "online"
 run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
+run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "online"
+run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
 
 # background wait-ready test (online)
 run_integration_case "TestCheckConnection" "background wait-ready" "online"
@@ -317,6 +338,8 @@ run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass
 run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "offline"
 run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "offline"
 run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
+run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "offline"
+run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "offline"
 
 # background wait-ready test (offline)
 run_integration_case "TestCheckConnection" "background wait-ready" "offline"

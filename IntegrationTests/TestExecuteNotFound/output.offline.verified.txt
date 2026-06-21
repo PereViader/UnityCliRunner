@@ -1,55 +1,10 @@
 Unity is not running. Running in batchmode...
 Found Unity at: UNITY_EXE
 Running method Tests.DummyExecuteClass.NonExistentMethod in batchmode...
-
-Aborting batchmode due to failure:
-executeMethod method 'NonExistentMethod' in class 'Tests.DummyExecuteClass' could not be found.
-Argument was -executeMethod Tests.DummyExecuteClass.NonExistentMethod
-
 Unity Response: FAILURE
 ------------------------------------------------------------
 Last 50 lines of Unity batch log (Temp/unity_batch_log.txt):
 ------------------------------------------------------------
-Preloading 0 native plugins for Editor in DURATIONms.
-Asset Pipeline Refresh (id=ASSET_DB_ID): Total: DURATIONseconds - Initiated by InitialRefreshV2(ForceSynchronousImport)
-	Summary:
-		Imports: total=0 (actual=0, local cache=0, cache server=0)
-		Asset DB Process Time: managed=DURATIONms, native=DURATIONms
-		Asset DB Callback time: managed=DURATIONms, native=DURATIONms
-		Scripting: domain reloads=1, domain reload time=DURATIONms, compile time=DURATIONms, other=DURATIONms
-		Project Asset Count: scripts=1466, non-scripts=2931
-		Asset File Changes: new=0, changed=1, moved=0, deleted=0
-		Scan Filter Count: 0
-	InvokeCustomDependenciesCallbacks: DURATIONms
-	InvokePackagesCallback: DURATIONms
-	ApplyChangesToAssetFolders: DURATIONms
-	Scan: DURATIONms
-	OnSourceAssetsModified: DURATIONms
-	CategorizeAssetsWithTransientArtifact: DURATIONms
-	ProcessAssetsWithTransientArtifactChanges: DURATIONms
-	CategorizeAssets: DURATIONms
-	ImportOutOfDateAssets: DURATIONms (DURATIONms without children)
-		CompileScripts: DURATIONms
-		ReloadNativeAssets: DURATIONms
-		UnloadImportedAssets: DURATIONms
-		EnsureUptoDateAssetsAreRegisteredWithGuidPM: DURATIONms
-		InitializingProgressBar: DURATIONms
-		PostProcessAllAssetNotificationsAddChangedAssets: DURATIONms
-		OnDemandSchedulerStart: DURATIONms
-	PostProcessAllAssets: DURATIONms
-	Hotreload: DURATIONms
-	GatherAllCurrentPrimaryArtifactRevisions: DURATIONms
-	UnloadStreamsBegin: DURATIONms
-	PersistCurrentRevisions: DURATIONms
-	UnloadStreamsEnd: DURATIONms
-	GenerateScriptTypeHashes: DURATIONms
-	Untracked: DURATIONms
-
-Application.AssetDatabase Initial Refresh End
-Scanning for USB devices : DURATIONms
-Initializing Unity extensions:
-Script 'Packages/com.pereviader.unityclirunner/package.json' will not be compiled because it exists outside the Assets folder and does not to belong to any assembly definition file.
-[MODES] ModeService[none].Initialize
 [MODES] ModeService[none].LoadModes
 [MODES] Loading mode Default (0) for mode-current-id-UnityCliRunner
 Unloading 16 Unused Serialized files (Serialized files now loaded: 0)
@@ -57,9 +12,26 @@ Unloading UNUSED_ASSETS unused Assets / (SIZE_MB). Loaded Objects now: LOADED_OB
 Memory consumption went from SIZE_MB to SIZE_MB.
 Total: DURATIONms (FindLiveObjects: DURATIONms CreateObjectMapping: DURATIONms MarkObjects: DURATIONms  DeleteObjects: DURATIONms)
 
-executeMethod method 'NonExistentMethod' in class 'Tests.DummyExecuteClass' could not be found.
-Argument was -executeMethod Tests.DummyExecuteClass.NonExistentMethod
-Exiting without the bug reporter. Application will terminate with return code 1Shut down.
+UnityCliRunner: Static method 'NonExistentMethod' not found in type 'Tests.DummyExecuteClass'
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace ()
+UnityEngine.DebugLogHandler:Internal_Log (UnityEngine.LogType,UnityEngine.LogOption,string,UnityEngine.Object)
+UnityEngine.DebugLogHandler:LogFormat (UnityEngine.LogType,UnityEngine.Object,string,object[])
+UnityEngine.Logger:Log (UnityEngine.LogType,object)
+UnityEngine.Debug:LogError (object)
+UnityCliRunner.UnityCliServer:ExecuteMethodFromCommandLine () (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
+
+(Filename: ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs Line: LINE)
+
+
+
+
+
+Checking for leaked weakptr:
+  Found no leaked weakptrs.
+[Package Manager] Server process was shutdown
+##utp:JSON
+~StackAllocator(ALLOC_TEMP_MAIN) m_LastAlloc not NULL. Did you forget to call FreeAllStackAllocations()? To get more information, run app with -diag-temp-memory-leak-validation cmd line argument
 ------------------------------------------------------------
 Batchmode method execution failed.
 EXIT_CODE: 1

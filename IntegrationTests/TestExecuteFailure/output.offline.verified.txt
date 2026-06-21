@@ -1,64 +1,37 @@
 Unity is not running. Running in batchmode...
 Found Unity at: UNITY_EXE
 Running method Tests.DummyExecuteClass.FailMethod in batchmode...
-
-Aborting batchmode due to failure:
-executeMethod method Tests.DummyExecuteClass.FailMethod threw exception.
-
 Unity Response: FAILURE
 ------------------------------------------------------------
 Last 50 lines of Unity batch log (Temp/unity_batch_log.txt):
 ------------------------------------------------------------
-		Asset DB Process Time: managed=DURATIONms, native=DURATIONms
-		Asset DB Callback time: managed=DURATIONms, native=DURATIONms
-		Scripting: domain reloads=1, domain reload time=DURATIONms, compile time=DURATIONms, other=DURATIONms
-		Project Asset Count: scripts=1466, non-scripts=2931
-		Asset File Changes: new=0, changed=1, moved=0, deleted=0
-		Scan Filter Count: 0
-	InvokeCustomDependenciesCallbacks: DURATIONms
-	InvokePackagesCallback: DURATIONms
-	ApplyChangesToAssetFolders: DURATIONms
-	Scan: DURATIONms
-	OnSourceAssetsModified: DURATIONms
-	CategorizeAssetsWithTransientArtifact: DURATIONms
-	ProcessAssetsWithTransientArtifactChanges: DURATIONms
-	CategorizeAssets: DURATIONms
-	ImportOutOfDateAssets: DURATIONms (DURATIONms without children)
-		CompileScripts: DURATIONms
-		ReloadNativeAssets: DURATIONms
-		UnloadImportedAssets: DURATIONms
-		EnsureUptoDateAssetsAreRegisteredWithGuidPM: DURATIONms
-		InitializingProgressBar: DURATIONms
-		PostProcessAllAssetNotificationsAddChangedAssets: DURATIONms
-		OnDemandSchedulerStart: DURATIONms
-	PostProcessAllAssets: DURATIONms
-	Hotreload: DURATIONms
-	GatherAllCurrentPrimaryArtifactRevisions: DURATIONms
-	UnloadStreamsBegin: DURATIONms
-	PersistCurrentRevisions: DURATIONms
-	UnloadStreamsEnd: DURATIONms
-	GenerateScriptTypeHashes: DURATIONms
-	Untracked: DURATIONms
 
-Application.AssetDatabase Initial Refresh End
-Scanning for USB devices : DURATIONms
-Initializing Unity extensions:
-Script 'Packages/com.pereviader.unityclirunner/package.json' will not be compiled because it exists outside the Assets folder and does not to belong to any assembly definition file.
-[MODES] ModeService[none].Initialize
-[MODES] ModeService[none].LoadModes
-[MODES] Loading mode Default (0) for mode-current-id-UnityCliRunner
-Unloading 16 Unused Serialized files (Serialized files now loaded: 0)
-Unloading UNUSED_ASSETS unused Assets / (SIZE_MB). Loaded Objects now: LOADED_OBJECTS.
-Memory consumption went from SIZE_MB to SIZE_MB.
-Total: DURATIONms (FindLiveObjects: DURATIONms CreateObjectMapping: DURATIONms MarkObjects: DURATIONms  DeleteObjects: DURATIONms)
+(Filename: ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs Line: LINE)
 
-InvalidOperationException: Intentional execution failure!
+UnityCliRunner: Method execution failed: System.InvalidOperationException: Intentional execution failure!
   at Tests.DummyExecuteClass.FailMethod () [0x00000] in C:\Users\perev\Code\UnityCliRunner\Assets\Tests\Editor\DummyTest.cs:13 
+  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)
+  at System.Reflection.RuntimeMethodInfo.Invoke (System.Object obj, System.Reflection.BindingFlags invokeAttr, System.Reflection.Binder binder, System.Object[] parameters, System.Globalization.CultureInfo culture) [0x0006a] in <4449e9424e7e4d4d81a660907c68cb97>:0 
+UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
+UnityEngine.StackTraceUtility:ExtractStackTrace ()
+UnityEngine.DebugLogHandler:Internal_Log (UnityEngine.LogType,UnityEngine.LogOption,string,UnityEngine.Object)
+UnityEngine.DebugLogHandler:LogFormat (UnityEngine.LogType,UnityEngine.Object,string,object[])
+UnityEngine.Logger:Log (UnityEngine.LogType,object)
+UnityEngine.Debug:LogError (object)
+UnityCliRunner.UnityCliServer:ExecuteMethod (System.Reflection.MethodInfo) (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
+UnityCliRunner.UnityCliServer:ExecuteMethodFromCommandLine () (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
 
-(Filename: Assets/Tests/Editor/DummyTest.cs Line: 13)
+(Filename: ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs Line: LINE)
 
-executeMethod method Tests.DummyExecuteClass.FailMethod threw exception.
-Exiting without the bug reporter. Application will terminate with return code 1Shut down.
+
+
+
+
+Checking for leaked weakptr:
+  Found no leaked weakptrs.
+[Package Manager] Server process was shutdown
+##utp:JSON
+~StackAllocator(ALLOC_TEMP_MAIN) m_LastAlloc not NULL. Did you forget to call FreeAllStackAllocations()? To get more information, run app with -diag-temp-memory-leak-validation cmd line argument
 ------------------------------------------------------------
 Batchmode method execution failed.
 EXIT_CODE: 1

@@ -333,7 +333,15 @@ run_online_method() {
     elif [[ "$response" == SUCCESS* ]]; then
       echo ""
       echo "Done!"
-      echo "Unity Response: SUCCESS"
+      local payload="${response#SUCCESS}"
+      # Trim leading/trailing whitespace
+      payload="${payload#"${payload%%[![:space:]]*}"}"
+      payload="${payload%"${payload##*[![:space:]]}"}"
+      if [ -n "$payload" ]; then
+        echo "$payload"
+      else
+        echo "Unity Response: SUCCESS"
+      fi
       return 0
     elif [[ "$response" == FAILURE* ]]; then
       echo ""
@@ -482,13 +490,28 @@ run_offline_method() {
 
   mkdir -p Temp
 
-  local args=(-batchmode -projectPath "$abs_proj_path" -executeMethod "$EXECUTE_METHOD" -logFile "$abs_log_file" -quit)
+  local args=(-batchmode -projectPath "$abs_proj_path" -executeMethod UnityCliRunner.UnityCliServer.ExecuteMethodFromCommandLine -executeMethodName "$EXECUTE_METHOD" -logFile "$abs_log_file" -quit)
 
   "$UNITY_EXE" "${args[@]}"
   local unity_exit=$?
 
   if [ $unity_exit -eq 0 ]; then
-    echo "Unity Response: SUCCESS"
+    local payload=""
+    if [ -f "Temp/unity_execute_result.json" ]; then
+      payload=$(powershell -NoProfile -Command "(Get-Content -Raw Temp/unity_execute_result.json | ConvertFrom-Json).payload" 2>/dev/null)
+      if [ $? -eq 0 ] && [ -n "$payload" ]; then
+        # Trim carriage returns and whitespace
+        payload=$(echo "$payload" | tr -d '\r')
+        payload="${payload#"${payload%%[![:space:]]*}"}"
+        payload="${payload%"${payload##*[![:space:]]}"}"
+      fi
+    fi
+
+    if [ -n "$payload" ]; then
+      echo "$payload"
+    else
+      echo "Unity Response: SUCCESS"
+    fi
     return 0
   else
     echo "Unity Response: FAILURE"
