@@ -132,14 +132,13 @@ normalize_output() {
     -e "s|$escaped_proj_path_win|PROJECT_PATH|gI" \
     -e 's|\[[0-9]+ ms\]|[DURATION]|g' \
     -e 's|\[< 1 ms\]|[DURATION]|g' \
-    -e 's|Waiting for tests to complete\.* Done!|Waiting for tests to complete. Done!|g' \
-    -e 's|Waiting for AssetDatabase refresh/compilation to finish\.* Unity is ready!|Waiting for AssetDatabase refresh/compilation to finish. Unity is ready!|g' \
-    -e 's|Triggering AssetDatabase refresh\.* Done!|Triggering AssetDatabase refresh. Done!|g' \
-    -e 's|Waiting for method execution to complete\.* Done!|Waiting for method execution to complete. Done!|g' \
-    -e 's|Connecting\.* Connected successfully!|Connecting... Connected successfully!|g' \
-    -e 's|^Starting Unity background instance\.* Started successfully!$|Starting Unity background instance. Started successfully!|g' \
-    -e 's|^Stopping Unity background instance\.* Stopped cleanly\.$|Stopping Unity background instance. Stopped cleanly.|g' \
-    -e 's|^Stopping Unity background instance\.* Stopped\.$|Stopping Unity background instance. Stopped.|g' \
+    -e 's|Waiting for tests to complete\.*$|Waiting for tests to complete...|g' \
+    -e 's|Waiting for AssetDatabase refresh/compilation to finish\.*$|Waiting for AssetDatabase refresh/compilation to finish...|g' \
+    -e 's|Triggering AssetDatabase refresh\.*$|Triggering AssetDatabase refresh...|g' \
+    -e 's|Waiting for method execution to complete\.*$|Waiting for method execution to complete...|g' \
+    -e 's|Connecting\.*$|Connecting...|g' \
+    -e 's|^Starting Unity background instance\.*$|Starting Unity background instance...|g' \
+    -e 's|^Stopping Unity background instance\.*$|Stopping Unity background instance...|g' \
     -e 's|Found Unity at: .*|Found Unity at: UNITY_EXE|g' \
     -e 's|PROJECT_PATH\\|PROJECT_PATH/|g' \
     -e 's|c:/program files/unity/hub/editor/[^/]+/editor/unity.exe|UNITY_EXE|gI' \

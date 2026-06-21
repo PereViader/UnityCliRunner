@@ -1,8 +1,11 @@
 Detected running Unity instance (via UnityLockfile).
-Triggering AssetDatabase refresh. Done!
-Waiting for AssetDatabase refresh/compilation to finish. Unity is ready!
+Triggering AssetDatabase refresh...
+Done!
+Waiting for AssetDatabase refresh/compilation to finish...
+Unity is ready!
 Sending command to run method Tests.DummyExecuteClass.SuccessMethod...
-Waiting for method execution to complete. Done!
+Waiting for method execution to complete...
+Done!
 Unity Response: SUCCESS
 Method execution succeeded.
 EXIT_CODE: 0

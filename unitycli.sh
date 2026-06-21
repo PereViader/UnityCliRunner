@@ -273,7 +273,7 @@ run_online_tests() {
   fi
   response=$(send_socket_cmd "$cmd" 10)
   
-  echo -n "Waiting for tests to complete"
+  echo -n "Waiting for tests to complete..."
   while true; do
     sleep 1
 
@@ -287,17 +287,20 @@ run_online_tests() {
     if [ "$response" = "RUNNING" ]; then
       echo -n "."
     elif [[ "$response" == SUCCESS* ]]; then
-      echo " Done!"
+      echo ""
+      echo "Done!"
       echo "Unity Response: $response"
       return 0
     elif [[ "$response" == FAILURE* ]]; then
-      echo " Done!"
+      echo ""
+      echo "Done!"
       echo "Unity Response: $response"
       print_failed_tests
       return 1
     else
       # If IDLE or ERROR
-      echo " Done!"
+      echo ""
+      echo "Done!"
       echo "Unity Response: $response"
       return 2
     fi
@@ -315,7 +318,7 @@ run_online_method() {
     return 1
   fi
 
-  echo -n "Waiting for method execution to complete"
+  echo -n "Waiting for method execution to complete..."
   while true; do
     sleep 1
 
@@ -328,16 +331,19 @@ run_online_method() {
     if [ "$response" = "RUNNING" ]; then
       echo -n "."
     elif [[ "$response" == SUCCESS* ]]; then
-      echo " Done!"
+      echo ""
+      echo "Done!"
       echo "Unity Response: SUCCESS"
       return 0
     elif [[ "$response" == FAILURE* ]]; then
-      echo " Done!"
+      echo ""
+      echo "Done!"
       echo "Unity Response: FAILURE"
       echo "${response#FAILURE }"
       return 1
     else
-      echo " Done!"
+      echo ""
+      echo "Done!"
       echo "Unity Response: $response"
       return 2
     fi
@@ -543,7 +549,8 @@ if [ "$SUBCOMMAND" = "background" ]; then
         if send_socket_cmd "PING" 2 >/dev/null 2>&1; then
           response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
           if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
-            echo " Started successfully!"
+            echo ""
+            echo "Started successfully!"
             started=true
             break
           fi
@@ -554,7 +561,8 @@ if [ "$SUBCOMMAND" = "background" ]; then
     done
 
     if [ "$started" = false ]; then
-      echo " Failed to start background Unity instance."
+      echo ""
+      echo "Failed to start background Unity instance."
       exit 1
     fi
     exit 0
@@ -588,7 +596,8 @@ if [ "$SUBCOMMAND" = "background" ]; then
     fi
 
     if [ "$stopped" = true ]; then
-      echo " Stopped cleanly."
+      echo ""
+      echo "Stopped cleanly."
       exit 0
     fi
 
@@ -626,7 +635,8 @@ if [ "$SUBCOMMAND" = "background" ]; then
       done
     fi
 
-    echo " Stopped."
+    echo ""
+    echo "Stopped."
     exit 0
   elif [ "$BG_ACTION" = "wait-ready" ]; then
     if [ "$IS_RUNNING" = false ]; then
@@ -637,7 +647,8 @@ if [ "$SUBCOMMAND" = "background" ]; then
     echo -n "Unity is running. Connecting..."
     while true; do
       if send_socket_cmd "PING" 2 >/dev/null; then
-        echo " Connected successfully!"
+        echo ""
+        echo "Connected successfully!"
         exit 0
       fi
       echo -n "."
@@ -653,7 +664,8 @@ if [ "$IS_RUNNING" = true ]; then
   echo -n "Triggering AssetDatabase refresh..."
   while true; do
     if send_socket_cmd "REFRESH" >/dev/null; then
-      echo " Done!"
+      echo ""
+      echo "Done!"
       break
     fi
     echo -n "."
@@ -663,7 +675,7 @@ fi
 
 if [ "$IS_RUNNING" = true ]; then
   # Step 2: Poll refresh until READY
-  echo -n "Waiting for AssetDatabase refresh/compilation to finish"
+  echo -n "Waiting for AssetDatabase refresh/compilation to finish..."
   while true; do
     # Sleep 1s
     sleep 1
@@ -689,7 +701,8 @@ if [ "$IS_RUNNING" = true ]; then
     fi
     
     if [ "$response" = "READY" ]; then
-      echo " Unity is ready!"
+      echo ""
+      echo "Unity is ready!"
       break
     elif [ "$response" = "COMPILATION_ERROR" ]; then
       echo ""

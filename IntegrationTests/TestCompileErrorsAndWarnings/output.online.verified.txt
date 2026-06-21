@@ -1,6 +1,7 @@
 Detected running Unity instance (via UnityLockfile).
-Triggering AssetDatabase refresh. Done!
-Waiting for AssetDatabase refresh/compilation to finish
+Triggering AssetDatabase refresh...
+Done!
+Waiting for AssetDatabase refresh/compilation to finish...
 Assets\Tests\Editor\DummyTest.cs(15,29): error CS1002: ; expected
 
 Build FAILED.
