@@ -32,8 +32,8 @@ show_usage() {
   echo "    --editmode            Run EditMode tests"
   echo "    --filter <filter>     Filter tests by name (regex/substring)"
   echo "    --category <category> Filter tests by category"
-  echo "  executemethod <method>  Execute a custom static parameterless method returning void"
-  echo "                          (e.g., Namespace.Class.Method)"
+  echo "  executemethod <method> [args...] Execute a custom static method (optionally with parameters)"
+  echo "                          (e.g., Namespace.Class.Method 4 3 \"{\\\"Value\\\":4}\")"
   echo "  background <action>     Manage a background Unity instance"
   echo "                          (action: start <mode> | stop | wait-ready | status)"
   echo "                          (mode: batchmode | interactive)"
@@ -106,12 +106,10 @@ case "$SUBCOMMAND" in
       echo "Error: executemethod requires a method name argument (e.g., Namespace.Class.Method)"
       show_usage
     fi
-    if [ $# -gt 1 ]; then
-      echo "Error: executemethod does not accept flags or multiple arguments"
-      show_usage
-    fi
     EXECUTE_METHOD="$1"
     shift
+    EXECUTE_METHOD_PARAMS=("$@")
+    shift $#
     ;;
 
   background)
@@ -220,19 +218,21 @@ send_socket_cmd() {
   fi
 
   local response=""
-  # Query using PowerShell to avoid Git Bash /dev/tcp subshell inheritance limitations.
-  # We use single quotes for the PowerShell code block to avoid bash variable expansion.
+  # Export command to environment variable to pass to powershell safely without quoting issues
+  export UNITY_CLI_CMD="$cmd"
   response=$(powershell -NoProfile -Command "
     \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
-    \$c.ReceiveTimeout = $(($timeout * 1000));
+    \$c.ReceiveTimeout = \$((\$timeout * 1000));
     \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
     \$r = New-Object System.IO.StreamReader(\$c.GetStream());
-    \$w.WriteLine('$cmd');
+    \$w.WriteLine(\$env:UNITY_CLI_CMD);
     \$w.Flush();
     \$res = \$r.ReadLine();
     \$c.Close();
     Write-Output \$res;
   " 2>/dev/null)
+  
+  unset UNITY_CLI_CMD
 
   if [ $? -eq 0 ] && [ -n "$response" ]; then
     # Strip carriage returns and trim whitespace
@@ -311,8 +311,15 @@ run_online_tests() {
 run_online_method() {
   echo "Sending command to run method $EXECUTE_METHOD..."
 
+  local cmd="EXECUTE_METHOD $EXECUTE_METHOD"
+  for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
+    local escaped="${param//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    cmd="$cmd \"$escaped\""
+  done
+
   local response=""
-  response=$(send_socket_cmd "EXECUTE_METHOD $EXECUTE_METHOD" 10)
+  response=$(send_socket_cmd "$cmd" 10)
   if [ $? -ne 0 ] || [[ "$response" == ERROR* ]]; then
     echo "Error starting method execution: $response"
     return 1
@@ -490,7 +497,10 @@ run_offline_method() {
 
   mkdir -p Temp
 
-  local args=(-batchmode -projectPath "$abs_proj_path" -executeMethod UnityCliRunner.UnityCliServer.ExecuteMethodFromCommandLine -executeMethodName "$EXECUTE_METHOD" -logFile "$abs_log_file" -quit)
+  local args=(-batchmode -projectPath "$abs_proj_path" -logFile "$abs_log_file" -quit -executeMethod UnityCliRunner.UnityCliServer.ExecuteMethodFromCommandLine -executeMethodName "$EXECUTE_METHOD")
+  for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
+    args+=("$param")
+  done
 
   "$UNITY_EXE" "${args[@]}"
   local unity_exit=$?

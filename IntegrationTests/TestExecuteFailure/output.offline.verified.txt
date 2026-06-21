@@ -18,7 +18,7 @@ UnityEngine.DebugLogHandler:Internal_Log (UnityEngine.LogType,UnityEngine.LogOpt
 UnityEngine.DebugLogHandler:LogFormat (UnityEngine.LogType,UnityEngine.Object,string,object[])
 UnityEngine.Logger:Log (UnityEngine.LogType,object)
 UnityEngine.Debug:LogError (object)
-UnityCliRunner.UnityCliServer:ExecuteMethod (System.Reflection.MethodInfo) (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
+UnityCliRunner.UnityCliServer:ExecuteMethod (System.Reflection.MethodInfo,string[]) (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
 UnityCliRunner.UnityCliServer:ExecuteMethodFromCommandLine () (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
 
 (Filename: ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs Line: LINE)
