@@ -1,0 +1,4 @@
+interface:
+  display_name: "Unity CLI"
+  short_description: "Run Unity tests and editor methods"
+  default_prompt: "Use $unity-cli to run Stumble Unity tests or execute an editor method through the platform-specific Unity CLI wrapper."
