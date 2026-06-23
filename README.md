@@ -21,7 +21,7 @@ It operates in two distinct modes depending on whether the editor is open:
 - 🤖 **Perfect for AI & CI/CD Workflows**: Headless tools can trigger compilations and check status without interacting with the graphical interface.
 - 🎨 **Beautiful Compiler Output**: Extracts C# warnings and errors from Unity compilation log/tracker and prints them in a clean, `dotnet build` format with ANSI colors (warnings in yellow, errors in red).
 - 🧪 **Flexible Test Runner**: Run EditMode or PlayMode tests (or both), filter specific tests by name, or filter by category. Failed tests are printed in a clean `dotnet test` format.
-- ⚙️ **Execute Custom Methods**: Run arbitrary static parameterless methods returning void (e.g., build scripts, setup methods) in both online and offline modes.
+- ⚙️ **Execute Custom Methods**: Run arbitrary static methods (optionally with parameters, including automatic JSON deserialization) in both online and offline modes.
 - 🔌 **Dynamic Port Assignment**: Avoids port conflicts by dynamically binding to a free loopback port on startup and writing it to `Temp/unity_cli_port.txt`.
 - 🪟 **PowerShell Socket Bridge**: Uses PowerShell socket communication internally on Windows to avoid the subshell socket inheritance issues common in Git Bash.
 - 📦 **UPM Package Support**: Clean package-based setup that doesn't clutter your project's main codebase.
@@ -86,8 +86,8 @@ Run `unitycli.sh` from the root directory of your Unity project:
 # Run tests matching a specific category filter
 ./unitycli.sh test --category "LongRunning"
 
-# Execute a custom static parameterless method returning void
-./unitycli.sh executemethod Namespace.Class.Method
+# Execute a custom static method (optionally with parameters, including JSON)
+./unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
 
 # Start a background Unity instance in batchmode
 ./unitycli.sh background start batchmode
@@ -109,6 +109,28 @@ Run `unitycli.sh` from the root directory of your Unity project:
 - `0`: Success (all tests passed, compilation succeeded, method executed successfully, or connection succeeded).
 - `1`: Failure (compilation errors, failed tests, method execution exception, or connection check failed).
 
+## Method Execution with Parameters
+
+The `executemethod` subcommand supports executing static methods with parameters directly from the shell:
+
+```bash
+./unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
+```
+
+### Supported Parameter Types
+- **Primitives**: `int`, `float`, `double`, `bool`, `long`, `decimal` (all parsed using invariant culture).
+- **Strings**: Standard C# strings.
+- **Complex Types (JSON)**: Any other C# class/struct type will be automatically deserialized from its raw string parameter using Unity's `JsonUtility.FromJson`.
+
+### Overload Resolution
+Overloaded static methods are resolved automatically by matching the number of arguments provided.
+
+### Method Return Values
+Methods executed via `executemethod` can return values:
+- **Primitives & Strings**: If the method returns a primitive type, `string`, or `decimal`, the value is printed directly to the console.
+- **Complex Types**: If the method returns a custom class or struct, it is automatically serialized and printed as a JSON payload using `JsonUtility.ToJson`.
+- **Void/Null**: If the method return type is `void` (or the returned value is `null`), the output defaults to `Unity Response: SUCCESS` (in batchmode) or no extra payload.
+
 ---
 
 ## How it Works under the Hood
@@ -123,12 +145,12 @@ External tools communicate using a line-based text protocol:
 - `POLL_REFRESH`: Returns compilation state (`COMPILING`, `UPDATING`, `COMPILATION_ERROR`, or `READY`).
 - `RUN_TESTS <mode> [--filter <filter>] [--category <category>]`: Triggers EditMode or PlayMode tests.
 - `POLL_TESTS`: Returns test running state (`RUNNING`, `SUCCESS <details>`, `FAILURE <details>`, `IDLE`, or `ERROR`).
-- `EXECUTE_METHOD <method>`: Enqueues execution of a static parameterless void method.
+- `EXECUTE_METHOD <method> [args...]`: Enqueues execution of a static method (with or without parameters, including JSON payloads).
 - `POLL_EXECUTE`: Returns method running state (`RUNNING`, `SUCCESS`, `FAILURE <details>`, `IDLE`, or `ERROR`).
 
 If Unity is closed, `unitycli.sh` parses `Temp/UnityLockfile` (or `UnityLockFile`), detects the absence of the running instance, and automatically runs the subcommand via Unity's batchmode:
 - For tests: `-batchmode -runTests -testPlatform <EditMode|PlayMode>`
-- For methods: `-batchmode -executeMethod <method>`
+- For methods: `-batchmode -executeMethod <method> [args...]`
 
 ---
 

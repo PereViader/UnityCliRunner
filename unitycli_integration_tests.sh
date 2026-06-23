@@ -308,6 +308,7 @@ run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClas
 run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
 run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "online"
 run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
+run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
 
 # background wait-ready test (online)
 run_integration_case "TestCheckConnection" "background wait-ready" "online"
@@ -340,6 +341,7 @@ run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClas
 run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
 run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "offline"
 run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "offline"
+run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "offline"
 
 # background wait-ready test (offline)
 run_integration_case "TestCheckConnection" "background wait-ready" "offline"

@@ -331,15 +331,23 @@ namespace UnityCliRunner
                             break;
                         }
 
-                        int lastDot = methodArgs.LastIndexOf('.');
-                        if (lastDot == -1)
+                        string[] execArgs = SplitArguments(methodArgs);
+                        if (execArgs.Length == 0)
                         {
-                            writer.WriteLine($"ERROR: Invalid method format: '{methodArgs}'. Expected FullyQualifiedType.Method");
+                            writer.WriteLine("ERROR: Missing method name");
                             break;
                         }
 
-                        string typeName = methodArgs.Substring(0, lastDot);
-                        string methodName = methodArgs.Substring(lastDot + 1);
+                        string targetMethodName = execArgs[0];
+                        int lastDot = targetMethodName.LastIndexOf('.');
+                        if (lastDot == -1)
+                        {
+                            writer.WriteLine($"ERROR: Invalid method format: '{targetMethodName}'. Expected FullyQualifiedType.Method");
+                            break;
+                        }
+
+                        string typeName = targetMethodName.Substring(0, lastDot);
+                        string methodName = targetMethodName.Substring(lastDot + 1);
 
                         var targetType = FindType(typeName);
                         if (targetType == null)
@@ -348,23 +356,33 @@ namespace UnityCliRunner
                             break;
                         }
 
-                        var targetMethod = targetType.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                        var methodParamsList = new List<string>();
+                        for (int i = 1; i < execArgs.Length; i++)
+                        {
+                            methodParamsList.Add(execArgs[i]);
+                        }
+
+                        MethodInfo targetMethod = null;
+                        try
+                        {
+                            targetMethod = FindStaticMethod(targetType, methodName, methodParamsList.Count);
+                        }
+                        catch (AmbiguousMatchException ex)
+                        {
+                            writer.WriteLine($"ERROR: {ex.Message}");
+                            break;
+                        }
+
                         if (targetMethod == null)
                         {
                             writer.WriteLine($"ERROR: Static method '{methodName}' not found in type '{typeName}'");
                             break;
                         }
 
-                        if (targetMethod.GetParameters().Length > 0)
-                        {
-                            writer.WriteLine($"ERROR: Method '{typeName}.{methodName}' must take no parameters");
-                            break;
-                        }
-
                         WriteExecuteRunningState();
 
                         MainThreadQueue.Enqueue(() => {
-                            ExecuteMethod(targetMethod);
+                            ExecuteMethod(targetMethod, methodParamsList.ToArray());
                         });
 
                         writer.WriteLine("RUNNING");
@@ -502,31 +520,90 @@ namespace UnityCliRunner
 
             var current = new StringBuilder();
             bool inQuotes = false;
+            bool isEscaped = false;
+            bool inArg = false;
+
             for (int i = 0; i < commandLine.Length; i++)
             {
                 char c = commandLine[i];
-                if (c == '"')
+                if (isEscaped)
+                {
+                    current.Append(c);
+                    isEscaped = false;
+                }
+                else if (c == '\\')
+                {
+                    if (i + 1 < commandLine.Length && (commandLine[i + 1] == '"' || commandLine[i + 1] == '\\'))
+                    {
+                        isEscaped = true;
+                        inArg = true;
+                    }
+                    else
+                    {
+                        current.Append(c);
+                        inArg = true;
+                    }
+                }
+                else if (c == '"')
                 {
                     inQuotes = !inQuotes;
+                    inArg = true;
                 }
                 else if (c == ' ' && !inQuotes)
                 {
-                    if (current.Length > 0)
+                    if (inArg)
                     {
                         args.Add(current.ToString());
                         current.Clear();
+                        inArg = false;
                     }
                 }
                 else
                 {
                     current.Append(c);
+                    inArg = true;
                 }
             }
-            if (current.Length > 0)
+
+            if (inArg)
             {
                 args.Add(current.ToString());
             }
             return args.ToArray();
+        }
+
+        private static MethodInfo FindStaticMethod(Type type, string methodName, int paramCount)
+        {
+            var methods = type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            MethodInfo candidate = null;
+            int matchCount = 0;
+            foreach (var m in methods)
+            {
+                if (m.Name == methodName)
+                {
+                    if (m.GetParameters().Length == paramCount)
+                    {
+                        candidate = m;
+                        matchCount++;
+                    }
+                }
+            }
+            if (matchCount == 1)
+            {
+                return candidate;
+            }
+            if (matchCount > 1)
+            {
+                throw new AmbiguousMatchException($"Ambiguous match: multiple static methods named '{methodName}' with {paramCount} parameters found in type '{type.FullName}'.");
+            }
+            foreach (var m in methods)
+            {
+                if (m.Name == methodName)
+                {
+                    return m;
+                }
+            }
+            return null;
         }
 
         private static void WritePortFile(int port)
@@ -587,7 +664,7 @@ namespace UnityCliRunner
             }
         }
 
-        private static void ExecuteMethod(System.Reflection.MethodInfo method)
+        private static void ExecuteMethod(System.Reflection.MethodInfo method, string[] stringParams)
         {
             string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
             string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
@@ -601,7 +678,66 @@ namespace UnityCliRunner
             try
             {
                 Debug.Log($"UnityCliRunner: Executing method '{method.DeclaringType.FullName}.{method.Name}'...");
-                object result = method.Invoke(null, null);
+                
+                var paramInfos = method.GetParameters();
+                int expectedCount = paramInfos.Length;
+                int providedCount = stringParams != null ? stringParams.Length : 0;
+                if (expectedCount != providedCount)
+                {
+                    throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects {expectedCount} parameters, but {providedCount} were provided.");
+                }
+
+                object[] convertedParams = null;
+                if (expectedCount > 0)
+                {
+                    convertedParams = new object[expectedCount];
+                    for (int i = 0; i < expectedCount; i++)
+                    {
+                        string rawArg = stringParams[i];
+                        Type paramType = paramInfos[i].ParameterType;
+                        try
+                        {
+                            if (paramType == typeof(string))
+                            {
+                                convertedParams[i] = rawArg;
+                            }
+                            else if (paramType == typeof(int))
+                            {
+                                convertedParams[i] = int.Parse(rawArg);
+                            }
+                            else if (paramType == typeof(float))
+                            {
+                                convertedParams[i] = float.Parse(rawArg, System.Globalization.CultureInfo.InvariantCulture);
+                            }
+                            else if (paramType == typeof(double))
+                            {
+                                convertedParams[i] = double.Parse(rawArg, System.Globalization.CultureInfo.InvariantCulture);
+                            }
+                            else if (paramType == typeof(bool))
+                            {
+                                convertedParams[i] = bool.Parse(rawArg);
+                            }
+                            else if (paramType == typeof(long))
+                            {
+                                convertedParams[i] = long.Parse(rawArg);
+                            }
+                            else if (paramType == typeof(decimal))
+                            {
+                                convertedParams[i] = decimal.Parse(rawArg, System.Globalization.CultureInfo.InvariantCulture);
+                            }
+                            else
+                            {
+                                convertedParams[i] = JsonUtility.FromJson(rawArg, paramType);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            throw new ArgumentException($"Failed to convert parameter {i} ('{rawArg}') to type '{paramType.FullName}': {ex.Message}", ex);
+                        }
+                    }
+                }
+
+                object result = method.Invoke(null, convertedParams);
                 success = true;
 
                 if (method.ReturnType != typeof(void))
@@ -667,11 +803,13 @@ namespace UnityCliRunner
             {
                 string[] args = System.Environment.GetCommandLineArgs();
                 string targetMethodName = null;
+                int targetIndex = -1;
                 for (int i = 0; i < args.Length - 1; i++)
                 {
                     if (args[i] == "-executeMethodName")
                     {
                         targetMethodName = args[i + 1];
+                        targetIndex = i + 1;
                         break;
                     }
                 }
@@ -702,7 +840,24 @@ namespace UnityCliRunner
                     return;
                 }
 
-                var targetMethod = targetType.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                var methodParamsList = new List<string>();
+                for (int i = targetIndex + 1; i < args.Length; i++)
+                {
+                    methodParamsList.Add(args[i]);
+                }
+
+                MethodInfo targetMethod = null;
+                try
+                {
+                    targetMethod = FindStaticMethod(targetType, methodName, methodParamsList.Count);
+                }
+                catch (AmbiguousMatchException ex)
+                {
+                    Debug.LogError($"UnityCliRunner: {ex.Message}");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
                 if (targetMethod == null)
                 {
                     Debug.LogError($"UnityCliRunner: Static method '{methodName}' not found in type '{typeName}'");
@@ -710,16 +865,9 @@ namespace UnityCliRunner
                     return;
                 }
 
-                if (targetMethod.GetParameters().Length > 0)
-                {
-                    Debug.LogError($"UnityCliRunner: Method '{typeName}.{methodName}' must take no parameters");
-                    EditorApplication.Exit(1);
-                    return;
-                }
-
                 WriteExecuteRunningState();
                 
-                ExecuteMethod(targetMethod);
+                ExecuteMethod(targetMethod, methodParamsList.ToArray());
 
                 string resultsPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_result.json");
                 if (File.Exists(resultsPath))
