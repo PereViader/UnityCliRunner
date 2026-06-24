@@ -252,10 +252,11 @@ send_socket_cmd() {
     \$c.Close();
     Write-Output \$res;
   " 2>/dev/null)
+  local powershell_exit=$?
   
   unset UNITY_CLI_CMD
 
-  if [ $? -eq 0 ] && [ -n "$response" ]; then
+  if [ $powershell_exit -eq 0 ] && [ -n "$response" ]; then
     # Strip carriage returns and trim whitespace
     response=$(echo "$response" | tr -d '\r')
     response="${response#"${response%%[![:space:]]*}"}"
@@ -628,7 +629,7 @@ rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "background" ]; then
   if [ "$BG_ACTION" = "start" ]; then
-    if [ "$IS_RUNNING" = true ] || send_socket_cmd "PING" 2 >/dev/null 2>&1; then
+    if [ "$IS_RUNNING" = true ] || _=$(send_socket_cmd "PING" 2 2>/dev/null); then
       echo "Unity is already running."
       exit 0
     fi
@@ -654,7 +655,7 @@ if [ "$SUBCOMMAND" = "background" ]; then
     # Wait up to 90 seconds (45 iterations * 2s sleep)
     for i in {1..45}; do
       if [ -f "Temp/unity_cli_port.txt" ]; then
-        if send_socket_cmd "PING" 2 >/dev/null 2>&1; then
+        if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
           response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
           if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
             echo ""
@@ -677,7 +678,7 @@ if [ "$SUBCOMMAND" = "background" ]; then
 
   elif [ "$BG_ACTION" = "stop" ]; then
     running=false
-    if [ "$IS_RUNNING" = true ] || send_socket_cmd "PING" 2 >/dev/null 2>&1; then
+    if [ "$IS_RUNNING" = true ] || _=$(send_socket_cmd "PING" 2 2>/dev/null); then
       running=true
     fi
 
@@ -754,7 +755,7 @@ if [ "$SUBCOMMAND" = "background" ]; then
 
     echo -n "Unity is running. Connecting..."
     while true; do
-      if send_socket_cmd "PING" 2 >/dev/null; then
+      if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
         echo ""
         echo "Connected successfully!"
         exit 0
@@ -785,7 +786,7 @@ if [ "$IS_RUNNING" = true ]; then
   # Step 1: Trigger AssetDatabase refresh
   echo -n "Triggering AssetDatabase refresh..."
   while true; do
-    if send_socket_cmd "REFRESH" >/dev/null; then
+    if _=$(send_socket_cmd "REFRESH" 2>/dev/null); then
       echo ""
       echo "Done!"
       break
