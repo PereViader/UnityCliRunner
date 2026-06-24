@@ -63,14 +63,14 @@ Treat the terminal output as the primary debugging surface:
 
 ## Background Unity
 
-Use `background` when repeated agent operations would be faster with Unity kept open, especially in worktrees or when no editor is already running.
+Use the start/stop/status/wait-ready commands when repeated agent operations would be faster with Unity kept open, especially in worktrees or when no editor is already running.
 
 ```bash
-bash ./unitycli.sh background start batchmode
-bash ./unitycli.sh background start interactive
-bash ./unitycli.sh background status
-bash ./unitycli.sh background wait-ready
-bash ./unitycli.sh background stop
+bash ./unitycli.sh start batchmode
+bash ./unitycli.sh start interactive
+bash ./unitycli.sh status
+bash ./unitycli.sh wait-ready
+bash ./unitycli.sh stop
 ```
 
 `start batchmode` launches a headless-ish background Unity instance and waits until the socket runner is reachable and refresh is ready or compilation has produced errors. `start interactive` opens a normal Unity editor instance but still enables the same socket workflow.

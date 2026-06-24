@@ -232,7 +232,7 @@ fi
 
 run_setup "online"
 if [ "$IS_RUNNING" = false ]; then
-  ./unitycli.sh background start batchmode
+  ./unitycli.sh start batchmode
 else
   echo "Unity is already running."
 fi
@@ -320,19 +320,19 @@ run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteCl
 run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
 run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
 
-# background wait-ready test (online)
-run_integration_case "TestCheckConnection" "background wait-ready" "online"
+# wait-ready test (online)
+run_integration_case "TestCheckConnection" "wait-ready" "online"
 
 # filter test (online)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
 
-# background tests (online)
-run_integration_case "TestBackgroundStatusOnline" "background status" "online"
-run_integration_case "TestBackgroundStartAlreadyRunning" "background start batchmode" "online"
+# status/start tests (online)
+run_integration_case "TestBackgroundStatusOnline" "status" "online"
+run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "online"
 
 # Close Unity
 run_teardown "online"
-./unitycli.sh background stop
+./unitycli.sh stop
 
 echo "============================================="
 echo "PHASE 2: Running integration tests in OFFLINE mode"
@@ -353,17 +353,17 @@ run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteCl
 run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "offline"
 run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "offline"
 
-# background wait-ready test (offline)
-run_integration_case "TestCheckConnection" "background wait-ready" "offline"
+# wait-ready test (offline)
+run_integration_case "TestCheckConnection" "wait-ready" "offline"
 
 # filter test (offline)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "offline"
 
 # background tests (offline)
-run_integration_case "TestBackgroundStatusOffline" "background status" "offline"
-run_integration_case "TestBackgroundStopAlreadyStopped" "background stop" "offline"
-run_integration_case "TestBackgroundStart" "background start batchmode" "offline"
-run_integration_case "TestBackgroundStop" "background stop" "offline"
+run_integration_case "TestBackgroundStatusOffline" "status" "offline"
+run_integration_case "TestBackgroundStopAlreadyStopped" "stop" "offline"
+run_integration_case "TestBackgroundStart" "start batchmode" "offline"
+run_integration_case "TestBackgroundStop" "stop" "offline"
 
 run_teardown "offline"
 

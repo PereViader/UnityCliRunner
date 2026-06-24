@@ -90,16 +90,16 @@ Run `unitycli.sh` from the root directory of your Unity project:
 ./unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
 
 # Start a background Unity instance in batchmode
-./unitycli.sh background start batchmode
+./unitycli.sh start batchmode
 
 # Start a background Unity instance in interactive mode (opens Unity Editor GUI)
-./unitycli.sh background start interactive
+./unitycli.sh start interactive
 
 # Stop a background Unity instance
-./unitycli.sh background stop
+./unitycli.sh stop
 
 # Check if Unity is running and block/wait until the connection is fully ready
-./unitycli.sh background wait-ready
+./unitycli.sh wait-ready
 
 # Show help output
 ./unitycli.sh --help
