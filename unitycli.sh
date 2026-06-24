@@ -27,6 +27,7 @@ BG_MODE=""
 show_usage() {
   echo "Usage: $0 <command> [options]"
   echo "Commands:"
+  echo "  refresh                 Trigger AssetDatabase refresh and print compiler diagnostics"
   echo "  test [options]          Run tests (defaults to running both EditMode and PlayMode)"
   echo "    --playmode            Run PlayMode tests"
   echo "    --editmode            Run EditMode tests"
@@ -49,6 +50,13 @@ SUBCOMMAND="$1"
 shift
 
 case "$SUBCOMMAND" in
+  refresh)
+    if [ $# -gt 0 ]; then
+      echo "Error: refresh does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
   test)
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -163,6 +171,19 @@ if [ -f "Temp/UnityLockfile" ] || [ -f "Temp/UnityLockFile" ]; then
   fi
 fi
 
+# Function to check if Unity is still running (locked)
+is_unity_still_running() {
+  if [ -f "Temp/UnityLockfile" ] || [ -f "Temp/UnityLockFile" ]; then
+    if rm "Temp/UnityLockfile" 2>/dev/null || rm "Temp/UnityLockFile" 2>/dev/null; then
+      return 1
+    else
+      return 0
+    fi
+  else
+    return 1
+  fi
+}
+
 # Function to find Unity path
 find_unity_path() {
   if [ -n "${UNITY_PATH:-}" ] && [ -f "$UNITY_PATH" ]; then
@@ -272,6 +293,10 @@ run_online_tests() {
     cmd="$cmd --category \"$CATEGORY\""
   fi
   response=$(send_socket_cmd "$cmd" 10)
+  if [ $? -ne 0 ] || [ -z "$response" ] || [[ "$response" == ERROR* ]] || [[ "$response" == FAILURE* ]]; then
+    echo "Unity Response: $response"
+    return 1
+  fi
   
   echo -n "Waiting for tests to complete..."
   while true; do
@@ -280,6 +305,11 @@ run_online_tests() {
     # Re-read port/query status. The connection will fail during domain reloads, which is expected.
     response=$(send_socket_cmd "POLL_TESTS" 5)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited during test execution."
+        return 1
+      fi
       echo -n "."
       continue
     fi
@@ -331,6 +361,11 @@ run_online_method() {
 
     response=$(send_socket_cmd "POLL_EXECUTE" 5)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited during method execution."
+        return 1
+      fi
       echo -n "."
       continue
     fi
@@ -545,10 +580,50 @@ run_offline_method() {
   fi
 }
 
+# Function to trigger an AssetDatabase refresh in batchmode (Offline)
+run_offline_refresh() {
+  echo "Running AssetDatabase refresh in batchmode..."
+
+  local bash_log_file="Temp/unity_refresh_log.txt"
+  rm -f "$bash_log_file"
+
+  local abs_proj_path="$(pwd)"
+  local abs_log_file="$(pwd)/$bash_log_file"
+
+  mkdir -p Temp
+
+  local args=(-batchmode -projectPath "$abs_proj_path" -logFile "$abs_log_file" -executeMethod UnityCliRunner.UnityCliServer.RefreshFromCommandLine -quit)
+
+  "$UNITY_EXE" "${args[@]}"
+  local unity_exit=$?
+
+  local parse_status=1
+  if [ -f "$bash_log_file" ]; then
+    parse_and_print_compilation_results "$bash_log_file"
+    parse_status=$?
+  fi
+
+  if [ $unity_exit -eq 0 ] && [ $parse_status -ne 0 ]; then
+    echo "Unity Response: SUCCESS"
+    return 0
+  fi
+
+  echo "Unity Response: FAILURE"
+  if [ $parse_status -ne 0 ] && [ -f "$bash_log_file" ]; then
+    echo "------------------------------------------------------------"
+    echo "Last 50 lines of Unity refresh log ($bash_log_file):"
+    echo "------------------------------------------------------------"
+    tail -n 50 "$bash_log_file"
+    echo "------------------------------------------------------------"
+  fi
+
+  return 1
+}
+
 # --- Main Execution ---
 
 # Clean up stale compilation errors, results, and failures files, and execute files
-rm -f Temp/unity_compilation_errors.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
+rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
 rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "background" ]; then
@@ -715,6 +790,15 @@ if [ "$IS_RUNNING" = true ]; then
       echo "Done!"
       break
     fi
+    
+    # If connection failed, check if Unity is still running.
+    # If it's not running, we should abort instead of looping forever.
+    if ! is_unity_still_running; then
+      echo ""
+      echo "Error: Unity background process exited before asset refresh could be triggered."
+      exit 1
+    fi
+    
     echo -n "."
     sleep 1
   done
@@ -727,21 +811,15 @@ if [ "$IS_RUNNING" = true ]; then
     # Sleep 1s
     sleep 1
     
-    # Read port again in case it changed due to reload
-    current_port=""
-    if [ -f "Temp/unity_cli_port.txt" ]; then
-      current_port=$(cat "Temp/unity_cli_port.txt")
-    fi
-    
-    if [ -z "$current_port" ]; then
-      echo -n "."
-      continue
-    fi
-    
-    # Check status
+    # Check status. send_socket_cmd reads the port file for each connection attempt.
     response=""
     response=$(send_socket_cmd "POLL_REFRESH" 2)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited during asset refresh/compilation."
+        exit 1
+      fi
       # Connection failure (compiling or domain reload in progress)
       echo -n "."
       continue
@@ -750,6 +828,13 @@ if [ "$IS_RUNNING" = true ]; then
     if [ "$response" = "READY" ]; then
       echo ""
       echo "Unity is ready!"
+      if [ -f "Temp/unity_compilation_errors.txt" ]; then
+        parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
+        parse_status=$?
+        if [ $parse_status -eq 0 ]; then
+          exit 1
+        fi
+      fi
       break
     elif [ "$response" = "COMPILATION_ERROR" ]; then
       echo ""
@@ -765,7 +850,10 @@ if [ "$IS_RUNNING" = true ]; then
   done
 
   # Step 3: Action Execution
-  if [ "$SUBCOMMAND" = "executemethod" ]; then
+  if [ "$SUBCOMMAND" = "refresh" ]; then
+    echo "Refresh completed."
+    exit 0
+  elif [ "$SUBCOMMAND" = "executemethod" ]; then
     run_online_method
     exit_code=$?
     if [ $exit_code -ne 0 ]; then
@@ -811,7 +899,17 @@ else
   fi
   echo "Found Unity at: $UNITY_EXE"
 
-  if [ "$SUBCOMMAND" = "executemethod" ]; then
+  if [ "$SUBCOMMAND" = "refresh" ]; then
+    run_offline_refresh
+    exit_status=$?
+    if [ $exit_status -ne 0 ]; then
+      echo "Batchmode refresh failed."
+      exit 1
+    fi
+
+    echo "Refresh completed."
+    exit 0
+  elif [ "$SUBCOMMAND" = "executemethod" ]; then
     run_offline_method
     exit_status=$?
     if [ $exit_status -eq 2 ]; then

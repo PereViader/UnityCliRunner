@@ -152,6 +152,7 @@ normalize_output() {
     -e 's|##utp:\{.*\}|##utp:JSON|g' \
     -e 's|Scanning for USB devices : USB_DURATIONms|Scanning for USB devices : USB_DURATION|g' \
     -e '/Cleanup mono/d' \
+    -e '/\[MODES\]/d' \
     -e '/Shut down\./d' \
     -e '/Physics::Module/d' \
     -e '/Input System module/d' \
@@ -168,6 +169,15 @@ normalize_output() {
     -e '/abort_threads/d' \
     -e '/debugger-agent/d' \
     -e '/Curl error 42/d' \
+    -e '/Scanning for USB devices/d' \
+    -e '/Initializing Unity extensions/d' \
+    -e '/will not be compiled because it exists outside the Assets folder/d' \
+    -e '/UnityEngine.Debug/d' \
+    -e '/UnityEngine.StackTraceUtility/d' \
+    -e '/UnityEngine.DebugLogHandler/d' \
+    -e '/UnityEngine.Logger/d' \
+    -e '/UnityCliRunner\.UnityCliServer:ExecuteMethod/d' \
+    -e '/Filename: .*UnityCliServer.cs/d' \
     -e 's|UnityCliServer\.cs:[0-9]+|UnityCliServer.cs:LINE|g' \
     -e 's|UnityCliServer\.cs Line: [0-9]+|UnityCliServer.cs Line: LINE|g' \
     -e 's|\r||g' \

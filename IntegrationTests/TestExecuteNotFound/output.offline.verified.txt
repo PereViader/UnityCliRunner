@@ -5,23 +5,13 @@ Unity Response: FAILURE
 ------------------------------------------------------------
 Last 50 lines of Unity batch log (Temp/unity_batch_log.txt):
 ------------------------------------------------------------
-[MODES] ModeService[none].LoadModes
-[MODES] Loading mode Default (0) for mode-current-id-UnityCliRunner
 Unloading 16 Unused Serialized files (Serialized files now loaded: 0)
 Unloading UNUSED_ASSETS unused Assets / (SIZE_MB). Loaded Objects now: LOADED_OBJECTS.
 Memory consumption went from SIZE_MB to SIZE_MB.
 Total: DURATIONms (FindLiveObjects: DURATIONms CreateObjectMapping: DURATIONms MarkObjects: DURATIONms  DeleteObjects: DURATIONms)
 
 UnityCliRunner: Static method 'NonExistentMethod' not found in type 'Tests.DummyExecuteClass'
-UnityEngine.Debug:ExtractStackTraceNoAlloc (byte*,int,string)
-UnityEngine.StackTraceUtility:ExtractStackTrace ()
-UnityEngine.DebugLogHandler:Internal_Log (UnityEngine.LogType,UnityEngine.LogOption,string,UnityEngine.Object)
-UnityEngine.DebugLogHandler:LogFormat (UnityEngine.LogType,UnityEngine.Object,string,object[])
-UnityEngine.Logger:Log (UnityEngine.LogType,object)
-UnityEngine.Debug:LogError (object)
-UnityCliRunner.UnityCliServer:ExecuteMethodFromCommandLine () (at ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs:LINE)
 
-(Filename: ./Packages/com.pereviader.unityclirunner/Editor/UnityCliServer.cs Line: LINE)
 
 
 

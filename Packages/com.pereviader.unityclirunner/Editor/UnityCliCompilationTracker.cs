@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
@@ -9,18 +10,61 @@ namespace UnityCliRunner
 {
     public static class UnityCliCompilationTracker
     {
+        private const string CompilationDiagnosticsFileName = "unity_compilation_errors.txt";
+
+        public static void ClearActiveEntries()
+        {
+            try
+            {
+                var logEntriesType = FindType("UnityEditor.LogEntries") ?? FindType("UnityEditorInternal.LogEntries");
+                var clearMethod = logEntriesType?.GetMethod("Clear", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                clearMethod?.Invoke(null, null);
+            }
+            catch(Exception e)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to clear active compilation diagnostics: {e}");
+            }
+        }
+
+        public static void DeleteDiagnosticsFile()
+        {
+            try
+            {
+                string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+                if(File.Exists(diagnosticsPath))
+                {
+                    File.Delete(diagnosticsPath);
+                }
+            }
+            catch(Exception e)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to delete compilation diagnostics file: {e}");
+            }
+        }
+
         private static Type FindType(string fullName)
         {
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            foreach(var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 try
                 {
                     var type = assembly.GetType(fullName);
-                    if (type != null) return type;
+                    if(type != null)
+                        return type;
                 }
                 catch { }
             }
             return null;
+        }
+
+        private static string GetTempDirectory()
+        {
+            string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+            if(!Directory.Exists(tempDir))
+            {
+                Directory.CreateDirectory(tempDir);
+            }
+            return tempDir;
         }
 
         public static void WriteActiveErrorsToFile()
@@ -41,51 +85,51 @@ namespace UnityCliRunner
                 var columnField = logEntryType?.GetField("column", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 var modeField = logEntryType?.GetField("mode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-                if (logEntriesType == null || logEntryType == null || getCountMethod == null || getEntryMethod == null || messageField == null || modeField == null) return;
-
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
-                if (!Directory.Exists(tempDir))
+                if(logEntriesType == null || logEntryType == null || getCountMethod == null || getEntryMethod == null || messageField == null || modeField == null)
                 {
-                    Directory.CreateDirectory(tempDir);
+                    WriteFallbackDiagnosticsIfCompilationFailed("Unity editor reports scriptCompilationFailed is true, but UnityCliRunner could not read Editor Console compilation entries. Missing Unity console reflection members.");
+                    return;
                 }
-                string errorsPath = Path.Combine(tempDir, "unity_compilation_errors.txt");
+
+                string errorsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+                var diagnostics = new List<string>();
 
                 startGettingEntriesMethod?.Invoke(null, null);
                 try
                 {
-                    int count = (int)getCountMethod.Invoke(null, null);
-                    using (var writer = new StreamWriter(errorsPath, false, new UTF8Encoding(false)))
+                    int count = (int) getCountMethod.Invoke(null, null);
+                    var logEntry = Activator.CreateInstance(logEntryType);
+                    var parameters = new object[] { 0, logEntry };
+
+                    for(int i = 0; i < count; i++)
                     {
-                        var logEntry = Activator.CreateInstance(logEntryType);
-                        var parameters = new object[] { 0, logEntry };
+                        parameters[0] = i;
+                        getEntryMethod.Invoke(null, parameters);
+                        var currentEntry = parameters[1];
 
-                        for (int i = 0; i < count; i++)
+                        int mode = (int) modeField.GetValue(currentEntry);
+                        bool isCompileError = (mode & (1 << 11)) != 0;
+                        bool isCompileWarning = (mode & (1 << 12)) != 0;
+
+                        if(isCompileError || isCompileWarning)
                         {
-                            parameters[0] = i;
-                            getEntryMethod.Invoke(null, parameters);
-                            var currentEntry = parameters[1];
+                            string message = (string) messageField.GetValue(currentEntry);
+                            string file = fileField != null ? (string) fileField.GetValue(currentEntry) : "";
+                            int line = lineField != null ? (int) lineField.GetValue(currentEntry) : 0;
+                            int column = columnField != null ? (int) columnField.GetValue(currentEntry) : 0;
 
-                            int mode = (int)modeField.GetValue(currentEntry);
-                            bool isCompileError = (mode & (1 << 11)) != 0;
-                            bool isCompileWarning = (mode & (1 << 12)) != 0;
-
-                            if (isCompileError || isCompileWarning)
+                            string typeStr = isCompileError ? "error" : "warning";
+                            if(string.IsNullOrEmpty(message))
                             {
-                                string message = (string)messageField.GetValue(currentEntry);
-                                string file = fileField != null ? (string)fileField.GetValue(currentEntry) : "";
-                                int line = lineField != null ? (int)lineField.GetValue(currentEntry) : 0;
-                                int column = columnField != null ? (int)columnField.GetValue(currentEntry) : 0;
-
-                                string typeStr = isCompileError ? "error" : "warning";
-                                if (string.IsNullOrEmpty(message)) continue;
-
-                                string lineStr = message;
-                                if (!string.IsNullOrEmpty(file) && !lineStr.Contains(file))
-                                {
-                                    lineStr = $"{file}({line},{column}): {typeStr} {message}";
-                                }
-                                writer.WriteLine(lineStr);
+                                continue;
                             }
+
+                            string lineStr = message;
+                            if(!string.IsNullOrEmpty(file) && !lineStr.Contains(file))
+                            {
+                                lineStr = $"{file}({line},{column}): {typeStr} {message}";
+                            }
+                            diagnostics.Add(lineStr);
                         }
                     }
                 }
@@ -93,10 +137,44 @@ namespace UnityCliRunner
                 {
                     endGettingEntriesMethod?.Invoke(null, null);
                 }
+
+                if(diagnostics.Count > 0)
+                {
+                    File.WriteAllLines(errorsPath, diagnostics, new UTF8Encoding(false));
+                }
+                else if(EditorUtility.scriptCompilationFailed)
+                {
+                    WriteFallbackDiagnosticsIfCompilationFailed("Unity editor reports scriptCompilationFailed is true, but no compiler log entries were captured from the Editor Console.");
+                }
+                else
+                {
+                    DeleteDiagnosticsFile();
+                }
             }
-            catch (Exception e)
+            catch(Exception e)
             {
                 Debug.LogError($"UnityCliRunner: Failed to write active compilation errors: {e}");
+                WriteFallbackDiagnosticsIfCompilationFailed($"Unity editor reports scriptCompilationFailed is true, but UnityCliRunner failed to capture compiler diagnostics: {e.Message}");
+            }
+        }
+
+        private static void WriteFallbackDiagnosticsIfCompilationFailed(string message)
+        {
+            try
+            {
+                if(!EditorUtility.scriptCompilationFailed)
+                {
+                    DeleteDiagnosticsFile();
+                    return;
+                }
+
+                string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+                string diagnostic = $"UnityCliRunner(1,1): error UC0001: {message}";
+                File.WriteAllText(diagnosticsPath, diagnostic + Environment.NewLine, new UTF8Encoding(false));
+            }
+            catch(Exception e)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to write fallback compilation diagnostics: {e}");
             }
         }
     }
