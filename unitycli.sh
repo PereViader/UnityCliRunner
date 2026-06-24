@@ -39,6 +39,7 @@ show_usage() {
   echo "    --category <category> Filter tests by category"
   echo "  executemethod <method> [args...] Execute a custom static method (optionally with parameters)"
   echo "                          (e.g., Namespace.Class.Method 4 3 \"{\\\"Value\\\":4}\")"
+
   echo "  -h, --help              Show this help message"
   exit 1
 }
