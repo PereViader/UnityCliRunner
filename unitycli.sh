@@ -170,30 +170,57 @@ case "$SUBCOMMAND" in
     ;;
 esac
 
-# Detect if Unity is running for this specific project
-IS_RUNNING=false
-if [ -f "Temp/UnityLockfile" ] || [ -f "Temp/UnityLockFile" ]; then
-  # Try to delete the lockfile. If Unity is running, it holds an exclusive lock
-  # and the OS will prevent deletion. If Unity is not running, the delete will succeed.
-  if rm "Temp/UnityLockfile" 2>/dev/null || rm "Temp/UnityLockFile" 2>/dev/null; then
-    IS_RUNNING=false
-  else
-    IS_RUNNING=true
-  fi
-fi
-
 # Function to check if Unity is still running (locked)
 is_unity_still_running() {
-  if [ -f "Temp/UnityLockfile" ] || [ -f "Temp/UnityLockFile" ]; then
-    if rm "Temp/UnityLockfile" 2>/dev/null || rm "Temp/UnityLockFile" 2>/dev/null; then
-      return 1
-    else
-      return 0
-    fi
-  else
+  local lockfile=""
+  if [ -f "Temp/UnityLockfile" ]; then
+    lockfile="Temp/UnityLockfile"
+  elif [ -f "Temp/UnityLockFile" ]; then
+    lockfile="Temp/UnityLockFile"
+  fi
+
+  if [ -z "$lockfile" ]; then
     return 1
   fi
+
+  # Check if we are on Windows
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    # On Windows, if the file is locked by a running Unity instance, cat will fail.
+    if ! cat "$lockfile" >/dev/null 2>&1; then
+      return 0
+    else
+      # Not locked -> stale lockfile
+      rm -f "$lockfile" 2>/dev/null
+      return 1
+    fi
+  fi
+
+  # On Unix-like systems
+  local pid=""
+  pid=$(cat "$lockfile" 2>/dev/null | tr -d '\r')
+  pid="${pid#"${pid%%[![:space:]]*}"}"
+  pid="${pid%"${pid##*[![:space:]]}"}"
+
+  if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
+    if kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if lsof "$lockfile" >/dev/null 2>&1 || fuser "$lockfile" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Stale lockfile
+  rm -f "$lockfile" 2>/dev/null
+  return 1
 }
+
+# Detect if Unity is running for this specific project
+IS_RUNNING=false
+if is_unity_still_running; then
+  IS_RUNNING=true
+fi
 
 # Function to find Unity path
 find_unity_path() {

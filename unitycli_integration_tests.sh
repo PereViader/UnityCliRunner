@@ -216,12 +216,8 @@ abs_proj_path="$(pwd)"
 
 # Check if Unity is running
 IS_RUNNING=false
-if [ -f "Temp/UnityLockfile" ] || [ -f "Temp/UnityLockFile" ]; then
-  if rm "Temp/UnityLockfile" 2>/dev/null || rm "Temp/UnityLockFile" 2>/dev/null; then
-    IS_RUNNING=false
-  else
-    IS_RUNNING=true
-  fi
+if ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
+  IS_RUNNING=true
 fi
 
 UNITY_EXE=$(find_unity_path)
