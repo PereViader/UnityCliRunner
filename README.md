@@ -35,7 +35,7 @@ Copy [unitycli.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli.sh) from 
 
 ### 3. Requirements
 - A shell environment capable of running Bash (e.g., Git Bash on Windows, macOS/Linux terminal).
-- PowerShell (on Windows, used internally to establish TCP socket connections).
+- PowerShell (on Windows) or standard networking tools like `nc` (netcat) / Bash `/dev/tcp` redirection (on macOS/Linux), used internally to establish TCP socket connections.
 - Unity version 2021.3 or higher.
 
 ---

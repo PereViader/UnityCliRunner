@@ -53,11 +53,31 @@ find_unity_path() {
     version="6000.0.77f1"
   fi
 
-  local paths=(
-    "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
-    "C:/Program Files/Unity/Hub/Editor/6000.0.77f1/Editor/Unity.exe"
-    "C:/Program Files/Unity/Editor/Unity.exe"
-  )
+  local is_windows=false
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    is_windows=true
+  fi
+
+  local paths=()
+  if [ "$is_windows" = true ]; then
+    paths=(
+      "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
+      "C:/Program Files/Unity/Hub/Editor/6000.0.77f1/Editor/Unity.exe"
+      "C:/Program Files/Unity/Editor/Unity.exe"
+    )
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    paths=(
+      "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+      "/Applications/Unity/Hub/Editor/6000.0.77f1/Unity.app/Contents/MacOS/Unity"
+      "/Applications/Unity/Unity.app/Contents/MacOS/Unity"
+    )
+  else
+    paths=(
+      "$HOME/Unity/Hub/Editor/$version/Editor/Unity"
+      "$HOME/Unity/Hub/Editor/6000.0.77f1/Editor/Unity"
+      "/opt/unity/Editor/Unity"
+    )
+  fi
 
   for p in "${paths[@]}"; do
     if [ -f "$p" ]; then
@@ -66,10 +86,15 @@ find_unity_path() {
     fi
   done
 
-  local where_unity=""
-  where_unity=$(where unity 2>/dev/null | head -n 1)
-  if [ -n "$where_unity" ]; then
-    echo "$where_unity"
+  local command_unity=""
+  if [ "$is_windows" = true ]; then
+    command_unity=$(where unity 2>/dev/null | head -n 1)
+  else
+    command_unity=$(command -v unity 2>/dev/null)
+  fi
+
+  if [ -n "$command_unity" ]; then
+    echo "$command_unity"
     return 0
   fi
 
@@ -92,27 +117,48 @@ send_socket_cmd() {
   fi
 
   local response=""
-  response=$(powershell -NoProfile -Command "
-    \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
-    \$c.ReceiveTimeout = $(($timeout * 1000));
-    \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
-    \$r = New-Object System.IO.StreamReader(\$c.GetStream());
-    \$w.WriteLine('$cmd');
-    \$w.Flush();
-    \$res = \$r.ReadLine();
-    \$c.Close();
-    Write-Output \$res;
-  " 2>/dev/null)
-
-  if [ $? -eq 0 ] && [ -n "$response" ]; then
-    response=$(echo "$response" | tr -d '\r')
-    response="${response#"${response%%[![:space:]]*}"}"
-    response="${response%"${response##*[![:space:]]}"}"
-    echo "$response"
-    return 0
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    # Export command to environment variable to pass to powershell safely without quoting issues
+    export UNITY_CLI_CMD="$cmd"
+    response=$(powershell -NoProfile -Command "
+      \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
+      \$c.ReceiveTimeout = \$((\$timeout * 1000));
+      \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
+      \$r = New-Object System.IO.StreamReader(\$c.GetStream());
+      \$w.WriteLine(\$env:UNITY_CLI_CMD);
+      \$w.Flush();
+      \$res = \$r.ReadLine();
+      \$c.Close();
+      Write-Output \$res;
+    " 2>/dev/null)
+    local powershell_exit=$?
+    unset UNITY_CLI_CMD
+    if [ $powershell_exit -ne 0 ] || [ -z "$response" ]; then
+      return 1
+    fi
+  else
+    # Non-Windows (macOS, Linux)
+    if command -v nc >/dev/null 2>&1; then
+      response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
+    elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
+      exec 3<>/dev/tcp/127.0.0.1/$port
+      echo "$cmd" >&3
+      if read -t "$timeout" response <&3; then
+        response=$(echo "$response" | head -n 1)
+      fi
+      exec 3>&-
+    fi
+    if [ -z "$response" ]; then
+      return 1
+    fi
   fi
 
-  return 1
+  # Strip carriage returns and trim whitespace
+  response=$(echo "$response" | tr -d '\r')
+  response="${response#"${response%%[![:space:]]*}"}"
+  response="${response%"${response##*[![:space:]]}"}"
+  echo "$response"
+  return 0
 }
 
 # Normalization function
