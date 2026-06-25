@@ -137,7 +137,8 @@ normalize_output() {
     -e 's|Triggering AssetDatabase refresh\.*$|Triggering AssetDatabase refresh...|g' \
     -e 's|Waiting for method execution to complete\.*$|Waiting for method execution to complete...|g' \
     -e 's|Connecting\.*$|Connecting...|g' \
-    -e 's|^Starting Unity background instance\.*$|Starting Unity background instance...|g' \
+    -e 's|Starting Unity background instance\.*$|Starting Unity background instance...|g' \
+    -e 's|Waiting for Unity background instance to be ready\.*$|Waiting for Unity background instance to be ready...|g' \
     -e 's|^Stopping Unity background instance\.*$|Stopping Unity background instance...|g' \
     -e 's|Found Unity at: .*|Found Unity at: UNITY_EXE|g' \
     -e 's|PROJECT_PATH\\|PROJECT_PATH/|g' \
@@ -316,9 +317,6 @@ run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteCl
 run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
 run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
 
-# wait-ready test (online)
-run_integration_case "TestCheckConnection" "wait-ready" "online"
-
 # filter test (online)
 run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
 
@@ -331,37 +329,32 @@ run_teardown "online"
 ./unitycli.sh stop
 
 echo "============================================="
-echo "PHASE 2: Running integration tests in OFFLINE mode"
+echo "PHASE 2: Running integration tests for AUTO-START"
 echo "============================================="
 
-run_setup "offline"
+# 1. Start with stopped Unity. Run status (should be Not Running).
+run_integration_case "TestBackgroundStatusOffline" "status" "autostart"
 
-for tc in "${TEST_CASES[@]}"; do
-  run_integration_case "$tc" "test --editmode" "offline"
-done
+# 2. Run start batchmode when stopped (should start and wait).
+run_integration_case "TestBackgroundStart" "start batchmode" "autostart"
 
-# executemethod tests (offline)
-run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
-run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "offline"
-run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "offline"
-run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "offline"
-run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "offline"
-run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "offline"
-run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "offline"
+# 3. Run start batchmode when already running (should say Unity is already running).
+run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
 
-# wait-ready test (offline)
-run_integration_case "TestCheckConnection" "wait-ready" "offline"
+# 4. Stop Unity.
+./unitycli.sh stop
 
-# filter test (offline)
-run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "offline"
+# 5. Run test when stopped (should auto-start and run test).
+run_integration_case "TestEverythingPasses" "test --editmode" "autostart"
 
-# background tests (offline)
-run_integration_case "TestBackgroundStatusOffline" "status" "offline"
-run_integration_case "TestBackgroundStopAlreadyStopped" "stop" "offline"
-run_integration_case "TestBackgroundStart" "start batchmode" "offline"
-run_integration_case "TestBackgroundStop" "stop" "offline"
+# 6. Stop Unity.
+./unitycli.sh stop
 
-run_teardown "offline"
+# 7. Run executemethod when stopped (should auto-start and execute).
+run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "autostart"
+
+# 8. Stop Unity.
+./unitycli.sh stop
 
 echo "============================================="
 if [ $FAILED_TESTS -eq 0 ]; then

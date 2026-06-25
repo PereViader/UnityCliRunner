@@ -1,3 +1,0 @@
-Unity is running. Connecting...
-Connected successfully!
-EXIT_CODE: 0

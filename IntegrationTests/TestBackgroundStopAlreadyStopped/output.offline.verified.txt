@@ -1,2 +1,0 @@
-Unity background instance is not running.
-EXIT_CODE: 0

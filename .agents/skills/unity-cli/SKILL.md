@@ -26,7 +26,7 @@ bash ./unitycli.sh refresh
 
 When Unity is already running for this project, the wrapper connects to the UnityCliRunner socket, clears the active editor console, triggers `AssetDatabase.Refresh()`, waits for refresh/compilation/domain reloads to settle, then prints compiler warnings and errors captured from the Unity console.
 
-When Unity is not running, the wrapper opens the project in batchmode, lets Unity refresh/import/compile, parses the Unity log for compiler warnings and errors, and quits.
+When Unity is not running, the wrapper automatically starts a background Unity instance in batchmode first, and then executes the refresh command over TCP.
 
 Treat `refresh` as a compile probe:
 
@@ -51,7 +51,7 @@ When none of the mode flags are supplied, the wrapper runs both modes.
 
 When Unity is already running for this project, the wrapper connects to the UnityCliRunner socket, triggers an AssetDatabase refresh, waits for refresh/compilation to finish, then runs tests in the running editor. Connection failures during domain reload are expected; the wrapper polls until Unity is ready.
 
-When Unity is not running, the wrapper finds the configured Unity editor, opens the project in batchmode, runs the requested tests, writes results under `Temp`, and quits.
+When Unity is not running, the wrapper automatically starts a background Unity instance in batchmode first, and then executes the tests.
 
 Treat the terminal output as the primary debugging surface:
 
@@ -63,17 +63,16 @@ Treat the terminal output as the primary debugging surface:
 
 ## Background Unity
 
-Use the start/stop/status/wait-ready commands when repeated agent operations would be faster with Unity kept open, especially in worktrees or when no editor is already running.
+Use the start/stop/status commands when repeated agent operations would be faster with Unity kept open, especially in worktrees or when no editor is already running.
 
 ```bash
 bash ./unitycli.sh start batchmode
 bash ./unitycli.sh start interactive
 bash ./unitycli.sh status
-bash ./unitycli.sh wait-ready
 bash ./unitycli.sh stop
 ```
 
-`start batchmode` launches a headless-ish background Unity instance and waits until the socket runner is reachable and refresh is ready or compilation has produced errors. `start interactive` opens a normal Unity editor instance but still enables the same socket workflow.
+`start batchmode` launches a headless-ish background Unity instance and waits until the socket runner is reachable. If the background instance is already starting or running, calling `start` will block and wait for it to be ready. `start interactive` opens a normal Unity editor instance but still enables the same socket workflow.
 
 Use `status` before long validation loops. It reports:
 
@@ -81,7 +80,7 @@ Use `status` before long validation loops. It reports:
 - `Status: Ready` when the socket runner responds.
 - `Status: Running Unreachable` when Unity is open but the socket runner cannot be reached, usually during startup, refresh, domain reload, or a broken editor state.
 
-Use `wait-ready` when Unity is already running and the workflow should pause until the socket is reachable. Use `stop` when the background instance is no longer needed; it asks the socket to exit and falls back to killing the project Unity process if needed.
+Use `stop` when the background instance is no longer needed; it asks the socket to exit and falls back to killing the project Unity process if needed.
 
 ## Execute Static Methods
 
@@ -101,4 +100,4 @@ The runner resolves overloads by method name and argument count. If multiple sta
 
 Methods can return values. Successful primitive, string, decimal, bool, and `null` results are printed directly; object results are serialized with `JsonUtility.ToJson`; empty `void` successes print `Unity Response: SUCCESS`. Failures print the failure payload and return non-zero.
 
-Like tests, `executemethod` reuses a running Unity socket when possible and otherwise falls back to batchmode execution. It also performs the AssetDatabase refresh/compilation readiness flow before invoking the method when Unity is already running.
+Like tests, `executemethod` reuses a running Unity socket when possible and otherwise automatically starts the background instance if it is not running. It also performs the AssetDatabase refresh/compilation readiness flow before invoking the method.

@@ -1,51 +1,10 @@
 # UnityCliRunner
 
-A lightweight, high-performance tool that bridges external command line interfaces (and AI coding agents) with the Unity Editor. It enables sub-second compilation loops, clean test execution, and static method invocations in both **Online Mode** (communicating with an open editor via loopback TCP sockets) and **Offline Mode** (falling back to headless batchmode).
+A lightweight, high-performance tool that bridges external command line interfaces (and AI coding agents) with the Unity Editor. It enables sub-second compilation loops, clean test execution, and static method invocations by communicating with a running Unity Editor (or headless background instance) via loopback TCP sockets.
 
 ---
 
-## Architecture Overview
 
-UnityCliRunner operates in two distinct modes depending on whether the Unity Editor is active for the project:
-
-```mermaid
-flowchart TD
-    subgraph Client ["Client Environment (Terminal / AI Agent)"]
-        sh["unitycli.sh wrapper"]
-    end
-    
-    subgraph UnityProcess ["Unity Environment"]
-        subgraph Online ["Online Mode (Unity Editor Open)"]
-            portfile["Temp/unity_cli_port.txt"]
-            tcpserver["UnityCliServer (TCP Listener)"]
-            domain["AppDomain (Active Editor)"]
-            portfile -. Publishes Port .-> sh
-            sh -- "TCP commands (PING, REFRESH, RUN_TESTS, EXECUTE_METHOD)" --> tcpserver
-            tcpserver --> domain
-        end
-        
-        subgraph Offline ["Offline Mode (Unity Editor Closed)"]
-            batch["Unity Batchmode (Headless)"]
-            log["Temp/unity_batch_log.txt"]
-            sh -- Launches with arguments --> batch
-            batch -- Writes output/errors --> log
-            log -. Parsed & Formatted .-> sh
-        end
-    end
-```
-
-### Execution Mode Comparison
-
-| Feature | Online Mode (Unity Editor Open) | Offline Mode (Unity Editor Closed) |
-| :--- | :--- | :--- |
-| **Communication Channel** | TCP Sockets (loopback) | Command-line arguments & logs |
-| **Feedback Loop Speed** | ⚡ **Sub-second** (re-uses open AppDomain) | ⏳ **15–30+ seconds** (launches new process) |
-| **Compilation Trigger** | Live `AssetDatabase.Refresh()` | Headless import & compile phase |
-| **Test Execution** | Instantly runs in active Editor | Runs via batchmode `-runTests` |
-| **Method Execution** | Calls method on active thread | Runs via batchmode `-executeMethod` |
-| **Output Diagnostics** | Real-time console extraction | Parses batch log for C# errors/warnings |
-
----
 
 ## Key Features
 
@@ -53,7 +12,7 @@ flowchart TD
 - 🤖 **Perfect for AI Agent Workflows**: Includes a pre-configured Agent Skill allowing AI agents to command and inspect Unity without GUI dependencies or slow batchmode startups.
 - 🎨 **Beautiful Compiler Output**: Reformats Unity logs and prints compiler warnings and errors in a clean, `dotnet build` format with ANSI colors (warnings in yellow, errors in red).
 - 🧪 **Flexible Test Runner**: Run EditMode or PlayMode tests (or both), filter specific tests by name (substring/regex), or target a specific test category. Failed tests are printed in a clean `dotnet test` format.
-- ⚙️ **Parameter-Aware Method Execution**: Execute arbitrary static methods in both online and offline modes, supporting automatic primitive type parsing and JSON deserialization.
+- ⚙️ **Parameter-Aware Method Execution**: Execute arbitrary static methods in the running Editor, supporting automatic primitive type parsing and JSON deserialization.
 - 🔌 **Conflict-Free Ports**: Avoids port conflicts by dynamically binding to a free loopback port on startup and writing it to `Temp/unity_cli_port.txt`.
 - 🪟 **PowerShell Socket Bridge**: Uses PowerShell socket communication internally on Windows to avoid the subshell socket inheritance issues common in Git Bash.
 - 📦 **UPM Package Support**: Clean package-based setup that doesn't clutter your project's main codebase.
@@ -114,6 +73,7 @@ Keep a background Unity instance warm to execute tests and methods in sub-second
 
 ```bash
 # Start a background Unity instance in headless batchmode
+# (If already starting or running, it blocks and waits until it is ready)
 ./unitycli.sh start batchmode
 
 # Start a background Unity instance in interactive mode (opens Unity Editor GUI)
@@ -122,15 +82,12 @@ Keep a background Unity instance warm to execute tests and methods in sub-second
 # Check if the background Unity instance is running and reachable
 ./unitycli.sh status
 
-# Block and wait until the background Unity instance is fully loaded and ready
-./unitycli.sh wait-ready
-
 # Safely stop the background Unity instance (falls back to process kill if needed)
 ./unitycli.sh stop
 ```
 
 ### Core Operations
-If Unity is not running, these commands will automatically fall back to launching batchmode Unity (Offline Mode):
+If Unity is not running, these commands will automatically start a background Unity instance in batchmode first before proceeding with the execution:
 
 ```bash
 # Trigger AssetDatabase.Refresh() and print compilation diagnostics
@@ -177,13 +134,13 @@ Overloaded static methods are resolved automatically by matching the number of a
 ### Return Value Serialization
 - **Primitives & Strings**: Printed directly to the console.
 - **Complex Types**: Automatically serialized and printed as a JSON payload using `JsonUtility.ToJson`.
-- **Void/Null**: Prints `Unity Response: SUCCESS` (in batchmode) or no extra payload.
+- **Void/Null**: Prints `Unity Response: SUCCESS` (via socket) or no extra payload.
 
 ---
 
 ## Integration Tests
 
-The repository includes a robust automated integration test suite [unitycli_integration_tests.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli_integration_tests.sh) to verify the CLI runner's correctness in both online and offline environments.
+The repository includes a robust automated integration test suite [unitycli_integration_tests.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli_integration_tests.sh) to verify the CLI runner's correctness when Unity is already running or when it is stopped.
 
 ### Running the tests
 Simply execute:
@@ -196,8 +153,8 @@ Simply execute:
 2. Runs a suite of test scenarios (such as compiling errors/warnings, skipped tests, executing successful/failing/missing methods) in **Online Mode** via TCP sockets.
 3. Compares the normalized console output against verified outputs located under `IntegrationTests/<TestCase>/output.online.verified.txt`.
 4. Gracefully terminates the running Unity Editor process.
-5. Re-runs the entire suite of scenarios in **Offline Mode** (batchmode).
-6. Compares batchmode console output against verified outputs under `IntegrationTests/<TestCase>/output.offline.verified.txt`.
+5. Re-runs scenarios in **Auto-Start Mode** (starting with Unity stopped) to verify that commands automatically trigger the background Unity startup sequence and execute correctly.
+6. Compares the console output against verified outputs under `IntegrationTests/<TestCase>/output.autostart.verified.txt`.
 7. Restores any modified test files to their original state upon completion.
 
 ### Bootstrapping Verified Outputs
@@ -205,4 +162,4 @@ If you modify the output format of `unitycli.sh` and need to update the expected
 ```bash
 BOOTSTRAP=true ./unitycli_integration_tests.sh
 ```
-This automatically overwrites all `output.online.verified.txt` and `output.offline.verified.txt` files with the actual output generated during the test run.
+This automatically overwrites all `output.online.verified.txt` and `output.autostart.verified.txt` files with the actual output generated during the test run.

@@ -1,6 +1,0 @@
-Unity is not running. Running in batchmode...
-Found Unity at: UNITY_EXE
-Running editmode tests in batchmode...
-Unity Response: SUCCESS
-All batchmode tests passed.
-EXIT_CODE: 0

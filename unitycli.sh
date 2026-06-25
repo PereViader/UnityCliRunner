@@ -30,7 +30,6 @@ show_usage() {
   echo "  start <mode>            Start a background Unity instance (mode: batchmode | interactive)"
   echo "  stop                    Stop the background Unity instance"
   echo "  status                  Check status of the background Unity instance"
-  echo "  wait-ready              Wait until the background Unity instance is ready"
   echo "  refresh                 Trigger AssetDatabase refresh and print compiler diagnostics"
   echo "  test [options]          Run tests (defaults to running both EditMode and PlayMode)"
   echo "    --playmode            Run PlayMode tests"
@@ -153,13 +152,6 @@ case "$SUBCOMMAND" in
     fi
     ;;
 
-  wait-ready)
-    if [ $# -gt 0 ]; then
-      echo "Error: wait-ready command does not accept extra arguments"
-      show_usage
-    fi
-    ;;
-
   -h|--help|help)
     show_usage
     ;;
@@ -218,6 +210,7 @@ is_unity_still_running() {
 
 # Detect if Unity is running for this specific project
 IS_RUNNING=false
+AUTO_STARTED=false
 if is_unity_still_running; then
   IS_RUNNING=true
 fi
@@ -304,6 +297,81 @@ send_socket_cmd() {
   fi
 
   return 1
+}
+
+# Function to start background Unity instance or wait for it to be ready
+start_background_unity() {
+  local mode="${1:-batchmode}"
+
+  local needs_launch=true
+  if is_unity_still_running; then
+    needs_launch=false
+    # Check if already ready
+    if [ -f "Temp/unity_cli_port.txt" ] && _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+      local resp
+      resp=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
+      if [ "$resp" = "READY" ] || [ "$resp" = "COMPILATION_ERROR" ]; then
+        echo "Unity is already running."
+        IS_RUNNING=true
+        return 0
+      fi
+    fi
+    echo "Unity is already running/starting. Skipping launch..."
+    echo -n "Waiting for Unity background instance to be ready..."
+  fi
+
+  if [ "$needs_launch" = true ]; then
+    UNITY_EXE=$(find_unity_path)
+    if [ -z "$UNITY_EXE" ]; then
+      echo "Error: Unity executable not found."
+      exit 1
+    fi
+
+    echo -n "Starting Unity background instance..."
+    mkdir -p Temp
+    
+    # Run Unity in background (batchmode or interactive)
+    local abs_proj_path
+    abs_proj_path="$(pwd)"
+    if [ "$mode" = "batchmode" ]; then
+      "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+    else
+      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+    fi
+  fi
+
+  local started=false
+  # Wait up to 90 seconds (45 iterations * 2s sleep)
+  for i in {1..45}; do
+    if [ -f "Temp/unity_cli_port.txt" ]; then
+      if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+        local response
+        response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
+        if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
+          echo ""
+          if [ "$needs_launch" = true ]; then
+            echo "Started successfully!"
+          else
+            echo "Unity is ready!"
+          fi
+          started=true
+          break
+        fi
+      fi
+    fi
+    echo -n "."
+    sleep 2
+  done
+
+  if [ "$started" = false ]; then
+    echo ""
+    echo "Failed to start background Unity instance or wait for it to be ready."
+    exit 1
+  fi
+  IS_RUNNING=true
+  if [ "$needs_launch" = true ]; then
+    AUTO_STARTED=true
+  fi
 }
 
 # Function to print failed tests in dotnet test format
@@ -494,171 +562,6 @@ parse_and_print_compilation_results() {
   fi
 }
 
-# Function to run tests in batchmode (Offline)
-run_offline_tests() {
-  local mode="$1"
-  local platform="EditMode"
-  if [ "$mode" = "playmode" ]; then
-    platform="PlayMode"
-  fi
-
-  echo "Running $mode tests in batchmode..."
-  
-  # Local relative paths for bash operations
-  local bash_results_file="Temp/test-results-${mode}.xml"
-  local bash_log_file="Temp/unity_batch_log.txt"
-
-  rm -f "$bash_results_file"
-  rm -f "$bash_log_file"
-
-  # Use absolute paths with forward slashes for Windows Unity.exe execution.
-  # This avoids any backslash-escaping issues when passing args from bash to Windows.
-  local abs_proj_path="$(pwd)"
-  local abs_results_file="$(pwd)/$bash_results_file"
-  local abs_log_file="$(pwd)/$bash_log_file"
-
-  mkdir -p Temp
-
-  local args=(-batchmode -runTests -projectPath "$abs_proj_path" -testPlatform "$platform" -testResults "$abs_results_file" -logFile "$abs_log_file")
-  if [ -n "$FILTER" ]; then
-    args+=(-testFilter "$FILTER")
-  fi
-  if [ -n "$CATEGORY" ]; then
-    args+=(-testCategory "$CATEGORY")
-  fi
-
-  # Run Unity
-  "$UNITY_EXE" "${args[@]}"
-  local unity_exit=$?
-
-  if [ $unity_exit -eq 0 ]; then
-    echo "Unity Response: SUCCESS"
-    return 0
-  else
-    echo "Unity Response: FAILURE"
-    if [ -f "$bash_log_file" ]; then
-      parse_and_print_compilation_results "$bash_log_file"
-      local parse_status=$?
-      if [ $parse_status -eq 0 ]; then
-        return 2
-      fi
-    fi
-
-    # Only print the Unity log tail if we don't have formatted test failures to print
-    # (e.g. if Unity crashed or failed to run tests at all).
-    if [ ! -f "Temp/unity_test_failures.txt" ] && [ -f "$bash_log_file" ]; then
-      echo "------------------------------------------------------------"
-      echo "Last 50 lines of Unity batch log ($bash_log_file):"
-      echo "------------------------------------------------------------"
-      tail -n 50 "$bash_log_file"
-      echo "------------------------------------------------------------"
-    fi
-
-    print_failed_tests
-    return 1
-  fi
-}
-
-# Function to run method in batchmode (Offline)
-run_offline_method() {
-  echo "Running method $EXECUTE_METHOD in batchmode..."
-  
-  local bash_log_file="Temp/unity_batch_log.txt"
-  rm -f "$bash_log_file"
-
-  local abs_proj_path="$(pwd)"
-  local abs_log_file="$(pwd)/$bash_log_file"
-
-  mkdir -p Temp
-
-  local args=(-batchmode -projectPath "$abs_proj_path" -logFile "$abs_log_file" -quit -executeMethod UnityCliRunner.UnityCliServer.ExecuteMethodFromCommandLine -executeMethodName "$EXECUTE_METHOD")
-  for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
-    args+=("$param")
-  done
-
-  "$UNITY_EXE" "${args[@]}"
-  local unity_exit=$?
-
-  if [ $unity_exit -eq 0 ]; then
-    local payload=""
-    if [ -f "Temp/unity_execute_result.json" ]; then
-      payload=$(powershell -NoProfile -Command "(Get-Content -Raw Temp/unity_execute_result.json | ConvertFrom-Json).payload" 2>/dev/null)
-      if [ $? -eq 0 ] && [ -n "$payload" ]; then
-        # Trim carriage returns and whitespace
-        payload=$(echo "$payload" | tr -d '\r')
-        payload="${payload#"${payload%%[![:space:]]*}"}"
-        payload="${payload%"${payload##*[![:space:]]}"}"
-      fi
-    fi
-
-    if [ -n "$payload" ]; then
-      echo "$payload"
-    else
-      echo "Unity Response: SUCCESS"
-    fi
-    return 0
-  else
-    echo "Unity Response: FAILURE"
-    if [ -f "$bash_log_file" ]; then
-      parse_and_print_compilation_results "$bash_log_file"
-      local parse_status=$?
-      if [ $parse_status -eq 0 ]; then
-        return 2
-      fi
-    fi
-
-    if [ -f "$bash_log_file" ]; then
-      echo "------------------------------------------------------------"
-      echo "Last 50 lines of Unity batch log ($bash_log_file):"
-      echo "------------------------------------------------------------"
-      tail -n 50 "$bash_log_file"
-      echo "------------------------------------------------------------"
-    fi
-
-    return 1
-  fi
-}
-
-# Function to trigger an AssetDatabase refresh in batchmode (Offline)
-run_offline_refresh() {
-  echo "Running AssetDatabase refresh in batchmode..."
-
-  local bash_log_file="Temp/unity_refresh_log.txt"
-  rm -f "$bash_log_file"
-
-  local abs_proj_path="$(pwd)"
-  local abs_log_file="$(pwd)/$bash_log_file"
-
-  mkdir -p Temp
-
-  local args=(-batchmode -projectPath "$abs_proj_path" -logFile "$abs_log_file" -executeMethod UnityCliRunner.UnityCliServer.RefreshFromCommandLine -quit)
-
-  "$UNITY_EXE" "${args[@]}"
-  local unity_exit=$?
-
-  local parse_status=1
-  if [ -f "$bash_log_file" ]; then
-    parse_and_print_compilation_results "$bash_log_file"
-    parse_status=$?
-  fi
-
-  if [ $unity_exit -eq 0 ] && [ $parse_status -ne 0 ]; then
-    echo "Unity Response: SUCCESS"
-    return 0
-  fi
-
-  echo "Unity Response: FAILURE"
-  if [ $parse_status -ne 0 ] && [ -f "$bash_log_file" ]; then
-    echo "------------------------------------------------------------"
-    echo "Last 50 lines of Unity refresh log ($bash_log_file):"
-    echo "------------------------------------------------------------"
-    tail -n 50 "$bash_log_file"
-    echo "------------------------------------------------------------"
-  fi
-
-  return 1
-}
-
 # --- Main Execution ---
 
 # Clean up stale compilation errors, results, and failures files, and execute files
@@ -666,51 +569,7 @@ rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_t
 rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "start" ]; then
-  if [ "$IS_RUNNING" = true ] || _=$(send_socket_cmd "PING" 2 2>/dev/null); then
-    echo "Unity is already running."
-    exit 0
-  fi
-
-  UNITY_EXE=$(find_unity_path)
-  if [ -z "$UNITY_EXE" ]; then
-    echo "Error: Unity executable not found."
-    exit 1
-  fi
-
-  echo -n "Starting Unity background instance..."
-  mkdir -p Temp
-  
-  # Run Unity in background (batchmode or interactive)
-  abs_proj_path="$(pwd)"
-  if [ "$BG_MODE" = "batchmode" ]; then
-    "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
-  else
-    "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
-  fi
-
-  started=false
-  # Wait up to 90 seconds (45 iterations * 2s sleep)
-  for i in {1..45}; do
-    if [ -f "Temp/unity_cli_port.txt" ]; then
-      if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
-        response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
-        if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
-          echo ""
-          echo "Started successfully!"
-          started=true
-          break
-        fi
-      fi
-    fi
-    echo -n "."
-    sleep 2
-  done
-
-  if [ "$started" = false ]; then
-    echo ""
-    echo "Failed to start background Unity instance."
-    exit 1
-  fi
+  start_background_unity "$BG_MODE"
   exit 0
 
 elif [ "$SUBCOMMAND" = "stop" ]; then
@@ -816,8 +675,16 @@ elif [ "$SUBCOMMAND" = "status" ]; then
   exit 0
 fi
 
+if [ "$IS_RUNNING" = false ]; then
+  if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "test" ] || [ "$SUBCOMMAND" = "executemethod" ]; then
+    start_background_unity batchmode
+  fi
+fi
+
 if [ "$IS_RUNNING" = true ]; then
-  echo "Detected running Unity instance (via UnityLockfile)."
+  if [ "$AUTO_STARTED" = false ]; then
+    echo "Detected running Unity instance (via UnityLockfile)."
+  fi
   
   # Step 1: Trigger AssetDatabase refresh
   echo -n "Triggering AssetDatabase refresh..."
@@ -922,70 +789,6 @@ if [ "$IS_RUNNING" = true ]; then
       exit 1
     else
       echo "All tests passed."
-      exit 0
-    fi
-  fi
-
-else
-  echo "Unity is not running. Running in batchmode..."
-  
-  UNITY_EXE=$(find_unity_path)
-  if [ -z "$UNITY_EXE" ]; then
-    echo "Error: Unity executable not found."
-    exit 1
-  fi
-  echo "Found Unity at: $UNITY_EXE"
-
-  if [ "$SUBCOMMAND" = "refresh" ]; then
-    run_offline_refresh
-    exit_status=$?
-    if [ $exit_status -ne 0 ]; then
-      echo "Batchmode refresh failed."
-      exit 1
-    fi
-
-    echo "Refresh completed."
-    exit 0
-  elif [ "$SUBCOMMAND" = "executemethod" ]; then
-    run_offline_method
-    exit_status=$?
-    if [ $exit_status -eq 2 ]; then
-      exit 1
-    elif [ $exit_status -ne 0 ]; then
-      echo "Batchmode method execution failed."
-      exit 1
-    else
-      echo "Batchmode method execution succeeded."
-      exit 0
-    fi
-  else
-    # SUBCOMMAND is test
-    TESTS_FAILED=false
-    if [ "$MODE_EDITMODE" = true ]; then
-      run_offline_tests "editmode"
-      exit_status=$?
-      if [ $exit_status -eq 2 ]; then
-        exit 1
-      elif [ $exit_status -ne 0 ]; then
-        TESTS_FAILED=true
-      fi
-    fi
-
-    if [ "$MODE_PLAYMODE" = true ]; then
-      run_offline_tests "playmode"
-      exit_status=$?
-      if [ $exit_status -eq 2 ]; then
-        exit 1
-      elif [ $exit_status -ne 0 ]; then
-        TESTS_FAILED=true
-      fi
-    fi
-
-    if [ "$TESTS_FAILED" = true ]; then
-      echo "Some batchmode tests failed."
-      exit 1
-    else
-      echo "All batchmode tests passed."
       exit 0
     fi
   fi
