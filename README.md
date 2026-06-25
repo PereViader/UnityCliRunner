@@ -13,8 +13,6 @@ A lightweight, high-performance tool that bridges external command line interfac
 - 🎨 **Beautiful Compiler Output**: Reformats Unity logs and prints compiler warnings and errors in a clean, `dotnet build` format with ANSI colors (warnings in yellow, errors in red).
 - 🧪 **Flexible Test Runner**: Run EditMode or PlayMode tests (or both), filter specific tests by name (substring/regex), or target a specific test category. Failed tests are printed in a clean `dotnet test` format.
 - ⚙️ **Parameter-Aware Method Execution**: Execute arbitrary static methods in the running Editor, supporting automatic primitive type parsing and JSON deserialization.
-- 🔌 **Conflict-Free Ports**: Avoids port conflicts by dynamically binding to a free loopback port on startup and writing it to `Temp/unity_cli_port.txt`.
-- 🪟 **PowerShell Socket Bridge**: Uses PowerShell socket communication internally on Windows to avoid the subshell socket inheritance issues common in Git Bash.
 - 📦 **UPM Package Support**: Clean package-based setup that doesn't clutter your project's main codebase.
 
 ---
@@ -23,9 +21,7 @@ A lightweight, high-performance tool that bridges external command line interfac
 
 ### 1. Install the Unity Package
 
-Choose one of the standard Unity Package Manager (UPM) options:
-
-#### Option A: Install via Git URL (Recommended)
+Install via Git URL (Recommended):
 1. Open your Unity project's `Packages/manifest.json`.
 2. Add the following entry to the `dependencies` block:
    ```json
@@ -33,12 +29,6 @@ Choose one of the standard Unity Package Manager (UPM) options:
    ```
 3. Alternatively, in the Unity Editor, go to **Window > Package Manager**, click the **+** button in the top-left corner, select **Add package from git URL...**, and paste:
    `https://github.com/PereViader/UnityCliRunner.git?path=Packages/com.pereviader.unityclirunner`
-
-#### Option B: Manual Installation
-Copy the `Packages/com.pereviader.unityclirunner` folder from this repository into your Unity project's `Assets` directory (e.g., `Assets/UnityCliRunner`).
-
-> [!IMPORTANT]
-> Because it contains editor-only scripts, ensure the folder structure containing `UnityCliServer.cs` and `UnityCliCompilationTracker.cs` is kept under an `Editor` folder (or referenced by an Editor-only assembly definition).
 
 ### 2. Add the Runner Script
 Copy [unitycli.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli.sh) from the root of this repository to the root directory of your Unity project.
