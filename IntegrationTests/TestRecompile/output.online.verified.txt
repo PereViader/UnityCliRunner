@@ -1,0 +1,7 @@
+Detected running Unity instance (via UnityLockfile).
+Triggering force recompilation...
+Done!
+Waiting for recompilation to finish...
+Unity is ready!
+Recompilation completed.
+EXIT_CODE: 0

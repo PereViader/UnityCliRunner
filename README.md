@@ -93,6 +93,9 @@ If Unity is not running, these commands will automatically start a background Un
 # Trigger AssetDatabase.Refresh() and print compilation diagnostics
 ./unitycli.sh refresh
 
+# Force a full C# recompilation (clean build cache) and print compiler diagnostics
+./unitycli.sh recompile
+
 # Run both EditMode and PlayMode tests
 ./unitycli.sh test
 

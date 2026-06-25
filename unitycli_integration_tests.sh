@@ -135,6 +135,8 @@ normalize_output() {
     -e 's|Waiting for tests to complete\.*$|Waiting for tests to complete...|g' \
     -e 's|Waiting for AssetDatabase refresh/compilation to finish\.*$|Waiting for AssetDatabase refresh/compilation to finish...|g' \
     -e 's|Triggering AssetDatabase refresh\.*$|Triggering AssetDatabase refresh...|g' \
+    -e 's|Waiting for recompilation to finish\.*$|Waiting for recompilation to finish...|g' \
+    -e 's|Triggering force recompilation\.*$|Triggering force recompilation...|g' \
     -e 's|Waiting for method execution to complete\.*$|Waiting for method execution to complete...|g' \
     -e 's|Connecting\.*$|Connecting...|g' \
     -e 's|Starting Unity background instance\.*$|Starting Unity background instance...|g' \
@@ -324,6 +326,9 @@ run_integration_case "TestFilterCategory" "test --editmode --category !LongRunni
 run_integration_case "TestBackgroundStatusOnline" "status" "online"
 run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "online"
 
+# recompile tests (online)
+run_integration_case "TestRecompile" "recompile" "online"
+
 # Close Unity
 run_teardown "online"
 ./unitycli.sh stop
@@ -354,6 +359,12 @@ run_integration_case "TestEverythingPasses" "test --editmode" "autostart"
 run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "autostart"
 
 # 8. Stop Unity.
+./unitycli.sh stop
+
+# 9. Run recompile when stopped (should auto-start and recompile).
+run_integration_case "TestRecompile" "recompile" "autostart"
+
+# 10. Stop Unity.
 ./unitycli.sh stop
 
 echo "============================================="

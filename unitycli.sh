@@ -31,6 +31,7 @@ show_usage() {
   echo "  stop                    Stop the background Unity instance"
   echo "  status                  Check status of the background Unity instance"
   echo "  refresh                 Trigger AssetDatabase refresh and print compiler diagnostics"
+  echo "  recompile               Force a full C# recompilation and print compiler diagnostics"
   echo "  test [options]          Run tests (defaults to running both EditMode and PlayMode)"
   echo "    --playmode            Run PlayMode tests"
   echo "    --editmode            Run EditMode tests"
@@ -54,6 +55,13 @@ case "$SUBCOMMAND" in
   refresh)
     if [ $# -gt 0 ]; then
       echo "Error: refresh does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
+  recompile)
+    if [ $# -gt 0 ]; then
+      echo "Error: recompile does not accept extra arguments"
       show_usage
     fi
     ;;
@@ -676,7 +684,7 @@ elif [ "$SUBCOMMAND" = "status" ]; then
 fi
 
 if [ "$IS_RUNNING" = false ]; then
-  if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "test" ] || [ "$SUBCOMMAND" = "executemethod" ]; then
+  if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "recompile" ] || [ "$SUBCOMMAND" = "test" ] || [ "$SUBCOMMAND" = "executemethod" ]; then
     start_background_unity batchmode
   fi
 fi
@@ -686,31 +694,55 @@ if [ "$IS_RUNNING" = true ]; then
     echo "Detected running Unity instance (via UnityLockfile)."
   fi
   
-  # Step 1: Trigger AssetDatabase refresh
-  echo -n "Triggering AssetDatabase refresh..."
-  while true; do
-    if _=$(send_socket_cmd "REFRESH" 2>/dev/null); then
-      echo ""
-      echo "Done!"
-      break
-    fi
-    
-    # If connection failed, check if Unity is still running.
-    # If it's not running, we should abort instead of looping forever.
-    if ! is_unity_still_running; then
-      echo ""
-      echo "Error: Unity background process exited before asset refresh could be triggered."
-      exit 1
-    fi
-    
-    echo -n "."
-    sleep 1
-  done
+  # Step 1: Trigger AssetDatabase refresh or recompile
+  if [ "$SUBCOMMAND" = "recompile" ]; then
+    echo -n "Triggering force recompilation..."
+    while true; do
+      if _=$(send_socket_cmd "RECOMPILE" 2>/dev/null); then
+        echo ""
+        echo "Done!"
+        break
+      fi
+      
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited before recompilation could be triggered."
+        exit 1
+      fi
+      
+      echo -n "."
+      sleep 1
+    done
+  else
+    echo -n "Triggering AssetDatabase refresh..."
+    while true; do
+      if _=$(send_socket_cmd "REFRESH" 2>/dev/null); then
+        echo ""
+        echo "Done!"
+        break
+      fi
+      
+      # If connection failed, check if Unity is still running.
+      # If it's not running, we should abort instead of looping forever.
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited before asset refresh could be triggered."
+        exit 1
+      fi
+      
+      echo -n "."
+      sleep 1
+    done
+  fi
 fi
 
 if [ "$IS_RUNNING" = true ]; then
-  # Step 2: Poll refresh until READY
-  echo -n "Waiting for AssetDatabase refresh/compilation to finish..."
+  # Step 2: Poll refresh/recompile until READY
+  if [ "$SUBCOMMAND" = "recompile" ]; then
+    echo -n "Waiting for recompilation to finish..."
+  else
+    echo -n "Waiting for AssetDatabase refresh/compilation to finish..."
+  fi
   while true; do
     # Sleep 1s
     sleep 1
@@ -721,7 +753,11 @@ if [ "$IS_RUNNING" = true ]; then
     if [ $? -ne 0 ] || [ -z "$response" ]; then
       if ! is_unity_still_running; then
         echo ""
-        echo "Error: Unity background process exited during asset refresh/compilation."
+        if [ "$SUBCOMMAND" = "recompile" ]; then
+          echo "Error: Unity background process exited during recompilation."
+        else
+          echo "Error: Unity background process exited during asset refresh/compilation."
+        fi
         exit 1
       fi
       # Connection failure (compiling or domain reload in progress)
@@ -754,8 +790,12 @@ if [ "$IS_RUNNING" = true ]; then
   done
 
   # Step 3: Action Execution
-  if [ "$SUBCOMMAND" = "refresh" ]; then
-    echo "Refresh completed."
+  if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "recompile" ]; then
+    if [ "$SUBCOMMAND" = "recompile" ]; then
+      echo "Recompilation completed."
+    else
+      echo "Refresh completed."
+    fi
     exit 0
   elif [ "$SUBCOMMAND" = "executemethod" ]; then
     run_online_method

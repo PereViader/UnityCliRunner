@@ -30,6 +30,7 @@ namespace UnityCliRunner
         private static volatile bool s_IsUpdating;
         private static volatile bool s_RefreshPending;
         private static volatile bool s_ScriptCompilationFailed;
+        private static volatile bool s_CompilationRequested;
 
         internal static bool HasActiveTestFilter { get; set; }
 
@@ -129,6 +130,11 @@ namespace UnityCliRunner
             s_IsCompiling = EditorApplication.isCompiling;
             s_IsUpdating = EditorApplication.isUpdating;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
+
+            if (s_CompilationRequested && s_IsCompiling)
+            {
+                s_CompilationRequested = false;
+            }
 
             while(MainThreadQueue.TryDequeue(out var action))
             {
@@ -257,6 +263,26 @@ namespace UnityCliRunner
                             }
                         });
                         writer.WriteLine("REFRESHING");
+                        break;
+
+                    case "RECOMPILE":
+                        s_RefreshPending = true;
+                        s_CompilationRequested = true;
+                        MainThreadQueue.Enqueue(() =>
+                        {
+                            try
+                            {
+                                Debug.Log("UnityCliRunner: Triggering force recompilation via CompilationPipeline.RequestScriptCompilation()");
+                                UnityCliCompilationTracker.DeleteDiagnosticsFile();
+                                UnityCliCompilationTracker.ClearActiveEntries();
+                                UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(UnityEditor.Compilation.RequestScriptCompilationOptions.CleanBuildCache);
+                            }
+                            finally
+                            {
+                                s_RefreshPending = false;
+                            }
+                        });
+                        writer.WriteLine("RECOMPILING");
                         break;
 
                     case "EXIT":
@@ -545,9 +571,9 @@ namespace UnityCliRunner
             s_IsUpdating = EditorApplication.isUpdating;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
 
-            if(s_RefreshPending)
+            if(s_RefreshPending || s_CompilationRequested)
             {
-                return "UPDATING";
+                return "COMPILING";
             }
 
             if(s_IsCompiling)

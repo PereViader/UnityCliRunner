@@ -1,6 +1,6 @@
 ---
 name: unity-cli
-description: Use it to run Unity EditMode or PlayMode tests, trigger a Unity AssetDatabase refresh and recompilation, inspect Unity compiler warnings or errors printed to the terminal, debug failed Unity tests, keep a background Unity instance warm for faster repeated runs, check/stop/wait for that background instance, or execute a Unity static method with optional primitive or JSON object parameters and terminal-returned results.
+description: Use it to run Unity EditMode or PlayMode tests, trigger a Unity AssetDatabase refresh and recompilation, force a full C# recompilation, inspect Unity compiler warnings or errors printed to the terminal, debug failed Unity tests, keep a background Unity instance warm for faster repeated runs, check/stop/wait for that background instance, or execute a Unity static method with optional primitive or JSON object parameters and terminal-returned results.
 ---
 
 # Unity CLI
@@ -33,6 +33,16 @@ Treat `refresh` as a compile probe:
 - Compiler warnings are printed and the command succeeds.
 - Compiler errors are printed and the command exits non-zero.
 - If Unity fails before compiler diagnostics are available, the wrapper prints the tail of the Unity refresh log.
+
+## Recompile Workflow
+
+Use `recompile` when you want to force a full C# recompilation (clearing the build cache) to reliably output and fetch all compiler warnings and errors from a clean state.
+
+```bash
+bash ./unitycli.sh recompile
+```
+
+This clears the compiler cache and forces Unity to rebuild all script assemblies from scratch.
 
 ## Test Workflow
 
