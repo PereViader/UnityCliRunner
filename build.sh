@@ -22,6 +22,28 @@ echo "Copying package contents..."
 # cp -R with trailing '/.' copies all contents of source, including hidden files/directories
 cp -R "$PACKAGE_SRC/." "$BUILD_DIR/"
 
+# 2.5. Update version in package.json from .env.shared
+if [ -f ".env.shared" ]; then
+  VERSION_VAL=$(source .env.shared && echo "$VERSION")
+  echo "Updating version in build/package.json to $VERSION_VAL..."
+  if jq --version &> /dev/null; then
+    jq --arg ver "$VERSION_VAL" '.version = $ver' "$BUILD_DIR/package.json" > "$BUILD_DIR/package.json.tmp" && mv "$BUILD_DIR/package.json.tmp" "$BUILD_DIR/package.json"
+  elif node --version &> /dev/null; then
+    node -e "const fs = require('fs'); const p = '$BUILD_DIR/package.json'; const d = JSON.parse(fs.readFileSync(p, 'utf8')); d.version = '$VERSION_VAL'; fs.writeFileSync(p, JSON.stringify(d, null, 2) + '\n', 'utf8');"
+  elif python3 --version &> /dev/null; then
+    python3 -c "import json; p='$BUILD_DIR/package.json'; d=json.load(open(p)); d['version']='$VERSION_VAL'; json.dump(d, open(p, 'w'), indent=2)"
+  elif python --version &> /dev/null; then
+    python -c "import json; p='$BUILD_DIR/package.json'; d=json.load(open(p)); d['version']='$VERSION_VAL'; json.dump(d, open(p, 'w'), indent=2)"
+  else
+    echo "Error: No jq, node, python3, or python found to update package.json version"
+    exit 1
+  fi
+else
+  echo "Error: .env.shared not found!"
+  exit 1
+fi
+
+
 # 3. Copy unitycli.sh into the Templates~ folder, overwriting the dummy placeholder
 echo "Copying actual unitycli.sh to build templates..."
 cp "unitycli.sh" "$BUILD_DIR/Templates~/unitycli.sh"

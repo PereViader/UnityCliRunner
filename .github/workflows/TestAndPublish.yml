@@ -1,0 +1,104 @@
+name: Test and publish
+on: 
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  TestAndPublish:
+    permissions:
+      contents: write
+
+    runs-on: ubuntu-latest
+    
+    # Documentation on how to get these values
+    # https://docs.unity3d.com/6000.4/Documentation/Manual/upm-cli-install.html
+    env:
+      UPM_SERVICE_ACCOUNT_KEY_ID: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_ID }}
+      UPM_SERVICE_ACCOUNT_KEY_SECRET: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_SECRET }}
+      UPM_ORG_ID: ${{ secrets.UPM_ORG_ID }}
+      DIST_DIR: /tmp/signed-upm-dist
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: get-version
+        run: |
+          source .env.shared
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" == *preview* ]]; then
+            echo "isPrerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "isPrerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if release exists
+        id: release-exists
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          release_exists=$(gh release view "v${{ steps.get-version.outputs.version }}" &> /dev/null && echo "true" || echo "false")
+          echo "Release exists $release_exists"
+          echo "exists=$release_exists" >> $GITHUB_OUTPUT
+
+      - name: Get changelog
+        id: get-changelog
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        run: |
+          payload=$(git log $(git describe --tags --abbrev=0 main)..main --pretty=format:"%s%n%b")
+          echo "changelog<<EOF"$'\n'"$payload"$'\n'EOF >> "$GITHUB_OUTPUT"
+
+      - name: Run build script
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        run: |
+          bash ./build.sh
+
+      - name: Install Unity UPM CLI
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        run: |
+          curl -fsSL https://cdn.packages.unity.com/upm-cli/install.sh -o install.sh
+          bash install.sh
+          echo "$HOME/.upm/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Unity UPM CLI
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        run: upm --help
+
+      - name: Sign and Pack Packages
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        run: |
+          rm -f build/*.tgz
+          mkdir -p "$DIST_DIR"
+          upm pack ./build --organization-id "$UPM_ORG_ID" --destination "$DIST_DIR"
+
+      - name: Print signed package info
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        run: |
+          shopt -s nullglob
+          archives=("$DIST_DIR"/*.tgz "$DIST_DIR"/*.tar.gz)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            printf 'Expected exactly one signed package archive, found %s\n' "${#archives[@]}" >&2
+            exit 1
+          fi
+
+          for archive in "${archives[@]}"; do
+            printf 'Checking Archive: %s\n' "$(basename "$archive")"
+            tar -tzf "$archive" | grep -qx 'package/package.json'
+            tar -tzf "$archive" | grep -qx 'package/.attestation.p7m'
+            tar -xOzf "$archive" package/package.json | jq '{name, version}'
+          done
+
+      - name: Create github release
+        if: ${{ steps.release-exists.outputs.exists == 'false' }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ steps.get-version.outputs.version }}
+          name: UnityCliRunner v${{ steps.get-version.outputs.version }}
+          body: ${{ steps.get-changelog.outputs.changelog }}
+          prerelease: ${{ steps.get-version.outputs.isPrerelease }}
+          files: |
+            /tmp/signed-upm-dist/*.tgz
+            /tmp/signed-upm-dist/*.tar.gz
