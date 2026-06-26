@@ -25,6 +25,7 @@ BG_MODE=""
 
 # Helper for usage
 show_usage() {
+  local exit_code="${1:-1}"
   echo "Usage: $0 <command> [options]"
   echo "Commands:"
   echo "  start <mode>            Start a background Unity instance (mode: batchmode | interactive)"
@@ -39,9 +40,8 @@ show_usage() {
   echo "    --category <category> Filter tests by category"
   echo "  executemethod <method> [args...] Execute a custom static method (optionally with parameters)"
   echo "                          (e.g., Namespace.Class.Method 4 3 \"{\\\"Value\\\":4}\")"
-
   echo "  -h, --help              Show this help message"
-  exit 1
+  exit "$exit_code"
 }
 
 if [ $# -eq 0 ]; then
@@ -102,7 +102,7 @@ case "$SUBCOMMAND" in
           shift
           ;;
         -h|--help)
-          show_usage
+          show_usage 0
           ;;
         *)
           echo "Unknown option for test subcommand: $1"
@@ -161,7 +161,7 @@ case "$SUBCOMMAND" in
     ;;
 
   -h|--help|help)
-    show_usage
+    show_usage 0
     ;;
 
   *)
