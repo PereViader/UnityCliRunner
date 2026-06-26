@@ -2,7 +2,7 @@
   "name": "com.pereviader.unityclirunner",
   "version": "1.0.0",
   "displayName": "Unity CLI Runner",
-  "description": "A lightweight tool to compile Unity code and run tests from the command line, enabling fast iteration cycles for both local developers and automated/AI workflows.",
+  "description": "A lightweight, high-performance tool that bridges external command line interfaces (and AI coding agents) with the Unity Editor. It enables sub-second compilation loops, clean test execution, and static method invocations by communicating with a running Unity Editor (or headless background instance) via loopback TCP sockets.",
   "unity": "2021.3",
   "author": {
     "name": "Pere Viader"
