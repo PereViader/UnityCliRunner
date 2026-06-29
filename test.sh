@@ -265,7 +265,7 @@ abs_proj_path="$(pwd)"
 
 # Check if Unity is running
 IS_RUNNING=false
-if ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
+if bash ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
   IS_RUNNING=true
 fi
 
@@ -277,7 +277,7 @@ fi
 
 run_setup "online"
 if [ "$IS_RUNNING" = false ]; then
-  ./unitycli.sh start batchmode
+  bash ./unitycli.sh start batchmode
 else
   echo "Unity is already running."
 fi
@@ -298,7 +298,7 @@ run_integration_case() {
   local cmd_args="$2"
   local mode="$3" # "online" or "offline"
 
-  echo "--- Running test case: $tc ($mode) with command: ./unitycli.sh $cmd_args ---"
+  echo "--- Running test case: $tc ($mode) with command: bash ./unitycli.sh $cmd_args ---"
   
   if [ -f "IntegrationTests/$tc/DummyTest.cs" ]; then
     cp "IntegrationTests/$tc/DummyTest.cs" "$DUMMY_TEST_PATH"
@@ -312,7 +312,7 @@ run_integration_case() {
   local norm_out="IntegrationTests/Temp/norm_out_${mode}.txt"
   rm -f "$raw_out" "$norm_out"
   
-  ./unitycli.sh $cmd_args > "$raw_out" 2>&1
+  bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1
   local exit_code=$?
   
   echo "EXIT_CODE: $exit_code" >> "$raw_out"
@@ -377,7 +377,7 @@ run_integration_case "TestRecompile" "recompile" "online"
 
 # Close Unity
 run_teardown "online"
-./unitycli.sh stop
+bash ./unitycli.sh stop
 
 echo "============================================="
 echo "PHASE 2: Running integration tests for AUTO-START"
@@ -393,25 +393,25 @@ run_integration_case "TestBackgroundStart" "start batchmode" "autostart"
 run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
 
 # 4. Stop Unity.
-./unitycli.sh stop
+bash ./unitycli.sh stop
 
 # 5. Run test when stopped (should auto-start and run test).
 run_integration_case "TestEverythingPasses" "test --editmode" "autostart"
 
 # 6. Stop Unity.
-./unitycli.sh stop
+bash ./unitycli.sh stop
 
 # 7. Run executemethod when stopped (should auto-start and execute).
 run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "autostart"
 
 # 8. Stop Unity.
-./unitycli.sh stop
+bash ./unitycli.sh stop
 
 # 9. Run recompile when stopped (should auto-start and recompile).
 run_integration_case "TestRecompile" "recompile" "autostart"
 
 # 10. Stop Unity.
-./unitycli.sh stop
+bash ./unitycli.sh stop
 
 echo "============================================="
 if [ $FAILED_TESTS -eq 0 ]; then
