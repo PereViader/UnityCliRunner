@@ -24,17 +24,13 @@ A lightweight, high-performance tool that bridges external command line interfac
 
 ### 1. Install the Unity Package
 
-Install via Git URL (Recommended):
-1. Open your Unity project's `Packages/manifest.json`.
-2. Add the following entry to the `dependencies` block:
-   ```json
-   "com.pereviader.unityclirunner": "https://github.com/PereViader/UnityCliRunner.git?path=Packages/com.pereviader.unityclirunner"
-   ```
-3. Alternatively, in the Unity Editor, go to **Window > Package Manager**, click the **+** button in the top-left corner, select **Add package from git URL...**, and paste:
-   `https://github.com/PereViader/UnityCliRunner.git?path=Packages/com.pereviader.unityclirunner`
+Follow the installation instructions on [OpenUPM](https://openupm.com/packages/com.pereviader.unityclirunner/#modal-manualinstallation).
 
-### 2. Add the Runner Script
-Copy [unitycli.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli.sh) from the root of this repository to the root directory of your Unity project.
+### 2. Install unitycli.sh and Agent Skill
+
+In the Unity Editor, run the installers from the top menu dropdown:
+- **Tools > UnityCliRunner > InstallBashScript** to copy the runner script (`unitycli.sh`) to the root of your Unity project.
+- **Tools > UnityCliRunner > InstallSkill** to copy the `.agents/skills/unity-cli` folder to the root of your project (required if you use agentic AI tools like **Antigravity**, **Gemini**, **Cline**, or **Roo Code**).
 
 ### 3. Requirements
 - A shell environment capable of running Bash (e.g., Git Bash on Windows, macOS/Linux terminal).
@@ -53,7 +49,7 @@ If you use agentic AI tools (like **Antigravity**, **Gemini**, **Cline**, or **R
 - **Diagnostics Formatting**: Compilation errors and test failures are formatted in standard compiler diagnostics patterns, which agents can easily read and fix autonomously.
 
 ### How to Install for Agents
-Simply place the `.agents/` folder at the root of your project. Agent frameworks that support automatic skill discovery (like those scanning `.agents/` or using custom skill directories) will automatically index the `unity-cli` skill.
+In the Unity Editor, go to **Tools > UnityCliRunner > InstallSkill** to automatically install the `.agents/` skill folder to your project root. Agent frameworks that support automatic skill discovery (like those scanning `.agents/` or using custom skill directories) will automatically index the `unity-cli` skill.
 
 ---
 
