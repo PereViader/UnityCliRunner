@@ -132,12 +132,12 @@ Overloaded static methods are resolved automatically by matching the number of a
 
 ## Integration Tests
 
-The repository includes a robust automated integration test suite [unitycli_integration_tests.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli_integration_tests.sh) to verify the CLI runner's correctness when Unity is already running or when it is stopped.
+The repository includes a robust automated integration test suite [test.sh](file:///c:/Users/perev/Code/UnityCliRunner/test.sh) to verify the CLI runner's correctness when Unity is already running or when it is stopped.
 
 ### Running the tests
 Simply execute:
 ```bash
-./unitycli_integration_tests.sh
+./test.sh
 ```
 
 ### Test Suite Execution Flow:
@@ -152,6 +152,6 @@ Simply execute:
 ### Bootstrapping Verified Outputs
 If you modify the output format of `unitycli.sh` and need to update the expected baselines, run the integration tests with the `BOOTSTRAP=true` environment variable:
 ```bash
-BOOTSTRAP=true ./unitycli_integration_tests.sh
+BOOTSTRAP=true ./test.sh
 ```
 This automatically overwrites all `output.online.verified.txt` and `output.autostart.verified.txt` files with the actual output generated during the test run.

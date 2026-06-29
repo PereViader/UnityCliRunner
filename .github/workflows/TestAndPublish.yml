@@ -6,20 +6,12 @@ on:
       - main
 
 jobs:
-  TestAndPublish:
-    permissions:
-      contents: write
-
+  CheckRelease:
     runs-on: ubuntu-latest
-    
-    # Documentation on how to get these values
-    # https://docs.unity3d.com/6000.4/Documentation/Manual/upm-cli-install.html
-    env:
-      UPM_SERVICE_ACCOUNT_KEY_ID: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_ID }}
-      UPM_SERVICE_ACCOUNT_KEY_SECRET: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_SECRET }}
-      UPM_ORG_ID: ${{ secrets.UPM_ORG_ID }}
-      DIST_DIR: /tmp/signed-upm-dist
-
+    outputs:
+      exists: ${{ steps.release-exists.outputs.exists }}
+      version: ${{ steps.get-version.outputs.version }}
+      isPrerelease: ${{ steps.get-version.outputs.isPrerelease }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,38 +36,74 @@ jobs:
           echo "Release exists $release_exists"
           echo "exists=$release_exists" >> $GITHUB_OUTPUT
 
+  Test:
+    needs: CheckRelease
+    if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
+    runs-on: ubuntu-latest
+    container:
+      image: unityci/editor:ubuntu-6000.0.77f1-base-3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Activate Unity License
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        run: |
+          mkdir -p /root/.local/share/unity3d/Unity
+          echo "$UNITY_LICENSE" > /root/.local/share/unity3d/Unity/Unity_lic.ulf
+
+      - name: Run tests
+        run: |
+          bash ./test.sh
+
+  Publish:
+    needs: [CheckRelease, Test]
+    if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    
+    # Documentation on how to get these values
+    # https://docs.unity3d.com/6000.4/Documentation/Manual/upm-cli-install.html
+    env:
+      UPM_SERVICE_ACCOUNT_KEY_ID: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_ID }}
+      UPM_SERVICE_ACCOUNT_KEY_SECRET: ${{ secrets.UPM_SERVICE_ACCOUNT_KEY_SECRET }}
+      UPM_ORG_ID: ${{ secrets.UPM_ORG_ID }}
+      DIST_DIR: /tmp/signed-upm-dist
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Get changelog
         id: get-changelog
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         run: |
           payload=$(git log $(git describe --tags --abbrev=0 main)..main --pretty=format:"%s%n%b")
           echo "changelog<<EOF"$'\n'"$payload"$'\n'EOF >> "$GITHUB_OUTPUT"
 
       - name: Run build script
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         run: |
           bash ./build.sh
 
       - name: Install Unity UPM CLI
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         run: |
           curl -fsSL https://cdn.packages.unity.com/upm-cli/install.sh -o install.sh
           bash install.sh
           echo "$HOME/.upm/bin" >> "$GITHUB_PATH"
 
       - name: Verify Unity UPM CLI
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         run: upm --help
 
       - name: Sign and Pack Packages
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         run: |
           rm -f build/*.tgz
           mkdir -p "$DIST_DIR"
           upm pack ./build --organization-id "$UPM_ORG_ID" --destination "$DIST_DIR"
 
       - name: Print signed package info
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         run: |
           shopt -s nullglob
           archives=("$DIST_DIR"/*.tgz "$DIST_DIR"/*.tar.gz)
@@ -92,13 +120,12 @@ jobs:
           done
 
       - name: Create github release
-        if: ${{ steps.release-exists.outputs.exists == 'false' }}
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ steps.get-version.outputs.version }}
-          name: UnityCliRunner v${{ steps.get-version.outputs.version }}
+          tag_name: v${{ needs.CheckRelease.outputs.version }}
+          name: UnityCliRunner v${{ needs.CheckRelease.outputs.version }}
           body: ${{ steps.get-changelog.outputs.changelog }}
-          prerelease: ${{ steps.get-version.outputs.isPrerelease }}
+          prerelease: ${{ needs.CheckRelease.outputs.isPrerelease }}
           files: |
             /tmp/signed-upm-dist/*.tgz
             /tmp/signed-upm-dist/*.tar.gz

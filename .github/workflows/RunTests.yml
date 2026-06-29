@@ -1,0 +1,25 @@
+name: Run tests manually
+on:
+  workflow_dispatch:
+
+jobs:
+  Test:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    container:
+      image: unityci/editor:ubuntu-6000.0.77f1-base-3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Activate Unity License
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        run: |
+          mkdir -p /root/.local/share/unity3d/Unity
+          echo "$UNITY_LICENSE" > /root/.local/share/unity3d/Unity/Unity_lic.ulf
+
+      - name: Run tests
+        run: |
+          bash ./test.sh
