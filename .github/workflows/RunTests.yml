@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: unityci/editor:ubuntu-6000.0.77f1-base-3
+    env:
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
     steps:
       - uses: actions/checkout@v6
         with:
