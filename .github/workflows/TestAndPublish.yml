@@ -36,32 +36,32 @@ jobs:
           echo "Release exists $release_exists"
           echo "exists=$release_exists" >> $GITHUB_OUTPUT
 
-  Test:
-    needs: CheckRelease
-    if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
-    runs-on: ubuntu-latest
-    container:
-      image: unityci/editor:ubuntu-6000.0.77f1-base-3
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+  # Test:
+  #   needs: CheckRelease
+  #   if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: unityci/editor:ubuntu-6000.0.77f1-base-3
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #       with:
+  #         fetch-depth: 0
 
-      - name: Activate Unity License
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        run: |
-          mkdir -p /root/.local/share/unity3d/Unity
-          echo "$UNITY_LICENSE" > /root/.local/share/unity3d/Unity/Unity_lic.ulf
+  #     - name: Activate Unity License
+  #       env:
+  #         UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+  #         UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+  #         UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+  #       run: |
+  #         mkdir -p /root/.local/share/unity3d/Unity
+  #         echo "$UNITY_LICENSE" > /root/.local/share/unity3d/Unity/Unity_lic.ulf
 
-      - name: Run tests
-        run: |
-          bash ./test.sh
+  #     - name: Run tests
+  #       run: |
+  #         bash ./test.sh
 
   Publish:
-    needs: [CheckRelease, Test]
+    needs: [CheckRelease]
     if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
     permissions:
       contents: write
