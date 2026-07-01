@@ -50,7 +50,8 @@ find_unity_path() {
   fi
 
   if [ -z "$version" ]; then
-    version="6000.0.77f1"
+    echo "Error: Could not detect Unity version from ProjectSettings/ProjectVersion.txt" >&2
+    return 1
   fi
 
   local is_windows=false
@@ -62,20 +63,14 @@ find_unity_path() {
   if [ "$is_windows" = true ]; then
     paths=(
       "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
-      "C:/Program Files/Unity/Hub/Editor/6000.0.77f1/Editor/Unity.exe"
-      "C:/Program Files/Unity/Editor/Unity.exe"
     )
   elif [[ "$(uname)" == "Darwin" ]]; then
     paths=(
       "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
-      "/Applications/Unity/Hub/Editor/6000.0.77f1/Unity.app/Contents/MacOS/Unity"
-      "/Applications/Unity/Unity.app/Contents/MacOS/Unity"
     )
   else
     paths=(
       "$HOME/Unity/Hub/Editor/$version/Editor/Unity"
-      "$HOME/Unity/Hub/Editor/6000.0.77f1/Editor/Unity"
-      "/opt/unity/Editor/Unity"
     )
   fi
 
