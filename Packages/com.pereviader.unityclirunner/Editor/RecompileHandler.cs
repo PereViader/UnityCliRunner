@@ -8,23 +8,21 @@ namespace UnityCliRunner
     {
         public void Handle(string payload, StreamWriter writer)
         {
-            UnityCliServer.RefreshPending = true;
-            UnityCliServer.CompilationRequested = true;
-            UnityCliServer.EnqueueToMainThread(() =>
-            {
-                try
-                {
-                    Debug.Log("UnityCliRunner: Triggering force recompilation via CompilationPipeline.RequestScriptCompilation()");
-                    UnityCliCompilationTracker.DeleteDiagnosticsFile();
-                    UnityCliCompilationTracker.ClearActiveEntries();
-                    UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(UnityEditor.Compilation.RequestScriptCompilationOptions.CleanBuildCache);
-                }
-                finally
-                {
-                    UnityCliServer.RefreshPending = false;
-                }
-            });
             writer.WriteLine("RECOMPILING");
+
+            UnityCliCompilationTracker.RefreshPending = true;
+            UnityCliCompilationTracker.CompilationRequested = true;
+            try
+            {
+                Debug.Log("UnityCliRunner: Triggering force recompilation via CompilationPipeline.RequestScriptCompilation()");
+                UnityCliCompilationTracker.DeleteDiagnosticsFile();
+                UnityCliCompilationTracker.ClearActiveEntries();
+                UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(UnityEditor.Compilation.RequestScriptCompilationOptions.CleanBuildCache);
+            }
+            finally
+            {
+                UnityCliCompilationTracker.RefreshPending = false;
+            }
         }
     }
 }

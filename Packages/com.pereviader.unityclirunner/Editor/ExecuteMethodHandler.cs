@@ -11,7 +11,7 @@ namespace UnityCliRunner
     {
         public void Handle(string payload, StreamWriter writer)
         {
-            if (UnityCliServer.ScriptCompilationFailed)
+            if (UnityCliCompilationTracker.ScriptCompilationFailed)
             {
                 writer.WriteLine("FAILURE Compilation failed");
                 return;
@@ -73,12 +73,10 @@ namespace UnityCliRunner
 
             WriteExecuteRunningState();
 
-            UnityCliServer.EnqueueToMainThread(() =>
-            {
-                ExecuteMethod(targetMethod, methodParamsList.ToArray());
-            });
-
             writer.WriteLine("RUNNING");
+            writer.Flush();
+
+            ExecuteMethod(targetMethod, methodParamsList.ToArray());
         }
 
         public static void WriteExecuteRunningState()

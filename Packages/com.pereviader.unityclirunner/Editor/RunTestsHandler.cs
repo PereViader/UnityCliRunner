@@ -11,10 +11,11 @@ namespace UnityCliRunner
     internal class RunTestsHandler : ICommandHandler
     {
         private static MyTestCallbacks s_Callbacks;
+        internal static bool HasActiveTestFilter { get; set; }
 
         public static void RegisterCallbacks()
         {
-            if (UnityCliServer.IsAssetImportWorkerProcess())
+            if (CommandHelper.IsAssetImportWorkerProcess())
             {
                 return;
             }
@@ -35,7 +36,7 @@ namespace UnityCliRunner
 
         public void Handle(string payload, StreamWriter writer)
         {
-            if (UnityCliServer.ScriptCompilationFailed)
+            if (UnityCliCompilationTracker.ScriptCompilationFailed)
             {
                 writer.WriteLine("FAILURE Compilation failed");
                 return;
@@ -90,12 +91,10 @@ namespace UnityCliRunner
             // Write running state files synchronously
             WriteTestRunningState();
 
-            UnityCliServer.EnqueueToMainThread(() =>
-            {
-                RunTests(mode, filter, category);
-            });
-
             writer.WriteLine("RUNNING");
+            writer.Flush();
+
+            RunTests(mode, filter, category);
         }
 
         private static void WriteTestRunningState()
@@ -147,7 +146,7 @@ namespace UnityCliRunner
                     filter.categoryNames = new[] { categoryText };
                 }
 
-                UnityCliServer.HasActiveTestFilter = !string.IsNullOrEmpty(filterText) || !string.IsNullOrEmpty(categoryText);
+                HasActiveTestFilter = !string.IsNullOrEmpty(filterText) || !string.IsNullOrEmpty(categoryText);
 
                 var settings = new ExecutionSettings(filter);
                 Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}' and category '{categoryText}'...");
@@ -156,7 +155,7 @@ namespace UnityCliRunner
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to start tests: {ex}");
-                UnityCliServer.HasActiveTestFilter = false;
+                HasActiveTestFilter = false;
                 // Clean up state so we don't hang polling
                 string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
                 if (File.Exists(runningPath))
@@ -233,7 +232,7 @@ namespace UnityCliRunner
                     File.WriteAllText(failuresPath, sb.ToString(), new UTF8Encoding(false));
                 }
 
-                bool didNotMatchAnyTests = UnityCliServer.HasActiveTestFilter && result.FailCount == 0 && result.PassCount == 0 && result.SkipCount == 0;
+                bool didNotMatchAnyTests = RunTestsHandler.HasActiveTestFilter && result.FailCount == 0 && result.PassCount == 0 && result.SkipCount == 0;
 
                 var runResult = new UnityTestRunResult
                 {
@@ -246,7 +245,7 @@ namespace UnityCliRunner
                     failedTests = new List<FailedTestInfo>(m_FailedTests)
                 };
 
-                UnityCliServer.HasActiveTestFilter = false;
+                RunTestsHandler.HasActiveTestFilter = false;
 
                 string json = JsonUtility.ToJson(runResult, true);
                 File.WriteAllText(resultsPath, json);

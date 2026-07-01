@@ -117,5 +117,30 @@ namespace UnityCliRunner
             }
             return null;
         }
+
+        public static bool IsAssetImportWorkerProcess()
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            for(int i = 0; i < args.Length; i++)
+            {
+                if(IsAssetImportWorkerName(args[i]))
+                {
+                    return true;
+                }
+
+                if(string.Equals(args[i], "-name", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length && IsAssetImportWorkerName(args[i + 1]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsAssetImportWorkerName(string value)
+        {
+            return string.Equals(value, "AssetImport", StringComparison.OrdinalIgnoreCase)
+                || value.StartsWith("AssetImportWorker", StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

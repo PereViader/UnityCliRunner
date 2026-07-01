@@ -8,9 +8,49 @@ using UnityEngine;
 
 namespace UnityCliRunner
 {
+    [InitializeOnLoad]
     public static class UnityCliCompilationTracker
     {
         private const string CompilationDiagnosticsFileName = "unity_compilation_errors.txt";
+
+        private static volatile bool s_IsCompiling;
+        private static volatile bool s_IsUpdating;
+        private static volatile bool s_RefreshPending;
+        private static volatile bool s_ScriptCompilationFailed;
+        private static volatile bool s_CompilationRequested;
+
+        public static bool IsCompiling => s_IsCompiling;
+        public static bool IsUpdating => s_IsUpdating;
+        public static bool ScriptCompilationFailed => s_ScriptCompilationFailed;
+
+        public static bool RefreshPending
+        {
+            get => s_RefreshPending;
+            set => s_RefreshPending = value;
+        }
+
+        public static bool CompilationRequested
+        {
+            get => s_CompilationRequested;
+            set => s_CompilationRequested = value;
+        }
+
+        static UnityCliCompilationTracker()
+        {
+            EditorApplication.update += UpdateCompilationState;
+        }
+
+        public static void UpdateCompilationState()
+        {
+            s_IsCompiling = EditorApplication.isCompiling;
+            s_IsUpdating = EditorApplication.isUpdating;
+            s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
+
+            if (s_CompilationRequested && s_IsCompiling)
+            {
+                s_CompilationRequested = false;
+            }
+        }
 
         public static void ClearActiveEntries()
         {

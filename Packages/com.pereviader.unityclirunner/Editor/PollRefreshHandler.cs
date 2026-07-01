@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Threading;
 using UnityEditor;
 
 namespace UnityCliRunner
@@ -9,50 +8,30 @@ namespace UnityCliRunner
     {
         public void Handle(string payload, StreamWriter writer)
         {
-            string response = "UPDATING";
-            var evt = new ManualResetEvent(false);
-            UnityCliServer.EnqueueToMainThread(() =>
-            {
-                try
-                {
-                    response = GetRefreshPollResponse();
-                }
-                finally
-                {
-                    evt.Set();
-                }
-            });
-
-            if (!evt.WaitOne(2000))
-            {
-                writer.WriteLine("UPDATING");
-                return;
-            }
-
+            string response = GetRefreshPollResponse();
             writer.WriteLine(response);
         }
 
         private string GetRefreshPollResponse()
         {
-            // Update compilation state parameters on the main thread
-            UnityCliServer.UpdateCompilationState();
+            UnityCliCompilationTracker.UpdateCompilationState();
 
-            if (UnityCliServer.RefreshPending || UnityCliServer.CompilationRequested)
+            if (UnityCliCompilationTracker.RefreshPending || UnityCliCompilationTracker.CompilationRequested)
             {
                 return "COMPILING";
             }
 
-            if (UnityCliServer.IsCompiling)
+            if (UnityCliCompilationTracker.IsCompiling)
             {
                 return "COMPILING";
             }
 
-            if (UnityCliServer.IsUpdating)
+            if (UnityCliCompilationTracker.IsUpdating)
             {
                 return "UPDATING";
             }
 
-            if (UnityCliServer.ScriptCompilationFailed)
+            if (UnityCliCompilationTracker.ScriptCompilationFailed)
             {
                 UnityCliCompilationTracker.WriteActiveErrorsToFile();
                 return "COMPILATION_ERROR";

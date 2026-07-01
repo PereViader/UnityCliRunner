@@ -9,11 +9,8 @@ namespace UnityCliRunner
         public void Handle(string payload, StreamWriter writer)
         {
             writer.WriteLine("EXITING");
-            UnityCliServer.EnqueueToMainThread(() =>
-            {
-                Debug.Log("UnityCliRunner: Shutdown requested via socket.");
-                EditorApplication.Exit(0);
-            });
+            Debug.Log("UnityCliRunner: Shutdown requested via socket.");
+            EditorApplication.Exit(0);
         }
     }
 }
