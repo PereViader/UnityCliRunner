@@ -25,6 +25,7 @@ namespace UnityCliRunner
 
         private static readonly ConcurrentQueue<Action> MainThreadQueue = new ConcurrentQueue<Action>();
         private static MyTestCallbacks s_Callbacks;
+        private static TestRunnerApi s_TestRunnerApi;
 
         private static volatile bool s_IsCompiling;
         private static volatile bool s_IsUpdating;
@@ -86,9 +87,18 @@ namespace UnityCliRunner
                 return;
             }
 
-            s_Callbacks = ScriptableObject.CreateInstance<MyTestCallbacks>();
-            var api = ScriptableObject.CreateInstance<TestRunnerApi>();
-            api.RegisterCallbacks(s_Callbacks);
+            var existingApis = Resources.FindObjectsOfTypeAll<TestRunnerApi>();
+            if (existingApis != null)
+            {
+                foreach (var api in existingApis)
+                {
+                    try { UnityEngine.Object.DestroyImmediate(api); } catch { }
+                }
+            }
+
+            s_Callbacks = new MyTestCallbacks();
+            var runnerApi = ScriptableObject.CreateInstance<TestRunnerApi>();
+            runnerApi.RegisterCallbacks(s_Callbacks);
         }
 
         private static void StartServer()
@@ -624,7 +634,13 @@ namespace UnityCliRunner
         {
             try
             {
-                var api = ScriptableObject.CreateInstance<TestRunnerApi>();
+                if (s_Callbacks == null)
+                {
+                    s_Callbacks = new MyTestCallbacks();
+                    var runnerApi = ScriptableObject.CreateInstance<TestRunnerApi>();
+                    runnerApi.RegisterCallbacks(s_Callbacks);
+                }
+                s_TestRunnerApi = ScriptableObject.CreateInstance<TestRunnerApi>();
 
                 var filter = new Filter();
                 filter.testMode = mode;
@@ -643,11 +659,12 @@ namespace UnityCliRunner
 
                 var settings = new ExecutionSettings(filter);
                 Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}' and category '{categoryText}'...");
-                api.Execute(settings);
+                s_TestRunnerApi.Execute(settings);
             }
             catch(Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to start tests: {ex}");
+                HasActiveTestFilter = false;
                 // Clean up state so we don't hang polling
                 string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
                 if(File.Exists(runningPath))
@@ -1114,19 +1131,28 @@ namespace UnityCliRunner
         public string payload;
     }
 
-    public class MyTestCallbacks : ScriptableObject, ICallbacks
+    public class MyTestCallbacks : ICallbacks
     {
         private List<FailedTestInfo> m_FailedTests = new List<FailedTestInfo>();
+        private bool m_IsRunning = false;
 
         public void RunStarted(ITestAdaptor testsToRun)
         {
             m_FailedTests.Clear();
+            m_IsRunning = true;
         }
 
         public void RunFinished(ITestResultAdaptor result)
         {
             try
             {
+                if (!m_IsRunning)
+                {
+                    return;
+                }
+                m_IsRunning = false;
+
+                Debug.Log($"UnityCliRunner: RunFinished called on callback instance {GetHashCode()}");
                 string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
                 string runningPath = Path.Combine(tempDir, "unity_test_running.txt");
                 string resultsPath = Path.Combine(tempDir, "unity_test_results.json");
