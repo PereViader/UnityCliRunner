@@ -398,7 +398,7 @@ start_background_unity() {
     local abs_proj_path
     abs_proj_path="$(pwd)"
     if [ "$mode" = "batchmode" ]; then
-      "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
       unity_pid=$!
     else
       "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
