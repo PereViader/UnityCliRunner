@@ -269,6 +269,8 @@ find_unity_path() {
   else
     paths=(
       "$HOME/Unity/Hub/Editor/$version/Editor/Unity"
+      "/opt/unity/Editor/Unity"
+      "/opt/Unity/Editor/Unity"
     )
   fi
 
@@ -283,7 +285,12 @@ find_unity_path() {
   if [ "$is_windows" = true ]; then
     command_unity=$(where unity 2>/dev/null | head -n 1)
   else
-    command_unity=$(command -v unity 2>/dev/null)
+    for cmd in unity-editor Unity unity; do
+      command_unity=$(command -v "$cmd" 2>/dev/null)
+      if [ -n "$command_unity" ]; then
+        break
+      fi
+    done
   fi
 
   if [ -n "$command_unity" ]; then
