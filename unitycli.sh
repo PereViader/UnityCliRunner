@@ -394,14 +394,24 @@ start_background_unity() {
     mkdir -p Temp
     rm -f Temp/unity_background_log.txt
     
+    # Check if xvfb-run should be used and is available
+    local xvfb_cmd=()
+    if [ "${UNITY_USE_XVFB:-false}" = "true" ]; then
+      if command -v xvfb-run >/dev/null 2>&1; then
+        xvfb_cmd=(xvfb-run --auto-servernum --server-args="-screen 0 640x480x24")
+      else
+        echo "Warning: UNITY_USE_XVFB is true but xvfb-run was not found on the system." >&2
+      fi
+    fi
+
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
     abs_proj_path="$(pwd)"
     if [ "$mode" = "batchmode" ]; then
-      "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      "${xvfb_cmd[@]}" "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
       unity_pid=$!
     else
-      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      "${xvfb_cmd[@]}" "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
       unity_pid=$!
     fi
   fi
