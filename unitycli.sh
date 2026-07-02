@@ -170,6 +170,18 @@ case "$SUBCOMMAND" in
     ;;
 esac
 
+# Function to kill a process by PID
+kill_process() {
+  local pid="$1"
+  if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
+    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+      taskkill //PID "$pid" //F >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1
+    else
+      kill -9 "$pid" >/dev/null 2>&1
+    fi
+  fi
+}
+
 # Function to check if Unity is still running (locked)
 is_unity_still_running() {
   local lockfile=""
@@ -345,6 +357,7 @@ send_socket_cmd() {
 # Function to start background Unity instance or wait for it to be ready
 start_background_unity() {
   local mode="${1:-batchmode}"
+  local unity_pid=""
 
   local needs_launch=true
   if is_unity_still_running; then
@@ -372,14 +385,17 @@ start_background_unity() {
 
     echo -n "Starting Unity background instance..."
     mkdir -p Temp
+    rm -f Temp/unity_background_log.txt
     
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
     abs_proj_path="$(pwd)"
     if [ "$mode" = "batchmode" ]; then
       "$UNITY_EXE" -batchmode -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      unity_pid=$!
     else
       "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      unity_pid=$!
     fi
   fi
 
@@ -402,6 +418,52 @@ start_background_unity() {
         fi
       fi
     fi
+
+    # Check for compilation errors in the log file
+    if [ -f "Temp/unity_background_log.txt" ]; then
+      if grep -q -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:' "Temp/unity_background_log.txt"; then
+        echo ""
+        echo "Compilation errors detected during startup."
+        # Sleep a moment to let all errors be written
+        sleep 2
+        parse_and_print_compilation_results "Temp/unity_background_log.txt"
+        if [ -n "$unity_pid" ]; then
+          echo "Killing Unity process (PID $unity_pid)..."
+          kill_process "$unity_pid"
+        fi
+        exit 1
+      fi
+    fi
+
+    # Check if the process exited unexpectedly
+    local process_exited=false
+    if [ "$needs_launch" = true ] && [ -n "$unity_pid" ]; then
+      if ! kill -0 "$unity_pid" 2>/dev/null; then
+        process_exited=true
+      fi
+    elif [ "$needs_launch" = false ]; then
+      if ! is_unity_still_running; then
+        process_exited=true
+      fi
+    fi
+
+    if [ "$process_exited" = true ]; then
+      echo ""
+      echo "Unity process exited unexpectedly."
+      if [ -f "Temp/unity_background_log.txt" ]; then
+        if parse_and_print_compilation_results "Temp/unity_background_log.txt"; then
+          exit 1
+        else
+          echo "Last 20 lines of Unity log:"
+          tail -n 20 "Temp/unity_background_log.txt"
+          exit 1
+        fi
+      else
+        echo "No Unity log file found."
+        exit 1
+      fi
+    fi
+
     echo -n "."
     sleep 2
   done
@@ -675,11 +737,7 @@ elif [ "$SUBCOMMAND" = "stop" ]; then
     fi
 
     if [[ "$pid" =~ ^[0-9]+$ ]]; then
-      if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-        taskkill //PID "$pid" //F >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1
-      else
-        kill -9 "$pid" >/dev/null 2>&1
-      fi
+      kill_process "$pid"
     else
       if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
         taskkill //IM Unity.exe //F >/dev/null 2>&1
