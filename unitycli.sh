@@ -392,13 +392,13 @@ start_background_unity() {
 
     echo -n "Starting Unity background instance..."
     mkdir -p Temp
-    rm -f Temp/unity_background_log.txt
+    rm -f Temp/unity_background_log.txt Temp/unity_stdout_stderr.txt
     
     # Check if xvfb-run should be used and is available
     local xvfb_cmd=()
     if [ "${UNITY_USE_XVFB:-false}" = "true" ]; then
       if command -v xvfb-run >/dev/null 2>&1; then
-        xvfb_cmd=(xvfb-run --auto-servernum --server-args="-screen 0 640x480x24")
+        xvfb_cmd=(xvfb-run --auto-servernum --server-args="-screen 0 640x480x24 -nolisten tcp -nolisten unix")
       else
         echo "Warning: UNITY_USE_XVFB is true but xvfb-run was not found on the system." >&2
       fi
@@ -408,10 +408,10 @@ start_background_unity() {
     local abs_proj_path
     abs_proj_path="$(pwd)"
     if [ "$mode" = "batchmode" ]; then
-      "${xvfb_cmd[@]}" "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      "${xvfb_cmd[@]}" "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     else
-      "${xvfb_cmd[@]}" "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >/dev/null 2>&1 &
+      "${xvfb_cmd[@]}" "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     fi
   fi
@@ -477,6 +477,10 @@ start_background_unity() {
         fi
       else
         echo "No Unity log file found."
+        if [ -f "Temp/unity_stdout_stderr.txt" ]; then
+          echo "Last 20 lines of stdout/stderr:"
+          tail -n 20 "Temp/unity_stdout_stderr.txt"
+        fi
         exit 1
       fi
     fi
@@ -687,7 +691,7 @@ parse_and_print_compilation_results() {
 # --- Main Execution ---
 
 # Clean up stale compilation errors, results, and failures files, and execute files
-rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
+rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt Temp/unity_stdout_stderr.txt 2>/dev/null
 rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "start" ]; then
