@@ -20,6 +20,15 @@ jobs:
           mkdir -p ~/.local/share/unity3d/Unity
           echo "$UNITY_LICENSE" > ~/.local/share/unity3d/Unity/Unity_lic.ulf
 
+      - name: Debug Container Environment
+        run: |
+          echo "=== unity-editor wrapper script ==="
+          cat $(which unity-editor) || true
+          echo "=== PATH ==="
+          echo $PATH
+          echo "=== HOME ==="
+          echo $HOME
+
       - name: Run tests
         env:
           USE_UNITYCI_STARTUP_SCRIPT: true
