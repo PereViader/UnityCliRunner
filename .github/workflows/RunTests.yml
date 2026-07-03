@@ -22,6 +22,6 @@ jobs:
 
       - name: Run tests
         env:
-          UNITY_USE_XVFB: true
+          USE_UNITYCI_STARTUP_SCRIPT: true
         run: |
           bash ./test.sh

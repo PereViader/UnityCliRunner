@@ -242,6 +242,16 @@ find_unity_path() {
     return 0
   fi
 
+  # Prioritize unity-editor wrapper from PATH if explicitly requested via environment variable
+  if [ "${USE_UNITYCI_STARTUP_SCRIPT:-false}" = "true" ]; then
+    local container_unity=""
+    container_unity=$(command -v unity-editor 2>/dev/null)
+    if [ -n "$container_unity" ]; then
+      echo "$container_unity"
+      return 0
+    fi
+  fi
+
   local version=""
   if [ -f "ProjectSettings/ProjectVersion.txt" ]; then
     version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}')
@@ -285,7 +295,7 @@ find_unity_path() {
   if [ "$is_windows" = true ]; then
     command_unity=$(where unity 2>/dev/null | head -n 1)
   else
-    for cmd in unity-editor Unity unity; do
+    for cmd in Unity unity; do
       command_unity=$(command -v "$cmd" 2>/dev/null)
       if [ -n "$command_unity" ]; then
         break
@@ -394,24 +404,14 @@ start_background_unity() {
     mkdir -p Temp
     rm -f Temp/unity_background_log.txt Temp/unity_stdout_stderr.txt
     
-    # Check if xvfb-run should be used and is available
-    local xvfb_cmd=()
-    if [ "${UNITY_USE_XVFB:-false}" = "true" ]; then
-      if command -v xvfb-run >/dev/null 2>&1; then
-        xvfb_cmd=(xvfb-run --auto-servernum --server-args="-screen 0 640x480x24 -nolisten tcp -nolisten unix")
-      else
-        echo "Warning: UNITY_USE_XVFB is true but xvfb-run was not found on the system." >&2
-      fi
-    fi
-
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
     abs_proj_path="$(pwd)"
     if [ "$mode" = "batchmode" ]; then
-      "${xvfb_cmd[@]}" "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
+      "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     else
-      "${xvfb_cmd[@]}" "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
+      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     fi
   fi
