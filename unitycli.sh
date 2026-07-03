@@ -400,6 +400,10 @@ start_background_unity() {
       exit 1
     fi
 
+    echo "DEBUG: USE_UNITYCI_STARTUP_SCRIPT='${USE_UNITYCI_STARTUP_SCRIPT:-}'"
+    echo "DEBUG: command -v unity-editor='$(command -v unity-editor 2>/dev/null || true)'"
+    echo "DEBUG: Resolved UNITY_EXE='$UNITY_EXE'"
+
     echo -n "Starting Unity background instance..."
     mkdir -p Temp
     rm -f Temp/unity_background_log.txt Temp/unity_stdout_stderr.txt
@@ -477,9 +481,13 @@ start_background_unity() {
         fi
       else
         echo "No Unity log file found."
+        echo "DEBUG: Listing Temp directory:"
+        ls -la Temp/ 2>/dev/null || echo "No Temp/ directory"
         if [ -f "Temp/unity_stdout_stderr.txt" ]; then
-          echo "Last 20 lines of stdout/stderr:"
-          tail -n 20 "Temp/unity_stdout_stderr.txt"
+          echo "Contents of Temp/unity_stdout_stderr.txt:"
+          cat "Temp/unity_stdout_stderr.txt"
+        else
+          echo "Temp/unity_stdout_stderr.txt does not exist"
         fi
         exit 1
       fi
