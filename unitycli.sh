@@ -209,9 +209,18 @@ is_unity_still_running() {
 
   # On Unix-like systems
   local pid=""
-  pid=$(cat "$lockfile" 2>/dev/null | tr -d '\r')
-  pid="${pid#"${pid%%[![:space:]]*}"}"
-  pid="${pid%"${pid##*[![:space:]]}"}"
+  local filesize
+  filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
+  if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
+    pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
+  fi
+
+  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    # Fallback to cat
+    pid=$(cat "$lockfile" 2>/dev/null | tr -d '\r')
+    pid="${pid#"${pid%%[![:space:]]*}"}"
+    pid="${pid%"${pid##*[![:space:]]}"}"
+  fi
 
   if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
     if kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; then
@@ -767,9 +776,17 @@ elif [ "$SUBCOMMAND" = "stop" ]; then
         }
       " 2>/dev/null | tr -d '\r')
     else
-      pid=$(cat "$lockfile" 2>/dev/null)
-      pid="${pid#"${pid%%[![:space:]]*}"}"
-      pid="${pid%"${pid##*[![:space:]]}"}"
+      local filesize
+      filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
+      if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
+        pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
+      fi
+
+      if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        pid=$(cat "$lockfile" 2>/dev/null)
+        pid="${pid#"${pid%%[![:space:]]*}"}"
+        pid="${pid%"${pid##*[![:space:]]}"}"
+      fi
     fi
 
     if [[ "$pid" =~ ^[0-9]+$ ]]; then
