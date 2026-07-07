@@ -14,11 +14,64 @@ jobs:
           fetch-depth: 0
 
       - name: Activate Unity License
+        id: activate_unity
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         run: |
-          mkdir -p ~/.local/share/unity3d/Unity
-          echo "$UNITY_LICENSE" > ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          # 1. Extract Serial Number from UNITY_LICENSE (.ulf content)
+          extract_serial() {
+            if command -v python3 >/dev/null 2>&1; then
+              python3 -c '
+          import os, re, base64
+          lic = os.environ.get("UNITY_LICENSE", "")
+          m = re.search(r"DeveloperData Value=\"([^\"]+)\"", lic)
+          if m:
+              decoded = base64.b64decode(m.group(1))
+              print(decoded[4:].decode("utf-8", errors="ignore"), end="")
+          '
+            elif command -v perl >/dev/null 2>&1; then
+              perl -e '
+                my $lic = $ENV{UNITY_LICENSE};
+                if ($lic =~ /DeveloperData Value="([^"]+)"/) {
+                  use MIME::Base64;
+                  my $decoded = decode_base64($1);
+                  my $serial = substr($decoded, 4);
+                  print $serial;
+                }
+              '
+            else
+              local b64
+              b64=$(echo "$UNITY_LICENSE" | grep -oE 'DeveloperData Value="[^"]+"' | cut -d'"' -f2)
+              if [ -n "$b64" ]; then
+                echo -n "$b64" | base64 -d | tail -c +5
+              fi
+            fi
+          }
+          
+          UNITY_SERIAL=$(extract_serial)
+          if [ -z "$UNITY_SERIAL" ]; then
+            echo "::error::Could not extract serial from UNITY_LICENSE"
+            exit 1
+          fi
+          
+          # Mask the serial in GitHub Actions logs
+          echo "::add-mask::$UNITY_SERIAL"
+          
+          # 2. Randomize Machine ID for Personal License activation
+          echo "Randomizing machine ID for personal license activation"
+          dbus-uuidgen > /etc/machine-id && mkdir -p /var/lib/dbus/ && ln -sf /etc/machine-id /var/lib/dbus/machine-id
+          
+          # 3. Activate License Online
+          echo "Requesting online license activation..."
+          unity-editor \
+            -logFile /dev/stdout \
+            -quit \
+            -serial "$UNITY_SERIAL" \
+            -username "$UNITY_EMAIL" \
+            -password "$UNITY_PASSWORD" \
+            -projectPath "$GITHUB_WORKSPACE"
 
       - name: Debug Container Environment
         run: |
@@ -28,9 +81,36 @@ jobs:
           echo $PATH
           echo "=== HOME ==="
           echo $HOME
+          echo "=== unity-editor.d files ==="
+          if [ -d /usr/bin/unity-editor.d ]; then
+            ls -la /usr/bin/unity-editor.d/
+            for f in /usr/bin/unity-editor.d/*.sh; do
+              if [ -r "$f" ]; then
+                echo "--- File: $f ---"
+                cat "$f"
+              fi
+            done
+          else
+            echo "Directory /usr/bin/unity-editor.d does not exist"
+          fi
 
       - name: Run tests
         env:
-          USE_UNITYCI_STARTUP_SCRIPT: true
+          USE_UNITY_EDITOR_WRAPPER: true
         run: |
           bash ./test.sh
+
+      - name: Return Unity License
+        if: always() && steps.activate_unity.outcome == 'success'
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          echo "Returning Unity license seat..."
+          unity-editor \
+            -logFile /dev/stdout \
+            -quit \
+            -returnlicense \
+            -username "$UNITY_EMAIL" \
+            -password "$UNITY_PASSWORD" \
+            -projectPath "$GITHUB_WORKSPACE"

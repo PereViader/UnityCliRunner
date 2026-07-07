@@ -243,7 +243,7 @@ find_unity_path() {
   fi
 
   # Prioritize unity-editor wrapper from PATH if explicitly requested via environment variable
-  if [ "${USE_UNITYCI_STARTUP_SCRIPT:-false}" = "true" ]; then
+  if [ "${USE_UNITY_EDITOR_WRAPPER:-false}" = "true" ]; then
     local container_unity=""
     container_unity=$(command -v unity-editor 2>/dev/null)
     if [ -n "$container_unity" ]; then
@@ -400,22 +400,38 @@ start_background_unity() {
       exit 1
     fi
 
-    echo "DEBUG: USE_UNITYCI_STARTUP_SCRIPT='${USE_UNITYCI_STARTUP_SCRIPT:-}'"
+    echo "DEBUG: USE_UNITY_EDITOR_WRAPPER='${USE_UNITY_EDITOR_WRAPPER:-}'"
     echo "DEBUG: command -v unity-editor='$(command -v unity-editor 2>/dev/null || true)'"
     echo "DEBUG: Resolved UNITY_EXE='$UNITY_EXE'"
 
     echo -n "Starting Unity background instance..."
     mkdir -p Temp
-    rm -f Temp/unity_background_log.txt Temp/unity_stdout_stderr.txt
+    rm -f unity_background_log.txt unity_stdout_stderr.txt
+    
+    echo "DEBUG: Creating unity_stdout_stderr.txt" > unity_stdout_stderr.txt
     
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
     abs_proj_path="$(pwd)"
+    local auth_args=()
+    local user="${UNITY_EMAIL:-${UNITY_USERNAME:-}}"
+    if [ -n "$user" ] && [ -n "${UNITY_PASSWORD:-}" ] && [ -n "${UNITY_LICENSE:-}" ]; then
+      local dev_data
+      dev_data=$(echo "$UNITY_LICENSE" | grep -oP '(?<=<DeveloperData Value=")[^"]*' || true)
+      if [ -n "$dev_data" ]; then
+        local serial
+        serial=$(echo "$dev_data" | base64 -d 2>/dev/null | tail -c +5)
+        local serial_prefix
+        serial_prefix=$(echo "$serial" | cut -c 1-4)
+        echo "DEBUG: Extracted serial prefix: ${serial_prefix}...XXXX"
+        auth_args+=("-username" "$user" "-password" "$UNITY_PASSWORD" "-serial" "$serial")
+      fi
+    fi
     if [ "$mode" = "batchmode" ]; then
-      "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
+      "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     else
-      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "Temp/unity_background_log.txt" >Temp/unity_stdout_stderr.txt 2>&1 &
+      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     fi
   fi
@@ -441,13 +457,13 @@ start_background_unity() {
     fi
 
     # Check for compilation errors in the log file
-    if [ -f "Temp/unity_background_log.txt" ]; then
-      if grep -q -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:' "Temp/unity_background_log.txt"; then
+    if [ -f "unity_background_log.txt" ]; then
+      if grep -q -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:' "unity_background_log.txt"; then
         echo ""
         echo "Compilation errors detected during startup."
         # Sleep a moment to let all errors be written
         sleep 2
-        parse_and_print_compilation_results "Temp/unity_background_log.txt"
+        parse_and_print_compilation_results "unity_background_log.txt"
         if [ -n "$unity_pid" ]; then
           echo "Killing Unity process (PID $unity_pid)..."
           kill_process "$unity_pid"
@@ -471,23 +487,23 @@ start_background_unity() {
     if [ "$process_exited" = true ]; then
       echo ""
       echo "Unity process exited unexpectedly."
-      if [ -f "Temp/unity_background_log.txt" ]; then
-        if parse_and_print_compilation_results "Temp/unity_background_log.txt"; then
+      if [ -f "unity_background_log.txt" ]; then
+        if parse_and_print_compilation_results "unity_background_log.txt"; then
           exit 1
         else
           echo "Last 20 lines of Unity log:"
-          tail -n 20 "Temp/unity_background_log.txt"
+          tail -n 20 "unity_background_log.txt"
           exit 1
         fi
       else
         echo "No Unity log file found."
         echo "DEBUG: Listing Temp directory:"
         ls -la Temp/ 2>/dev/null || echo "No Temp/ directory"
-        if [ -f "Temp/unity_stdout_stderr.txt" ]; then
-          echo "Contents of Temp/unity_stdout_stderr.txt:"
-          cat "Temp/unity_stdout_stderr.txt"
+        if [ -f "unity_stdout_stderr.txt" ]; then
+          echo "Contents of unity_stdout_stderr.txt:"
+          cat "unity_stdout_stderr.txt"
         else
-          echo "Temp/unity_stdout_stderr.txt does not exist"
+          echo "unity_stdout_stderr.txt does not exist"
         fi
         exit 1
       fi
@@ -699,7 +715,7 @@ parse_and_print_compilation_results() {
 # --- Main Execution ---
 
 # Clean up stale compilation errors, results, and failures files, and execute files
-rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt Temp/unity_stdout_stderr.txt 2>/dev/null
+rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt Temp/unity_stdout_stderr.txt unity_stdout_stderr.txt unity_background_log.txt 2>/dev/null
 rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "start" ]; then
