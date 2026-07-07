@@ -175,6 +175,7 @@ normalize_output() {
   escaped_proj_path_win=$(echo "$abs_proj_path" | sed 's/\//\\\\/g' | sed 's/[].[^$*?+\\|()]/\\&/g')
 
   sed -E \
+    -e '/^DEBUG:/d' \
     -e 's|\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]||g' \
     -e "s|$escaped_proj_path|PROJECT_PATH|gI" \
     -e "s|$escaped_proj_path_win|PROJECT_PATH|gI" \

@@ -400,15 +400,9 @@ start_background_unity() {
       exit 1
     fi
 
-    echo "DEBUG: USE_UNITY_EDITOR_WRAPPER='${USE_UNITY_EDITOR_WRAPPER:-}'"
-    echo "DEBUG: command -v unity-editor='$(command -v unity-editor 2>/dev/null || true)'"
-    echo "DEBUG: Resolved UNITY_EXE='$UNITY_EXE'"
-
     echo -n "Starting Unity background instance..."
     mkdir -p Temp
     rm -f unity_background_log.txt unity_stdout_stderr.txt
-    
-    echo "DEBUG: Creating unity_stdout_stderr.txt" > unity_stdout_stderr.txt
     
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
@@ -421,9 +415,6 @@ start_background_unity() {
       if [ -n "$dev_data" ]; then
         local serial
         serial=$(echo "$dev_data" | base64 -d 2>/dev/null | tail -c +5)
-        local serial_prefix
-        serial_prefix=$(echo "$serial" | cut -c 1-4)
-        echo "DEBUG: Extracted serial prefix: ${serial_prefix}...XXXX"
         auth_args+=("-username" "$user" "-password" "$UNITY_PASSWORD" "-serial" "$serial")
       fi
     fi
@@ -497,7 +488,7 @@ start_background_unity() {
         fi
       else
         echo "No Unity log file found."
-        echo "DEBUG: Listing Temp directory:"
+        echo "Listing Temp directory:"
         ls -la Temp/ 2>/dev/null || echo "No Temp/ directory"
         if [ -f "unity_stdout_stderr.txt" ]; then
           echo "Contents of unity_stdout_stderr.txt:"
