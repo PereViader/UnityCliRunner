@@ -207,7 +207,15 @@ is_unity_still_running() {
     fi
   fi
 
-  # On Unix-like systems
+  # On Unix-like systems (Linux/macOS)
+  # 1. Try flock command-line utility first (handles 0-byte lockfiles on Linux)
+  if command -v flock >/dev/null 2>&1; then
+    if ! flock -n "$lockfile" -c true >/dev/null 2>&1; then
+      return 0 # Locked -> Unity is running
+    fi
+  fi
+
+  # 2. Fallback to PID check
   local pid=""
   local filesize
   filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
@@ -427,12 +435,27 @@ start_background_unity() {
         auth_args+=("-username" "$user" "-password" "$UNITY_PASSWORD" "-serial" "$serial")
       fi
     fi
+    local is_win=false
+    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+      is_win=true
+    fi
+
     if [ "$mode" = "batchmode" ]; then
-      "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-      unity_pid=$!
+      if [ "$is_win" = true ]; then
+        "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      else
+        nohup "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      fi
     else
-      "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-      unity_pid=$!
+      if [ "$is_win" = true ]; then
+        "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      else
+        nohup "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      fi
     fi
   fi
 

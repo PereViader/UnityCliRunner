@@ -172,9 +172,14 @@ normalize_output() {
   escaped_proj_path=$(echo "$abs_proj_path" | sed 's/[].[^$*?+\\|()]/\\&/g')
   
   local escaped_proj_path_win
-  escaped_proj_path_win=$(echo "$abs_proj_path" | sed 's/\//\\\\/g' | sed 's/[].[^$*?+\\|()]/\\&/g')
+  if [ -n "${abs_proj_path_win:-}" ]; then
+    escaped_proj_path_win=$(echo "$abs_proj_path_win" | sed 's/[].[^$*?+\\|()]/\\&/g')
+  else
+    escaped_proj_path_win=$(echo "$abs_proj_path" | sed 's/\//\\\\/g' | sed 's/[].[^$*?+\\|()]/\\&/g')
+  fi
 
   sed -E \
+    -e 's|\\|/|g' \
     -e '/^DEBUG:/d' \
     -e 's|\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]||g' \
     -e "s|$escaped_proj_path|PROJECT_PATH|gI" \
@@ -265,6 +270,12 @@ run_teardown() {
 }
 
 abs_proj_path="$(pwd)"
+abs_proj_path_win=""
+if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+  if command -v pwd >/dev/null 2>&1; then
+    abs_proj_path_win=$(pwd -W 2>/dev/null || true)
+  fi
+fi
 
 # Check if Unity is running
 IS_RUNNING=false

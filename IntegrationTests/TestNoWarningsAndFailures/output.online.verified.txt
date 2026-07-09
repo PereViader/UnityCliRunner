@@ -11,7 +11,7 @@ Unity Response: FAILURE 1 failed, 0 passed
   Error Message:
    This test failed intentionally.
   Stack Trace:
-   at Tests.DummyTest.FailTest () [0x00000] in C:\Users\perev\Code\UnityCliRunner\Assets\Tests\Editor\DummyTest.cs:10
+   at Tests.DummyTest.FailTest () [0x00000] in PROJECT_PATH/Assets/Tests/Editor/DummyTest.cs:10
    
 
 Some tests failed.

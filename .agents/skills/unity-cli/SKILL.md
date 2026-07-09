@@ -9,7 +9,7 @@ description: Use it to run Unity EditMode or PlayMode tests, trigger a Unity Ass
 
 `unitycli.sh` allows interacting with Unity3d to refresh the AssetDatabase before test/method work, surface compilation diagnostics in the terminal, print failed test details.
 
-On windows, run it using the git bash or sh.
+On windows, run it using the git bash.
 
 Run commands with the current working directory set to the root of the unity project so it can find `ProjectSettings`, `Temp`, `UnityLockFile` and other Unity specific files.
 
