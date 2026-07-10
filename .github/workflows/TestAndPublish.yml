@@ -36,30 +36,14 @@ jobs:
           echo "Release exists $release_exists"
           echo "exists=$release_exists" >> $GITHUB_OUTPUT
 
-  # Test:
-  #   needs: CheckRelease
-  #   if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
-  #   runs-on: ubuntu-latest
-  #   container:
-  #     image: unityci/editor:ubuntu-6000.0.77f1-base-3
-  #   steps:
-  #     - uses: actions/checkout@v6
-  #       with:
-  #         fetch-depth: 0
-
-  #     - name: Activate Unity License
-  #       env:
-  #         UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-  #       run: |
-  #         mkdir -p ~/.local/share/unity3d/Unity
-  #         echo "$UNITY_LICENSE" > ~/.local/share/unity3d/Unity/Unity_lic.ulf
-
-  #     - name: Run tests
-  #       run: |
-  #         bash ./test.sh
+  Test:
+    needs: CheckRelease
+    if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
+    uses: ./.github/workflows/RunTests.yml
+    secrets: inherit
 
   Publish:
-    needs: [CheckRelease]
+    needs: [CheckRelease, Test]
     if: ${{ needs.CheckRelease.outputs.exists == 'false' }}
     permissions:
       contents: write
