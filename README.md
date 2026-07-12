@@ -3,59 +3,54 @@
 
 # UnityCliRunner
 
-A lightweight, high-performance tool that bridges external command line interfaces (and AI coding agents) with the Unity Editor. It enables sub-second compilation loops, clean test execution, and static method invocations by communicating with a running Unity Editor (or headless background instance) via loopback TCP sockets.
+A lightweight command-line runner that bridges your shell and AI coding agents with the Unity Editor.
 
----
+### Key Capabilities
 
-
-
-## Key Features
-
-- ⚡ **Sub-Second Compilation Loop**: Modify C# files and run tests or custom editor methods instantly via TCP sockets without restarting or reloading the editor graphical interface.
-- 🤖 **Perfect for AI Agent Workflows**: Includes a pre-configured Agent Skill allowing AI agents to command and inspect Unity without GUI dependencies or slow batchmode startups.
-- 🎨 **Beautiful Compiler Output**: Reformats Unity logs and prints compiler warnings and errors in a clean, `dotnet build` format with ANSI colors (warnings in yellow, errors in red).
-- 🧪 **Flexible Test Runner**: Run EditMode or PlayMode tests (or both), filter specific tests by name (substring/regex), or target a specific test category. Failed tests are printed in a clean `dotnet test` format.
-- ⚙️ **Parameter-Aware Method Execution**: Execute arbitrary static methods in the running Editor, supporting automatic primitive type parsing and JSON deserialization.
-- 📦 **UPM Package Support**: Clean package-based setup that doesn't clutter your project's main codebase.
+* **Trigger Asset Database Refresh**: Instantly recompile your C# code and feed any compilation errors or warnings directly back to your terminal or AI coding agent.
+* **Run Editor & PlayMode Tests**: Execute unit and integration tests seamlessly as part of your feature implementation workflow.
+* **Run Static Methods**: Execute any C# static method with support for primitive parameters and JSON deserialization.
 
 ---
 
 ## Installation & Setup
 
-### 1. Install the Unity Package
+### 1. Requirements
+- **macOS / Linux**: A terminal with Bash (pre-installed on almost all distributions).
+- **Windows**: Git Bash (included with Git for Windows).
+- **Unity**: Version 2021.3 or higher.
 
-Follow the installation instructions on [OpenUPM](https://openupm.com/packages/com.pereviader.unityclirunner/#modal-manualinstallation).
+### 2. Install the Package
 
-### 2. Install unitycli.sh and Agent Skill
+[Install from on OpenUPM](https://openupm.com/packages/com.pereviader.unityclirunner/#modal-manualinstallation).
+
+### 3. Install unitycli.sh and Agent Skill
 
 In the Unity Editor, run the installers from the top menu dropdown:
 - **Tools > UnityCliRunner > InstallBashScript** to copy the runner script (`unitycli.sh`) to the root of your Unity project.
 - **Tools > UnityCliRunner > InstallSkill** to copy the `.agents/skills/unity-cli` folder to the root of your project (required if you use agentic AI tools like **Antigravity**, **Gemini**, **Cline**, or **Roo Code**).
 
-### 3. Requirements
-- A shell environment capable of running Bash (e.g., Git Bash on Windows, macOS/Linux terminal).
-- PowerShell (on Windows) or standard networking tools like `nc` (netcat) / Bash `/dev/tcp` redirection (on macOS/Linux), used internally to establish TCP socket connections.
-- Unity version 2021.3 or higher.
+Note: If the root of the unity project is not the root of your repository you may want to move the `.agents` folder to the root of the repository.
+
+
 
 ---
 
 ## AI Agent Integration & Agent Skills
 
-If you use agentic AI tools (like **Antigravity**, **Gemini**, **Cline**, or **Roo Code**) to develop inside this repository, UnityCliRunner includes a pre-packaged **Agent Skill** under the [.agents/skills/unity-cli](file:///c:/Users/perev/Code/UnityCliRunner/.agents/skills/unity-cli) directory.
+If you use agentic AI tools (like **Antigravity**, **Gemini**, **Claude**, ...), UnityCliRunner includes a pre-packaged **Agent Skill** under `.agents/skills/unity-cli`
+### Benefits of the Agent Skill:
+- **Sub-Second Feedback**: Agents compile code and run tests instantly, avoiding slow batchmode restarts (~30s delay).
+- **Background Unity Process**: Keeps a headless Unity process open in the background so it can be reused for quick iterations.
+- **Diagnostics Formatting**: Compilation errors and test failures are formatted in standard compiler patterns, making it easy for agents to parse and resolve them autonomously.
 
-### Why use the Agent Skill?
-- **Sub-Second Feedback**: Agents can instantly compile code and run tests to verify changes, saving massive amounts of waiting time and token usage.
-- **Warm Unity Instance**: Agents are trained to run `start batchmode` once at the beginning of their task. This keeps a headless Unity process open in the background, allowing all subsequent checks to run via TCP sockets in < 1 second instead of restarting Unity every time (~30s delay).
-- **Diagnostics Formatting**: Compilation errors and test failures are formatted in standard compiler diagnostics patterns, which agents can easily read and fix autonomously.
-
-### How to Install for Agents
-In the Unity Editor, go to **Tools > UnityCliRunner > InstallSkill** to automatically install the `.agents/` skill folder to your project root. Agent frameworks that support automatic skill discovery (like those scanning `.agents/` or using custom skill directories) will automatically index the `unity-cli` skill.
+To install, select **Tools > UnityCliRunner > InstallSkill** in the Unity Editor to copy the `.agents/` folder to your project root.
 
 ---
 
 ## How to Use It
 
-Run [unitycli.sh](file:///c:/Users/perev/Code/UnityCliRunner/unitycli.sh) from the root directory of your Unity project:
+Run `unitycli.sh` from the root directory of your Unity project:
 
 ### Background Instance Management
 Keep a background Unity instance warm to execute tests and methods in sub-second Online Mode without launching the Unity GUI:
@@ -63,16 +58,16 @@ Keep a background Unity instance warm to execute tests and methods in sub-second
 ```bash
 # Start a background Unity instance in headless batchmode
 # (If already starting or running, it blocks and waits until it is ready)
-./unitycli.sh start batchmode
+bash unitycli.sh start batchmode
 
 # Start a background Unity instance in interactive mode (opens Unity Editor GUI)
-./unitycli.sh start interactive
+bash unitycli.sh start interactive
 
 # Check if the background Unity instance is running and reachable
-./unitycli.sh status
+bash unitycli.sh status
 
 # Safely stop the background Unity instance (falls back to process kill if needed)
-./unitycli.sh stop
+bash unitycli.sh stop
 ```
 
 ### Core Operations
@@ -80,25 +75,25 @@ If Unity is not running, these commands will automatically start a background Un
 
 ```bash
 # Trigger AssetDatabase.Refresh() and print compilation diagnostics
-./unitycli.sh refresh
+bash unitycli.sh refresh
 
 # Force a full C# recompilation (clean build cache) and print compiler diagnostics
-./unitycli.sh recompile
+bash unitycli.sh recompile
 
 # Run both EditMode and PlayMode tests
-./unitycli.sh test
+bash unitycli.sh test
 
 # Run only EditMode tests
-./unitycli.sh test --editmode
+bash unitycli.sh test --editmode
 
 # Run only PlayMode tests
-./unitycli.sh test --playmode
+bash unitycli.sh test --playmode
 
 # Run tests matching a specific name filter (regex or substring)
-./unitycli.sh test --filter "MyNamespace.MyTestClass"
+bash unitycli.sh test --filter "MyNamespace.MyTestClass"
 
 # Run tests matching a specific category filter
-./unitycli.sh test --category "Smoke"
+bash unitycli.sh test --category "Smoke"
 ```
 
 ### Exit Codes
@@ -112,7 +107,7 @@ If Unity is not running, these commands will automatically start a background Un
 The `executemethod` subcommand executes static methods in the Unity editor AppDomain directly from the shell:
 
 ```bash
-./unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
+bash unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
 ```
 
 ### Supported Parameter Types
@@ -132,26 +127,26 @@ Overloaded static methods are resolved automatically by matching the number of a
 
 ## Integration Tests
 
-The repository includes a robust automated integration test suite [test.sh](file:///c:/Users/perev/Code/UnityCliRunner/test.sh) to verify the CLI runner's correctness when Unity is already running or when it is stopped.
+The repository includes a robust automated integration test suite `test.sh` to verify the CLI runner's correctness
 
 ### Running the tests
 Simply execute:
 ```bash
-./test.sh
+bash test.sh
 ```
 
 ### Test Suite Execution Flow:
 1. Detects if Unity is running for the project. If not, it launches Unity in the background and waits for the TCP server to start.
 2. Runs a suite of test scenarios (such as compiling errors/warnings, skipped tests, executing successful/failing/missing methods) in **Online Mode** via TCP sockets.
-3. Compares the normalized console output against verified outputs located under `IntegrationTests/<TestCase>/output.online.verified.txt`.
+3. Compares the normalized console output against verified outputs located under [IntegrationTests](file:///c:/Users/perev/Code/UnityCliRunner/IntegrationTests)/<TestCase>/output.online.verified.txt.
 4. Gracefully terminates the running Unity Editor process.
 5. Re-runs scenarios in **Auto-Start Mode** (starting with Unity stopped) to verify that commands automatically trigger the background Unity startup sequence and execute correctly.
-6. Compares the console output against verified outputs under `IntegrationTests/<TestCase>/output.autostart.verified.txt`.
+6. Compares the console output against verified outputs under [IntegrationTests](file:///c:/Users/perev/Code/UnityCliRunner/IntegrationTests)/<TestCase>/output.autostart.verified.txt.
 7. Restores any modified test files to their original state upon completion.
 
 ### Bootstrapping Verified Outputs
 If you modify the output format of `unitycli.sh` and need to update the expected baselines, run the integration tests with the `BOOTSTRAP=true` environment variable:
 ```bash
-BOOTSTRAP=true ./test.sh
+BOOTSTRAP=true bash test.sh
 ```
 This automatically overwrites all `output.online.verified.txt` and `output.autostart.verified.txt` files with the actual output generated during the test run.
