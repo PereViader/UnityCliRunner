@@ -77,23 +77,23 @@ If Unity is not running, these commands will automatically start a background Un
 # Trigger AssetDatabase.Refresh() and print compilation diagnostics
 bash unitycli.sh refresh
 
-# Force a full C# recompilation (clean build cache) and print compiler diagnostics
+# Force a full C# recompilation (clean build cache) and print compilation diagnostics
 bash unitycli.sh recompile
 
-# Run both EditMode and PlayMode tests
+# Run all EditMode and PlayMode tests
 bash unitycli.sh test
 
-# Run only EditMode tests
+# Run all EditMode tests
 bash unitycli.sh test --editmode
 
-# Run only PlayMode tests
+# Run all PlayMode tests
 bash unitycli.sh test --playmode
 
-# Run tests matching a specific name filter (regex or substring)
-bash unitycli.sh test --filter "MyNamespace.MyTestClass"
+# Run editmode tests matching a specific name filter (regex or substring)
+bash unitycli.sh test --editmode --filter "MyNamespace.MyTestClass"
 
-# Run tests matching a specific category filter
-bash unitycli.sh test --category "Smoke"
+# Run playmode tests matching a specific category filter
+bash unitycli.sh test --playmode --category "Smoke"
 ```
 
 ### Exit Codes
@@ -110,7 +110,7 @@ The `executemethod` subcommand executes static methods in the Unity editor AppDo
 bash unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
 ```
 
-### Supported Parameter Types
+### Supported Input Parameter Types
 - **Primitives**: `int`, `float`, `double`, `bool`, `long`, `decimal` (parsed using invariant culture).
 - **Strings**: Standard C# strings.
 - **Complex Types (JSON)**: Any other C# class/struct type will be automatically deserialized from its raw string parameter using Unity's `JsonUtility.FromJson`.
