@@ -18,6 +18,7 @@ namespace UnityCliRunner
         private static volatile bool s_RefreshPending;
         private static volatile bool s_ScriptCompilationFailed;
         private static volatile bool s_CompilationRequested;
+        private static double s_CompilationRequestTime;
 
         public static bool IsCompiling => s_IsCompiling;
         public static bool IsUpdating => s_IsUpdating;
@@ -32,7 +33,14 @@ namespace UnityCliRunner
         public static bool CompilationRequested
         {
             get => s_CompilationRequested;
-            set => s_CompilationRequested = value;
+            set
+            {
+                s_CompilationRequested = value;
+                if (value)
+                {
+                    s_CompilationRequestTime = EditorApplication.timeSinceStartup;
+                }
+            }
         }
 
         static UnityCliCompilationTracker()
@@ -46,9 +54,16 @@ namespace UnityCliRunner
             s_IsUpdating = EditorApplication.isUpdating;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
 
-            if (s_CompilationRequested && s_IsCompiling)
+            if (s_CompilationRequested)
             {
-                s_CompilationRequested = false;
+                if (s_IsCompiling)
+                {
+                    s_CompilationRequested = false;
+                }
+                else if (EditorApplication.timeSinceStartup - s_CompilationRequestTime > 1.5)
+                {
+                    s_CompilationRequested = false;
+                }
             }
         }
 

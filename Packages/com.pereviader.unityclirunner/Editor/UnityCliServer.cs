@@ -108,7 +108,7 @@ namespace UnityCliRunner
                         break;
                     }
 
-                    UnityCliDispatcher.Enqueue(() => HandleClient(client));
+                    ThreadPool.QueueUserWorkItem(state => ProcessClient((TcpClient)state), client);
                 }
             }
             catch(Exception e)
@@ -153,10 +153,11 @@ namespace UnityCliRunner
             }
         }
 
-        private static void HandleClient(TcpClient client)
+        private static void ProcessClient(TcpClient client)
         {
             try
             {
+                client.ReceiveTimeout = 5000;
                 using NetworkStream stream = client.GetStream();
                 using StreamReader reader = new(stream, Encoding.UTF8);
                 // We use new UTF8Encoding(false) to disable emitting a UTF-8 Byte Order Mark (BOM).
@@ -184,17 +185,51 @@ namespace UnityCliRunner
                         writer.WriteLine($"ERROR: Unknown command: {command}");
                         return;
                     }
-                
-                    handler.Handle(payload, writer);
+
+                    if (handler is PingHandler || handler is PollTestsHandler || handler is PollExecuteHandler)
+                    {
+                        handler.Handle(payload, writer);
+                    }
+                    else
+                    {
+                        using (var finishedEvent = new ManualResetEvent(false))
+                        {
+                            Exception dispatchException = null;
+                            UnityCliDispatcher.Enqueue(() =>
+                            {
+                                try
+                                {
+                                    handler.Handle(payload, writer);
+                                }
+                                catch (Exception ex)
+                                {
+                                    dispatchException = ex;
+                                }
+                                finally
+                                {
+                                    finishedEvent.Set();
+                                }
+                            });
+                            finishedEvent.WaitOne();
+                            if (dispatchException != null)
+                            {
+                                throw dispatchException;
+                            }
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
                     writer.WriteLine($"ERROR: {e.Message}");
                 }
             }
+            catch (Exception)
+            {
+                // Socket/Stream creation exception, ignore
+            }
             finally
             {
-                client.Dispose();
+                try { client.Close(); } catch { }
             }
         }
 

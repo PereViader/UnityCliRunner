@@ -103,65 +103,7 @@ find_unity_path() {
   return 1
 }
 
-# Helper to send command to the socket server
-send_socket_cmd() {
-  local cmd="$1"
-  local timeout="${2:-10}"
 
-  # Read dynamic port
-  local port=""
-  if [ -f "Temp/unity_cli_port.txt" ]; then
-    port=$(cat "Temp/unity_cli_port.txt")
-  fi
-
-  if [ -z "$port" ]; then
-    return 1
-  fi
-
-  local response=""
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    # Export command to environment variable to pass to powershell safely without quoting issues
-    export UNITY_CLI_CMD="$cmd"
-    response=$(powershell -NoProfile -Command "
-      \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
-      \$c.ReceiveTimeout = \$((\$timeout * 1000));
-      \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
-      \$r = New-Object System.IO.StreamReader(\$c.GetStream());
-      \$w.WriteLine(\$env:UNITY_CLI_CMD);
-      \$w.Flush();
-      \$res = \$r.ReadLine();
-      \$c.Close();
-      Write-Output \$res;
-    " 2>/dev/null)
-    local powershell_exit=$?
-    unset UNITY_CLI_CMD
-    if [ $powershell_exit -ne 0 ] || [ -z "$response" ]; then
-      return 1
-    fi
-  else
-    # Non-Windows (macOS, Linux)
-    if command -v nc >/dev/null 2>&1; then
-      response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
-    elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
-      exec 3<>/dev/tcp/127.0.0.1/$port
-      echo "$cmd" >&3
-      if read -t "$timeout" response <&3; then
-        response=$(echo "$response" | head -n 1)
-      fi
-      exec 3>&-
-    fi
-    if [ -z "$response" ]; then
-      return 1
-    fi
-  fi
-
-  # Strip carriage returns and trim whitespace
-  response=$(echo "$response" | tr -d '\r')
-  response="${response#"${response%%[![:space:]]*}"}"
-  response="${response%"${response##*[![:space:]]}"}"
-  echo "$response"
-  return 0
-}
 
 # Normalization function
 normalize_output() {
@@ -346,7 +288,7 @@ run_integration_case() {
       cp "$norm_out" "$received_file"
       FAILED_TESTS=$((FAILED_TESTS + 1))
     else
-      if diff -u "$expected_file" "$norm_out"; then
+      if diff -u --strip-trailing-cr "$expected_file" "$norm_out"; then
         echo "SUCCESS: Output matches $expected_file"
         rm -f "$received_file"
       else

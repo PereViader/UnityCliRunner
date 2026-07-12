@@ -344,8 +344,22 @@ send_socket_cmd() {
   fi
 
   local response=""
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    # Export command to environment variable to pass to powershell safely without quoting issues
+  if (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
+    # Try bash /dev/tcp redirection (fastest, no process spawn overhead)
+    response=$(
+      if exec 3<>/dev/tcp/127.0.0.1/$port; then
+        echo "$cmd" >&3
+        if read -t "$timeout" line <&3; then
+          echo "$line"
+        fi
+        exec 3>&-
+      fi
+    )
+  elif command -v nc >/dev/null 2>&1; then
+    # Try netcat
+    response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
+  elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    # PowerShell fallback on Windows
     export UNITY_CLI_CMD="$cmd"
     response=$(powershell -NoProfile -Command "
       \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
@@ -360,24 +374,13 @@ send_socket_cmd() {
     " 2>/dev/null)
     local powershell_exit=$?
     unset UNITY_CLI_CMD
-    if [ $powershell_exit -ne 0 ] || [ -z "$response" ]; then
-      return 1
+    if [ $powershell_exit -ne 0 ]; then
+      response=""
     fi
-  else
-    # Non-Windows (macOS, Linux)
-    if command -v nc >/dev/null 2>&1; then
-      response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
-    elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
-      exec 3<>/dev/tcp/127.0.0.1/$port
-      echo "$cmd" >&3
-      if read -t "$timeout" response <&3; then
-        response=$(echo "$response" | head -n 1)
-      fi
-      exec 3>&-
-    fi
-    if [ -z "$response" ]; then
-      return 1
-    fi
+  fi
+
+  if [ -z "$response" ]; then
+    return 1
   fi
 
   # Strip carriage returns and trim whitespace

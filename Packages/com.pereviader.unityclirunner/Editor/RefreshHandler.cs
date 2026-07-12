@@ -11,6 +11,7 @@ namespace UnityCliRunner
             writer.WriteLine("REFRESHING");
 
             UnityCliCompilationTracker.RefreshPending = true;
+            UnityCliCompilationTracker.CompilationRequested = true;
             try
             {
                 Debug.Log("UnityCliRunner: Triggering AssetDatabase.Refresh()");
