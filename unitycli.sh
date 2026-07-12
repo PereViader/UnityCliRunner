@@ -4,6 +4,9 @@
 # but we handle Unity exit codes manually.
 set -u
 
+# Change working directory to the directory of this script
+cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
+
 # Cleanup background tail on exit
 tail_pid=""
 cleanup() {
