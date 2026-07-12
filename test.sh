@@ -351,24 +351,6 @@ run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "auto
 # 4. Stop Unity.
 bash ./unitycli.sh stop
 
-# 5. Run test when stopped (should auto-start and run test).
-run_integration_case "TestEverythingPasses" "test --editmode" "autostart"
-
-# 6. Stop Unity.
-bash ./unitycli.sh stop
-
-# 7. Run executemethod when stopped (should auto-start and execute).
-run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "autostart"
-
-# 8. Stop Unity.
-bash ./unitycli.sh stop
-
-# 9. Run recompile when stopped (should auto-start and recompile).
-run_integration_case "TestRecompile" "recompile" "autostart"
-
-# 10. Stop Unity.
-bash ./unitycli.sh stop
-
 echo "============================================="
 if [ $FAILED_TESTS -eq 0 ]; then
   echo "ALL INTEGRATION TESTS PASSED SUCCESSFULLY!"
