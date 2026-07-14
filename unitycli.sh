@@ -492,7 +492,10 @@ start_background_unity() {
         echo "Compilation errors detected during startup."
         # Sleep a moment to let all errors be written
         sleep 2
-        parse_and_print_compilation_results "unity_background_log.txt"
+        # Extract all errors/warnings and save to Temp/unity_compilation_errors.txt
+        mkdir -p Temp
+        grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "unity_background_log.txt" | awk '!seen[$0]++' > Temp/unity_compilation_errors.txt
+        parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
         if [ -n "$unity_pid" ]; then
           echo "Killing Unity process (PID $unity_pid)..."
           kill_process "$unity_pid"
@@ -517,7 +520,10 @@ start_background_unity() {
       echo ""
       echo "Unity process exited unexpectedly."
       if [ -f "unity_background_log.txt" ]; then
-        if parse_and_print_compilation_results "unity_background_log.txt"; then
+        if grep -q -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:' "unity_background_log.txt"; then
+          mkdir -p Temp
+          grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "unity_background_log.txt" | awk '!seen[$0]++' > Temp/unity_compilation_errors.txt
+          parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
           exit 1
         else
           echo "Last 20 lines of Unity log:"
@@ -694,10 +700,10 @@ parse_and_print_compilation_results() {
     return 1
   fi
 
-  # Extract lines matching compiler error/warning pattern from the last 1000 lines of the file,
+  # Extract lines matching compiler error/warning pattern from the file,
   # and deduplicate preserving order
   local lines
-  lines=$(tail -n 1000 "$log_file" | grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' | awk '!seen[$0]++')
+  lines=$(grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "$log_file" | awk '!seen[$0]++')
 
   if [ -z "$lines" ]; then
     return 1
