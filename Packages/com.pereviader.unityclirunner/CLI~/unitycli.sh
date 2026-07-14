@@ -1,0 +1,1030 @@
+#!/usr/bin/env bash
+
+# Exit immediately if a command exits with a non-zero status,
+# but we handle Unity exit codes manually.
+set -u
+
+# Change working directory to the project root
+if [ -n "${UNITY_CLI_PROJECT_ROOT:-}" ]; then
+  cd "$UNITY_CLI_PROJECT_ROOT" || exit 1
+fi
+
+# Cleanup background tail on exit
+tail_pid=""
+cleanup() {
+  if [ -n "$tail_pid" ]; then
+    kill "$tail_pid" 2>/dev/null
+  fi
+}
+trap cleanup EXIT INT TERM
+
+# Default options
+SUBCOMMAND=""
+MODE_PLAYMODE=false
+MODE_EDITMODE=false
+FILTER=""
+CATEGORY=""
+EXECUTE_METHOD=""
+BG_ACTION=""
+BG_MODE=""
+
+# Helper for usage
+show_usage() {
+  local exit_code="${1:-1}"
+  echo "Usage: $0 <command> [options]"
+  echo "Commands:"
+  echo "  start <mode>            Start a background Unity instance (mode: batchmode | interactive)"
+  echo "  stop                    Stop the background Unity instance"
+  echo "  status                  Check status of the background Unity instance"
+  echo "  refresh                 Trigger AssetDatabase refresh and print compiler diagnostics"
+  echo "  recompile               Force a full C# recompilation and print compiler diagnostics"
+  echo "  test [options]          Run tests (defaults to running both EditMode and PlayMode)"
+  echo "    --playmode            Run PlayMode tests"
+  echo "    --editmode            Run EditMode tests"
+  echo "    --filter <filter>     Filter tests by name (regex/substring)"
+  echo "    --category <category> Filter tests by category"
+  echo "  executemethod <method> [args...] Execute a custom static method (optionally with parameters)"
+  echo "                          (e.g., Namespace.Class.Method 4 3 \"{\\\"Value\\\":4}\")"
+  echo "  -h, --help              Show this help message"
+  exit "$exit_code"
+}
+
+if [ $# -eq 0 ]; then
+  show_usage
+fi
+
+SUBCOMMAND="$1"
+shift
+
+case "$SUBCOMMAND" in
+  refresh)
+    if [ $# -gt 0 ]; then
+      echo "Error: refresh does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
+  recompile)
+    if [ $# -gt 0 ]; then
+      echo "Error: recompile does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
+  test)
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --playmode)
+          MODE_PLAYMODE=true
+          shift
+          ;;
+        --editmode)
+          MODE_EDITMODE=true
+          shift
+          ;;
+        --filter)
+          if [ -z "${2:-}" ]; then
+            echo "Error: --filter requires an argument"
+            show_usage
+          fi
+          FILTER="$2"
+          shift 2
+          ;;
+        --filter=*)
+          FILTER="${1#*=}"
+          shift
+          ;;
+        --category)
+          if [ -z "${2:-}" ]; then
+            echo "Error: --category requires an argument"
+            show_usage
+          fi
+          CATEGORY="$2"
+          shift 2
+          ;;
+        --category=*)
+          CATEGORY="${1#*=}"
+          shift
+          ;;
+        -h|--help)
+          show_usage 0
+          ;;
+        *)
+          echo "Unknown option for test subcommand: $1"
+          show_usage
+          ;;
+      esac
+    done
+
+    # If neither mode is specified, default to running both
+    if [ "$MODE_PLAYMODE" = false ] && [ "$MODE_EDITMODE" = false ]; then
+      MODE_PLAYMODE=true
+      MODE_EDITMODE=true
+    fi
+    ;;
+
+  executemethod)
+    if [ $# -eq 0 ]; then
+      echo "Error: executemethod requires a method name argument (e.g., Namespace.Class.Method)"
+      show_usage
+    fi
+    EXECUTE_METHOD="$1"
+    shift
+    EXECUTE_METHOD_PARAMS=("$@")
+    shift $#
+    ;;
+
+  start)
+    if [ $# -eq 0 ]; then
+      echo "Error: start command requires a mode (batchmode|interactive)"
+      show_usage
+    fi
+    BG_MODE="$1"
+    if [ "$BG_MODE" != "batchmode" ] && [ "$BG_MODE" != "interactive" ]; then
+      echo "Error: start command mode must be batchmode or interactive"
+      show_usage
+    fi
+    shift
+    if [ $# -gt 0 ]; then
+      echo "Error: start command does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
+  stop)
+    if [ $# -gt 0 ]; then
+      echo "Error: stop command does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
+  status)
+    if [ $# -gt 0 ]; then
+      echo "Error: status command does not accept extra arguments"
+      show_usage
+    fi
+    ;;
+
+  -h|--help|help)
+    show_usage 0
+    ;;
+
+  *)
+    echo "Unknown command: $SUBCOMMAND"
+    show_usage
+    ;;
+esac
+
+# Function to kill a process by PID
+kill_process() {
+  local pid="$1"
+  if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
+    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+      taskkill //PID "$pid" //F >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1
+    else
+      kill -9 "$pid" >/dev/null 2>&1
+    fi
+  fi
+}
+
+# Function to check if Unity is still running (locked)
+is_unity_still_running() {
+  local lockfile=""
+  if [ -f "Temp/UnityLockfile" ]; then
+    lockfile="Temp/UnityLockfile"
+  elif [ -f "Temp/UnityLockFile" ]; then
+    lockfile="Temp/UnityLockFile"
+  fi
+
+  if [ -z "$lockfile" ]; then
+    return 1
+  fi
+
+  # Check if we are on Windows
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    # On Windows, if the file is locked by a running Unity instance, cat will fail.
+    if ! cat "$lockfile" >/dev/null 2>&1; then
+      return 0
+    else
+      # Not locked -> stale lockfile
+      rm -f "$lockfile" 2>/dev/null
+      return 1
+    fi
+  fi
+
+  # On Unix-like systems (Linux/macOS)
+  # 1. Try flock command-line utility first (handles 0-byte lockfiles on Linux)
+  if command -v flock >/dev/null 2>&1; then
+    if ! flock -n "$lockfile" -c true >/dev/null 2>&1; then
+      return 0 # Locked -> Unity is running
+    fi
+  fi
+
+  # 2. Fallback to PID check
+  local pid=""
+  local filesize
+  filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
+  if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
+    pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
+  fi
+
+  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    # Fallback to cat
+    pid=$(cat "$lockfile" 2>/dev/null | tr -d '\r')
+    pid="${pid#"${pid%%[![:space:]]*}"}"
+    pid="${pid%"${pid##*[![:space:]]}"}"
+  fi
+
+  if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
+    if kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if lsof "$lockfile" >/dev/null 2>&1 || fuser "$lockfile" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Stale lockfile
+  rm -f "$lockfile" 2>/dev/null
+  return 1
+}
+
+# Detect if Unity is running for this specific project
+IS_RUNNING=false
+AUTO_STARTED=false
+if is_unity_still_running; then
+  IS_RUNNING=true
+fi
+
+# Function to find Unity path
+find_unity_path() {
+  if [ -n "${UNITY_PATH:-}" ] && [ -f "$UNITY_PATH" ]; then
+    echo "$UNITY_PATH"
+    return 0
+  fi
+
+  # Prioritize unity-editor wrapper from PATH if explicitly requested via environment variable
+  if [ "${USE_UNITY_EDITOR_WRAPPER:-false}" = "true" ]; then
+    local container_unity=""
+    container_unity=$(command -v unity-editor 2>/dev/null)
+    if [ -n "$container_unity" ]; then
+      echo "$container_unity"
+      return 0
+    fi
+  fi
+
+  local version=""
+  if [ -f "ProjectSettings/ProjectVersion.txt" ]; then
+    version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}')
+  fi
+
+  if [ -z "$version" ]; then
+    echo "Error: Could not detect Unity version from ProjectSettings/ProjectVersion.txt" >&2
+    return 1
+  fi
+
+  local is_windows=false
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    is_windows=true
+  fi
+
+  local paths=()
+  if [ "$is_windows" = true ]; then
+    paths=(
+      "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
+    )
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    paths=(
+      "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+    )
+  else
+    paths=(
+      "$HOME/Unity/Hub/Editor/$version/Editor/Unity"
+      "/opt/unity/Editor/Unity"
+      "/opt/Unity/Editor/Unity"
+    )
+  fi
+
+  for p in "${paths[@]}"; do
+    if [ -f "$p" ]; then
+      echo "$p"
+      return 0
+    fi
+  done
+
+  local command_unity=""
+  if [ "$is_windows" = true ]; then
+    command_unity=$(where unity 2>/dev/null | head -n 1)
+  else
+    for cmd in Unity unity; do
+      command_unity=$(command -v "$cmd" 2>/dev/null)
+      if [ -n "$command_unity" ]; then
+        break
+      fi
+    done
+  fi
+
+  if [ -n "$command_unity" ]; then
+    echo "$command_unity"
+    return 0
+  fi
+
+  return 1
+}
+
+# Function to send a command to the socket server
+send_socket_cmd() {
+  local cmd="$1"
+  local timeout="${2:-10}"
+
+  # Read dynamic port
+  local port=""
+  if [ -f "Temp/unity_cli_port.txt" ]; then
+    port=$(cat "Temp/unity_cli_port.txt")
+  fi
+
+  if [ -z "$port" ]; then
+    return 1
+  fi
+
+  local response=""
+  if (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
+    # Try bash /dev/tcp redirection (fastest, no process spawn overhead)
+    response=$(
+      if exec 3<>/dev/tcp/127.0.0.1/$port; then
+        echo "$cmd" >&3
+        if read -t "$timeout" line <&3; then
+          echo "$line"
+        fi
+        exec 3>&-
+      fi
+    )
+  elif command -v nc >/dev/null 2>&1; then
+    # Try netcat
+    response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
+  elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    # PowerShell fallback on Windows
+    export UNITY_CLI_CMD="$cmd"
+    response=$(powershell -NoProfile -Command "
+      \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
+      \$c.ReceiveTimeout = \$((\$timeout * 1000));
+      \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
+      \$r = New-Object System.IO.StreamReader(\$c.GetStream());
+      \$w.WriteLine(\$env:UNITY_CLI_CMD);
+      \$w.Flush();
+      \$res = \$r.ReadLine();
+      \$c.Close();
+      Write-Output \$res;
+    " 2>/dev/null)
+    local powershell_exit=$?
+    unset UNITY_CLI_CMD
+    if [ $powershell_exit -ne 0 ]; then
+      response=""
+    fi
+  fi
+
+  if [ -z "$response" ]; then
+    return 1
+  fi
+
+  # Strip carriage returns and trim whitespace
+  response=$(echo "$response" | tr -d '\r')
+  response="${response#"${response%%[![:space:]]*}"}"
+  response="${response%"${response##*[![:space:]]}"}"
+  echo "$response"
+  return 0
+}
+
+# Function to start background Unity instance or wait for it to be ready
+start_background_unity() {
+  local mode="${1:-batchmode}"
+  local unity_pid=""
+
+  local needs_launch=true
+  if is_unity_still_running; then
+    needs_launch=false
+    # Check if already ready
+    if [ -f "Temp/unity_cli_port.txt" ] && _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+      local resp
+      resp=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
+      if [ "$resp" = "READY" ] || [ "$resp" = "COMPILATION_ERROR" ]; then
+        echo "Unity is already running."
+        IS_RUNNING=true
+        return 0
+      fi
+    fi
+    echo "Unity is already running/starting. Skipping launch..."
+    echo -n "Waiting for Unity background instance to be ready..."
+  fi
+
+  if [ "$needs_launch" = true ]; then
+    UNITY_EXE=$(find_unity_path)
+    if [ -z "$UNITY_EXE" ]; then
+      echo "Error: Unity executable not found."
+      exit 1
+    fi
+
+    echo -n "Starting Unity background instance..."
+    mkdir -p Temp
+    rm -f unity_background_log.txt unity_stdout_stderr.txt
+    
+    # Run Unity in background (batchmode or interactive)
+    local abs_proj_path
+    abs_proj_path="$(pwd)"
+    local auth_args=()
+    local user="${UNITY_EMAIL:-${UNITY_USERNAME:-}}"
+    if [ -n "$user" ] && [ -n "${UNITY_PASSWORD:-}" ] && [ -n "${UNITY_LICENSE:-}" ]; then
+      local dev_data
+      dev_data=$(echo "$UNITY_LICENSE" | grep -oP '(?<=<DeveloperData Value=")[^"]*' || true)
+      if [ -n "$dev_data" ]; then
+        local serial
+        serial=$(echo "$dev_data" | base64 -d 2>/dev/null | tail -c +5)
+        auth_args+=("-username" "$user" "-password" "$UNITY_PASSWORD" "-serial" "$serial")
+      fi
+    fi
+    local is_win=false
+    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+      is_win=true
+    fi
+
+    if [ "$mode" = "batchmode" ]; then
+      if [ "$is_win" = true ]; then
+        "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      else
+        nohup "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      fi
+    else
+      if [ "$is_win" = true ]; then
+        "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      else
+        nohup "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      fi
+    fi
+  fi
+
+  local started=false
+  # Wait up to 90 seconds (45 iterations * 2s sleep)
+  for i in {1..45}; do
+    if [ -f "Temp/unity_cli_port.txt" ]; then
+      if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+        local response
+        response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
+        if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
+          echo ""
+          if [ "$needs_launch" = true ]; then
+            echo "Started successfully!"
+          else
+            echo "Unity is ready!"
+          fi
+          started=true
+          break
+        fi
+      fi
+    fi
+
+    # Check for compilation errors in the log file
+    if [ -f "unity_background_log.txt" ]; then
+      if grep -q -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:' "unity_background_log.txt"; then
+        echo ""
+        echo "Compilation errors detected during startup."
+        # Sleep a moment to let all errors be written
+        sleep 2
+        # Extract all errors/warnings and save to Temp/unity_compilation_errors.txt
+        mkdir -p Temp
+        grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "unity_background_log.txt" | awk '!seen[$0]++' > Temp/unity_compilation_errors.txt
+        parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
+        if [ -n "$unity_pid" ]; then
+          echo "Killing Unity process (PID $unity_pid)..."
+          kill_process "$unity_pid"
+        fi
+        exit 1
+      fi
+    fi
+
+    # Check if the process exited unexpectedly
+    local process_exited=false
+    if [ "$needs_launch" = true ] && [ -n "$unity_pid" ]; then
+      if ! kill -0 "$unity_pid" 2>/dev/null; then
+        process_exited=true
+      fi
+    elif [ "$needs_launch" = false ]; then
+      if ! is_unity_still_running; then
+        process_exited=true
+      fi
+    fi
+
+    if [ "$process_exited" = true ]; then
+      echo ""
+      echo "Unity process exited unexpectedly."
+      if [ -f "unity_background_log.txt" ]; then
+        if grep -q -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:' "unity_background_log.txt"; then
+          mkdir -p Temp
+          grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "unity_background_log.txt" | awk '!seen[$0]++' > Temp/unity_compilation_errors.txt
+          parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
+          exit 1
+        else
+          echo "Last 20 lines of Unity log:"
+          tail -n 20 "unity_background_log.txt"
+          exit 1
+        fi
+      else
+        echo "No Unity log file found."
+        echo "Listing Temp directory:"
+        ls -la Temp/ 2>/dev/null || echo "No Temp/ directory"
+        if [ -f "unity_stdout_stderr.txt" ]; then
+          echo "Contents of unity_stdout_stderr.txt:"
+          cat "unity_stdout_stderr.txt"
+        else
+          echo "unity_stdout_stderr.txt does not exist"
+        fi
+        exit 1
+      fi
+    fi
+
+    echo -n "."
+    sleep 2
+  done
+
+  if [ "$started" = false ]; then
+    echo ""
+    echo "Failed to start background Unity instance or wait for it to be ready."
+    exit 1
+  fi
+  IS_RUNNING=true
+  if [ "$needs_launch" = true ]; then
+    AUTO_STARTED=true
+  fi
+}
+
+# Function to print failed tests in dotnet test format
+print_failed_tests() {
+  local failures_file="Temp/unity_test_failures.txt"
+  local results_file="Temp/unity_test_results.json"
+
+  if [ -f "$failures_file" ]; then
+    cat "$failures_file"
+    rm -f "$failures_file"
+    rm -f "$results_file" 2>/dev/null
+  fi
+}
+
+# Function to run tests via socket (Online)
+run_online_tests() {
+  local mode="$1"
+  echo "Sending command to run $mode tests..."
+
+  local response=""
+  local cmd="RUN_TESTS $mode"
+  if [ -n "$FILTER" ]; then
+    cmd="$cmd --filter \"$FILTER\""
+  fi
+  if [ -n "$CATEGORY" ]; then
+    cmd="$cmd --category \"$CATEGORY\""
+  fi
+  response=$(send_socket_cmd "$cmd" 10)
+  if [ $? -ne 0 ] || [ -z "$response" ] || [[ "$response" == ERROR* ]] || [[ "$response" == FAILURE* ]]; then
+    echo "Unity Response: $response"
+    return 1
+  fi
+  
+  echo -n "Waiting for tests to complete..."
+  while true; do
+    sleep 1
+
+    # Re-read port/query status. The connection will fail during domain reloads, which is expected.
+    response=$(send_socket_cmd "POLL_TESTS" 5)
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited during test execution."
+        return 1
+      fi
+      echo -n "."
+      continue
+    fi
+
+    if [ "$response" = "RUNNING" ]; then
+      echo -n "."
+    elif [[ "$response" == SUCCESS* ]]; then
+      echo ""
+      echo "Done!"
+      echo "Unity Response: $response"
+      return 0
+    elif [[ "$response" == FAILURE* ]]; then
+      echo ""
+      echo "Done!"
+      echo "Unity Response: $response"
+      print_failed_tests
+      return 1
+    else
+      # If IDLE or ERROR
+      echo ""
+      echo "Done!"
+      echo "Unity Response: $response"
+      return 2
+    fi
+  done
+}
+
+# Function to run a method via socket (Online)
+run_online_method() {
+  echo "Sending command to run method $EXECUTE_METHOD..."
+
+  local cmd="EXECUTE_METHOD $EXECUTE_METHOD"
+  for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
+    local escaped="${param//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    cmd="$cmd \"$escaped\""
+  done
+
+  local response=""
+  response=$(send_socket_cmd "$cmd" 10)
+  if [ $? -ne 0 ] || [[ "$response" == ERROR* ]]; then
+    echo "Error starting method execution: $response"
+    return 1
+  fi
+
+  echo -n "Waiting for method execution to complete..."
+  while true; do
+    sleep 1
+
+    response=$(send_socket_cmd "POLL_EXECUTE" 5)
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited during method execution."
+        return 1
+      fi
+      echo -n "."
+      continue
+    fi
+
+    if [ "$response" = "RUNNING" ]; then
+      echo -n "."
+    elif [[ "$response" == SUCCESS* ]]; then
+      echo ""
+      echo "Done!"
+      local payload="${response#SUCCESS}"
+      # Trim leading/trailing whitespace
+      payload="${payload#"${payload%%[![:space:]]*}"}"
+      payload="${payload%"${payload##*[![:space:]]}"}"
+      if [ -n "$payload" ]; then
+        echo "$payload"
+      else
+        echo "Unity Response: SUCCESS"
+      fi
+      return 0
+    elif [[ "$response" == FAILURE* ]]; then
+      echo ""
+      echo "Done!"
+      echo "Unity Response: FAILURE"
+      echo "${response#FAILURE }"
+      return 1
+    else
+      echo ""
+      echo "Done!"
+      echo "Unity Response: $response"
+      return 2
+    fi
+  done
+}
+
+# Function to parse compilation errors and warnings from a log file
+# and print them in dotnet build format.
+parse_and_print_compilation_results() {
+  local log_file="$1"
+  if [ ! -f "$log_file" ]; then
+    return 1
+  fi
+
+  # Extract lines matching compiler error/warning pattern from the file,
+  # and deduplicate preserving order
+  local lines
+  lines=$(grep -E '^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:' "$log_file" | awk '!seen[$0]++')
+
+  if [ -z "$lines" ]; then
+    return 1
+  fi
+
+  local error_count=0
+  local warning_count=0
+
+  # ANSI color codes
+  local red=$'\e[31m'
+  local yellow=$'\e[33m'
+  local reset=$'\e[0m'
+
+  # Read line by line to count and format
+  while IFS= read -r line; do
+    if [ -z "$line" ]; then
+      continue
+    fi
+    if [[ "$line" =~ \):\ error\  ]]; then
+      ((error_count++))
+      echo "${line/error /${red}error${reset} }"
+    elif [[ "$line" =~ \):\ warning\  ]]; then
+      ((warning_count++))
+      echo "${line/warning /${yellow}warning${reset} }"
+    else
+      echo "$line"
+    fi
+  done <<< "$lines"
+
+  echo ""
+  if [ $error_count -gt 0 ]; then
+    echo "${red}Build FAILED.${reset}"
+    echo "    $warning_count Warning(s)"
+    echo "    $error_count Error(s)"
+    return 0 # compilation failed
+  else
+    echo "${yellow}Build succeeded with warnings.${reset}"
+    echo "    $warning_count Warning(s)"
+    echo "    $error_count Error(s)"
+    return 2 # compilation succeeded but with warnings
+  fi
+}
+
+# --- Main Execution ---
+
+# Clean up stale compilation errors, results, and failures files, and execute files
+rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt Temp/unity_stdout_stderr.txt unity_stdout_stderr.txt unity_background_log.txt 2>/dev/null
+rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
+
+if [ "$SUBCOMMAND" = "start" ]; then
+  start_background_unity "$BG_MODE"
+  exit 0
+
+elif [ "$SUBCOMMAND" = "stop" ]; then
+  running=false
+  if [ "$IS_RUNNING" = true ] || _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+    running=true
+  fi
+
+  if [ "$running" = false ]; then
+    echo "Unity background instance is not running."
+    exit 0
+  fi
+
+  echo -n "Stopping Unity background instance..."
+
+  stopped=false
+  if [ -f "Temp/unity_cli_port.txt" ]; then
+    response=$(send_socket_cmd "EXIT" 5 2>/dev/null)
+    if [ "$response" = "EXITING" ]; then
+      # Wait up to 15 seconds for lockfile to clear
+      for i in {1..15}; do
+        if [ ! -f "Temp/UnityLockfile" ] && [ ! -f "Temp/UnityLockFile" ]; then
+          stopped=true
+          break
+        fi
+        sleep 1
+      done
+    fi
+  fi
+
+  if [ "$stopped" = true ]; then
+    echo ""
+    echo "Stopped cleanly."
+    exit 0
+  fi
+
+  # Fallback to process kill
+  lockfile=""
+  if [ -f "Temp/UnityLockfile" ]; then
+    lockfile="Temp/UnityLockfile"
+  elif [ -f "Temp/UnityLockFile" ]; then
+    lockfile="Temp/UnityLockFile"
+  fi
+
+  if [ -n "$lockfile" ]; then
+    pid=""
+    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+      # On Windows, read PID from running processes to bypass lockfile sharing violations
+      pid=$(powershell -NoProfile -Command "
+        \$currentDir = (Get-Item .).FullName;
+        \$processes = Get-CimInstance Win32_Process -Filter \"Name = 'Unity.exe'\" | Where-Object { \$_.CommandLine -like \"*\$currentDir*\" -or \$_.CommandLine.Replace('\\', '/') -like \"*\$(\$currentDir.Replace('\\', '/'))*\" };
+        if (\$processes) {
+            \$processes.ProcessId | Select-Object -First 1;
+        }
+      " 2>/dev/null | tr -d '\r')
+    else
+      local filesize
+      filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
+      if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
+        pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
+      fi
+
+      if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+        pid=$(cat "$lockfile" 2>/dev/null)
+        pid="${pid#"${pid%%[![:space:]]*}"}"
+        pid="${pid%"${pid##*[![:space:]]}"}"
+      fi
+    fi
+
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then
+      kill_process "$pid"
+    else
+      if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+        taskkill //IM Unity.exe //F >/dev/null 2>&1
+      fi
+    fi
+
+    # Wait up to 5 seconds for lockfile to disappear
+    for i in {1..5}; do
+      if [ ! -f "$lockfile" ]; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+
+  echo ""
+  echo "Stopped."
+  exit 0
+elif [ "$SUBCOMMAND" = "wait-ready" ]; then
+  if [ "$IS_RUNNING" = false ]; then
+    echo "Error: Unity is not running for this project."
+    exit 1
+  fi
+
+  echo -n "Unity is running. Connecting..."
+  while true; do
+    if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+      echo ""
+      echo "Connected successfully!"
+      exit 0
+    fi
+    echo -n "."
+    sleep 1
+  done
+elif [ "$SUBCOMMAND" = "status" ]; then
+  if [ "$IS_RUNNING" = false ]; then
+    echo "Status: Not Running"
+    exit 0
+  fi
+
+  response=""
+  response=$(send_socket_cmd "PING" 2 2>/dev/null)
+  if [ $? -eq 0 ] && [ "$response" = "PONG" ]; then
+    echo "Status: Ready"
+  else
+    echo "Status: Running Unreachable"
+  fi
+  exit 0
+fi
+
+if [ "$IS_RUNNING" = false ]; then
+  if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "recompile" ] || [ "$SUBCOMMAND" = "test" ] || [ "$SUBCOMMAND" = "executemethod" ]; then
+    start_background_unity batchmode
+  fi
+fi
+
+if [ "$IS_RUNNING" = true ]; then
+  if [ "$AUTO_STARTED" = false ]; then
+    echo "Detected running Unity instance (via UnityLockfile)."
+  fi
+  
+  # Step 1: Trigger AssetDatabase refresh or recompile
+  if [ "$SUBCOMMAND" = "recompile" ]; then
+    echo -n "Triggering force recompilation..."
+    while true; do
+      if _=$(send_socket_cmd "RECOMPILE" 2>/dev/null); then
+        echo ""
+        echo "Done!"
+        break
+      fi
+      
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited before recompilation could be triggered."
+        exit 1
+      fi
+      
+      echo -n "."
+      sleep 1
+    done
+  else
+    echo -n "Triggering AssetDatabase refresh..."
+    while true; do
+      if _=$(send_socket_cmd "REFRESH" 2>/dev/null); then
+        echo ""
+        echo "Done!"
+        break
+      fi
+      
+      # If connection failed, check if Unity is still running.
+      # If it's not running, we should abort instead of looping forever.
+      if ! is_unity_still_running; then
+        echo ""
+        echo "Error: Unity background process exited before asset refresh could be triggered."
+        exit 1
+      fi
+      
+      echo -n "."
+      sleep 1
+    done
+  fi
+fi
+
+if [ "$IS_RUNNING" = true ]; then
+  # Step 2: Poll refresh/recompile until READY
+  if [ "$SUBCOMMAND" = "recompile" ]; then
+    echo -n "Waiting for recompilation to finish..."
+  else
+    echo -n "Waiting for AssetDatabase refresh/compilation to finish..."
+  fi
+  while true; do
+    # Sleep 1s
+    sleep 1
+    
+    # Check status. send_socket_cmd reads the port file for each connection attempt.
+    response=""
+    response=$(send_socket_cmd "POLL_REFRESH" 2)
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if ! is_unity_still_running; then
+        echo ""
+        if [ "$SUBCOMMAND" = "recompile" ]; then
+          echo "Error: Unity background process exited during recompilation."
+        else
+          echo "Error: Unity background process exited during asset refresh/compilation."
+        fi
+        exit 1
+      fi
+      # Connection failure (compiling or domain reload in progress)
+      echo -n "."
+      continue
+    fi
+    
+    if [ "$response" = "READY" ]; then
+      echo ""
+      echo "Unity is ready!"
+      if [ -f "Temp/unity_compilation_errors.txt" ]; then
+        parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"
+        parse_status=$?
+        if [ $parse_status -eq 0 ]; then
+          exit 1
+        fi
+      fi
+      break
+    elif [ "$response" = "COMPILATION_ERROR" ]; then
+      echo ""
+      if [ -f "Temp/unity_compilation_errors.txt" ] && parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"; then
+        :
+      else
+        echo "Error: Unity compilation failed. Check the Unity Editor Console for details."
+      fi
+      exit 1
+    else
+      echo -n "."
+    fi
+  done
+
+  # Step 3: Action Execution
+  if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "recompile" ]; then
+    if [ "$SUBCOMMAND" = "recompile" ]; then
+      echo "Recompilation completed."
+    else
+      echo "Refresh completed."
+    fi
+    exit 0
+  elif [ "$SUBCOMMAND" = "executemethod" ]; then
+    run_online_method
+    exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+      echo "Method execution failed."
+      exit 1
+    else
+      echo "Method execution succeeded."
+      exit 0
+    fi
+  else
+    # SUBCOMMAND is test
+    TESTS_FAILED=false
+    if [ "$MODE_EDITMODE" = true ]; then
+      run_online_tests "editmode"
+      if [ $? -ne 0 ]; then
+        TESTS_FAILED=true
+      fi
+    fi
+
+    if [ "$MODE_PLAYMODE" = true ]; then
+      run_online_tests "playmode"
+      if [ $? -ne 0 ]; then
+        TESTS_FAILED=true
+      fi
+    fi
+
+    if [ "$TESTS_FAILED" = true ]; then
+      echo "Some tests failed."
+      exit 1
+    else
+      echo "All tests passed."
+      exit 0
+    fi
+  fi
+fi

@@ -21,7 +21,7 @@ namespace UnityCliRunner
                 }
 
                 string packagePath = packageInfo.resolvedPath;
-                string sourcePath = Path.Combine(packagePath, "Templates~", "unitycli.sh");
+                string sourcePath = Path.Combine(packagePath, "CLI~", "unitycli-forward.sh");
                 
                 if (!File.Exists(sourcePath))
                 {
@@ -61,7 +61,7 @@ namespace UnityCliRunner
                 }
 
                 string packagePath = packageInfo.resolvedPath;
-                string sourceDir = Path.Combine(packagePath, "Templates~", ".agents", "skills", "unity-cli");
+                string sourceDir = Path.Combine(packagePath, "CLI~", ".agents", "skills", "unity-cli");
 
                 if (!Directory.Exists(sourceDir))
                 {
