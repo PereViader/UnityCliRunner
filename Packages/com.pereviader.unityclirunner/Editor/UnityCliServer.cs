@@ -197,17 +197,34 @@ namespace UnityCliRunner
                             Exception dispatchException = null;
                             UnityCliDispatcher.Enqueue(() =>
                             {
-                                try
+                                Action executeAction = () =>
                                 {
-                                    handler.Handle(payload, writer);
+                                    try
+                                    {
+                                        handler.Handle(payload, writer);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        dispatchException = ex;
+                                    }
+                                    finally
+                                    {
+                                        finishedEvent.Set();
+                                    }
+                                };
+
+                                bool shouldStopPlaymode = handler is RefreshHandler ||
+                                                          handler is RecompileHandler ||
+                                                          handler is RunTestsHandler ||
+                                                          handler is ExecuteMethodHandler;
+
+                                if (shouldStopPlaymode)
+                                {
+                                    RunActionAfterStoppingPlaymode(executeAction);
                                 }
-                                catch (Exception ex)
+                                else
                                 {
-                                    dispatchException = ex;
-                                }
-                                finally
-                                {
-                                    finishedEvent.Set();
+                                    executeAction();
                                 }
                             });
                             finishedEvent.WaitOne();
@@ -230,6 +247,38 @@ namespace UnityCliRunner
             finally
             {
                 try { client.Close(); } catch { }
+            }
+        }
+
+        private static void RunActionAfterStoppingPlaymode(Action action)
+        {
+            if (EditorApplication.isPlaying)
+            {
+                Debug.Log("UnityCliRunner: Stopping PlayMode before executing command...");
+                EditorApplication.isPlaying = false;
+
+                EditorApplication.CallbackFunction checkPlaymode = null;
+                checkPlaymode = () =>
+                {
+                    if (!EditorApplication.isPlaying)
+                    {
+                        EditorApplication.update -= checkPlaymode;
+                        Debug.Log("UnityCliRunner: PlayMode stopped. Executing command...");
+                        try
+                        {
+                            action();
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogException(e);
+                        }
+                    }
+                };
+                EditorApplication.update += checkPlaymode;
+            }
+            else
+            {
+                action();
             }
         }
 
