@@ -44,16 +44,16 @@ else
 fi
 
 
-# 3. Copy unitycli.sh into the Templates~ folder, overwriting the dummy placeholder
-echo "Copying actual unitycli.sh to build templates..."
-cp "unitycli.sh" "$BUILD_DIR/Templates~/unitycli.sh"
-chmod +x "$BUILD_DIR/Templates~/unitycli.sh"
+# 3. Copy unitycli.sh (wrapper) into the CLI~ folder as unitycli-forward.sh
+echo "Copying forwarding script to build CLI~ folder..."
+cp "unitycli.sh" "$BUILD_DIR/CLI~/unitycli-forward.sh"
+chmod +x "$BUILD_DIR/CLI~/unitycli-forward.sh"
 
-# 4. Copy unity-cli agent skill into the Templates~ folder, replacing the dummy placeholder
-echo "Copying actual unity-cli agent skill to build templates..."
+# 4. Copy unity-cli agent skill into the CLI~ folder, replacing the dummy placeholder
+echo "Copying actual unity-cli agent skill to build CLI~ folder..."
 # Remove the dummy placeholder directory
-rm -rf "$BUILD_DIR/Templates~/.agents/skills/unity-cli"
+rm -rf "$BUILD_DIR/CLI~/.agents/skills/unity-cli"
 # Copy the actual skill directory recursively
-cp -R ".agents/skills/unity-cli" "$BUILD_DIR/Templates~/.agents/skills/"
+cp -R ".agents/skills/unity-cli" "$BUILD_DIR/CLI~/.agents/skills/"
 
 echo "=== Build completed successfully! ==="
