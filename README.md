@@ -28,7 +28,7 @@ A lightweight command-line runner that bridges your shell and AI coding agents w
 
 In the Unity Editor, run the installers from the top menu dropdown:
 - **Tools > UnityCliRunner > InstallBashScript** to copy the runner script (`unitycli.sh`) to the root of your Unity project.
-- **Tools > UnityCliRunner > InstallSkill** to copy the `.agents/skills/unity-cli` folder to the root of your project (required if you use agentic AI tools like **Antigravity**, **Gemini**, **Cline**, or **Roo Code**).
+- **Tools > UnityCliRunner > InstallSkill** to copy the `.agents/skills/unity-cli` folder to the root of your project (required if you use agentic AI tools like **Antigravity**, **Codex**, **Claude**...).
 
 Note: If the root of the unity project is not the root of your repository you may want to move the `.agents` folder to the root of the repository.
 
