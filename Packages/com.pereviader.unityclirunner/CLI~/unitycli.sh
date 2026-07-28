@@ -352,14 +352,14 @@ send_socket_cmd() {
   if (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
     # Try bash /dev/tcp redirection (fastest, no process spawn overhead)
     response=$(
-      if exec 3<>/dev/tcp/127.0.0.1/$port; then
-        echo "$cmd" >&3
-        if read -t "$timeout" line <&3; then
+      if exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
+        echo "$cmd" >&3 2>/dev/null
+        if read -t "$timeout" line <&3 2>/dev/null; then
           echo "$line"
         fi
-        exec 3>&-
+        exec 3>&- 2>/dev/null
       fi
-    )
+    ) 2>/dev/null
   elif command -v nc >/dev/null 2>&1; then
     # Try netcat
     response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
