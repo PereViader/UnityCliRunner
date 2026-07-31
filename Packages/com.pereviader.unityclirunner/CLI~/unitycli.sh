@@ -349,8 +349,24 @@ send_socket_cmd() {
   fi
 
   local response=""
-  if (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
-    # Try bash /dev/tcp redirection (fastest, no process spawn overhead)
+  if command -v zsh >/dev/null 2>&1; then
+    # Try zsh net/tcp module (fastest on macOS and systems with zsh)
+    response=$(
+      zsh -c '
+        zmodload zsh/net/tcp
+        port="$1"
+        cmd="$2"
+        timeout="$3"
+        ztcp 127.0.0.1 "$port" 2>/dev/null || exit 1
+        fd=$REPLY
+        echo "$cmd" >&$fd
+        read -t "$timeout" line <&$fd
+        echo "$line"
+        ztcp -c $fd
+      ' _ "$port" "$cmd" "$timeout"
+    ) 2>/dev/null
+  elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
+    # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
     response=$(
       if exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
         echo "$cmd" >&3 2>/dev/null
@@ -360,9 +376,6 @@ send_socket_cmd() {
         exec 3>&- 2>/dev/null
       fi
     ) 2>/dev/null
-  elif command -v nc >/dev/null 2>&1; then
-    # Try netcat
-    response=$(echo "$cmd" | nc -w "$timeout" 127.0.0.1 "$port" 2>/dev/null | head -n 1)
   elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
     # PowerShell fallback on Windows
     export UNITY_CLI_CMD="$cmd"
