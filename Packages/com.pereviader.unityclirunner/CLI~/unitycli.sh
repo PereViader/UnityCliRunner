@@ -349,6 +349,7 @@ send_socket_cmd() {
   fi
 
   local response=""
+  local socket_exit_code=0
   if command -v zsh >/dev/null 2>&1; then
     # Try zsh net/tcp module (fastest on macOS and systems with zsh)
     response=$(
@@ -357,14 +358,14 @@ send_socket_cmd() {
         port="$1"
         cmd="$2"
         timeout="$3"
-        ztcp 127.0.0.1 "$port" 2>/dev/null || exit 1
+        ztcp 127.0.0.1 "$port" 2>&1 || exit 1
         fd=$REPLY
         echo "$cmd" >&$fd
         read -t "$timeout" line <&$fd
         echo "$line"
         ztcp -c $fd
       ' _ "$port" "$cmd" "$timeout"
-    ) 2>/dev/null
+    ) || socket_exit_code=$?
   elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
     # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
     response=$(
@@ -389,12 +390,20 @@ send_socket_cmd() {
       \$res = \$r.ReadLine();
       \$c.Close();
       Write-Output \$res;
-    " 2>/dev/null)
+    " 2>&1)
     local powershell_exit=$?
+    socket_exit_code=$powershell_exit
     unset UNITY_CLI_CMD
-    if [ $powershell_exit -ne 0 ]; then
-      response=""
+  fi
+
+  if [ "$socket_exit_code" -ne 0 ]; then
+    local lower_resp
+    lower_resp=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lower_resp" == *"operation not permitted"* || "$lower_resp" == *"forbidden by its access permissions"* || "$lower_resp" == *"permissiondenied"* || "$lower_resp" == *"unauthorizedaccessexception"* ]]; then
+      return 42
     fi
+
+    return 1
   fi
 
   if [ -z "$response" ]; then
@@ -407,6 +416,10 @@ send_socket_cmd() {
   response="${response%"${response##*[![:space:]]}"}"
   echo "$response"
   return 0
+}
+
+print_network_permission_error() {
+  echo "Error: Local network permission is required to connect to UnityCliRunner at 127.0.0.1. If you are running in a sandbox, allow network access and retry." >&2
 }
 
 # Function to start background Unity instance or wait for it to be ready
@@ -883,8 +896,12 @@ elif [ "$SUBCOMMAND" = "status" ]; then
 
   response=""
   response=$(send_socket_cmd "PING" 2 2>/dev/null)
-  if [ $? -eq 0 ] && [ "$response" = "PONG" ]; then
+  socket_exit_code=$?
+  if [ "$socket_exit_code" -eq 0 ] && [ "$response" = "PONG" ]; then
     echo "Status: Ready"
+  elif [ "$socket_exit_code" -eq 42 ]; then
+    print_network_permission_error
+    echo "Status: Local Network Permission Required"
   else
     echo "Status: Running Unreachable"
   fi
@@ -911,7 +928,14 @@ if [ "$IS_RUNNING" = true ]; then
         echo "Done!"
         break
       fi
-      
+
+      socket_exit_code=$?
+      if [ "$socket_exit_code" -eq 42 ]; then
+        echo ""
+        print_network_permission_error
+        exit 1
+      fi
+
       if ! is_unity_still_running; then
         echo ""
         echo "Error: Unity background process exited before recompilation could be triggered."
@@ -928,6 +952,13 @@ if [ "$IS_RUNNING" = true ]; then
         echo ""
         echo "Done!"
         break
+      fi
+
+      socket_exit_code=$?
+      if [ "$socket_exit_code" -eq 42 ]; then
+        echo ""
+        print_network_permission_error
+        exit 1
       fi
       
       # If connection failed, check if Unity is still running.

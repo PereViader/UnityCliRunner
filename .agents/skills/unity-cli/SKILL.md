@@ -13,6 +13,8 @@ On windows, run it using the git bash.
 
 Run commands with the current working directory set to the root of the unity project so it can find `ProjectSettings`, `Temp`, `UnityLockFile` and other Unity specific files.
 
+When running in a sandboxed environment, the CLI needs local network permission to connect to the UnityCliRunner TCP socket on 127.0.0.1. Request or grant that network permission before running.
+
 Command executions should not be timed out. Agents should wait for the command to finish or for the user to interrupt it manually.
 
 ## Refresh Workflow
