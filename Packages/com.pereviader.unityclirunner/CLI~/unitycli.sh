@@ -25,6 +25,7 @@ MODE_EDITMODE=false
 FILTER=""
 CATEGORY=""
 EXECUTE_METHOD=""
+EXECUTE_METHOD_PARAMS=()
 BG_ACTION=""
 BG_MODE=""
 
@@ -474,22 +475,21 @@ start_background_unity() {
       is_win=true
     fi
 
+    local launch_args=()
     if [ "$mode" = "batchmode" ]; then
-      if [ "$is_win" = true ]; then
-        "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-        unity_pid=$!
-      else
-        nohup "$UNITY_EXE" -batchmode -nographics -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-        unity_pid=$!
-      fi
+      launch_args+=("-batchmode" "-nographics")
+    fi
+    launch_args+=("-projectPath" "$abs_proj_path" "-logFile" "unity_background_log.txt")
+    if [ ${#auth_args[@]} -gt 0 ]; then
+      launch_args+=("${auth_args[@]}")
+    fi
+
+    if [ "$is_win" = true ]; then
+      "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+      unity_pid=$!
     else
-      if [ "$is_win" = true ]; then
-        "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-        unity_pid=$!
-      else
-        nohup "$UNITY_EXE" -projectPath "$abs_proj_path" -logFile "unity_background_log.txt" "${auth_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-        unity_pid=$!
-      fi
+      nohup "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+      unity_pid=$!
     fi
   fi
 
@@ -599,6 +599,79 @@ print_failed_tests() {
   fi
 }
 
+# Function to parse test results from Temp/unity_test_results.json if process exited/recycled
+parse_and_handle_test_results_file() {
+  local results_file="Temp/unity_test_results.json"
+  if [ ! -f "$results_file" ]; then
+    return 2
+  fi
+
+  local success
+  success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
+  local pass_count
+  pass_count=$(grep '"passCount":' "$results_file" 2>/dev/null | sed -E 's/.*"passCount":[[:space:]]*([0-9]+).*/\1/' | head -n 1)
+  local fail_count
+  fail_count=$(grep '"failCount":' "$results_file" 2>/dev/null | sed -E 's/.*"failCount":[[:space:]]*([0-9]+).*/\1/' | head -n 1)
+  local skip_count
+  skip_count=$(grep '"skipCount":' "$results_file" 2>/dev/null | sed -E 's/.*"skipCount":[[:space:]]*([0-9]+).*/\1/' | head -n 1)
+  local msg
+  msg=$(grep '"message":' "$results_file" 2>/dev/null | sed -E 's/.*"message":[[:space:]]*"([^"]*)".*/\1/' | head -n 1)
+
+  local skip_str=""
+  if [ -n "$skip_count" ] && [ "$skip_count" -gt 0 ]; then
+    skip_str=", $skip_count skipped"
+  fi
+
+  if [ "$success" = "true" ]; then
+    echo ""
+    echo "Done!"
+    echo "Unity Response: SUCCESS ${pass_count:-0} passed${skip_str}"
+    return 0
+  else
+    echo ""
+    echo "Done!"
+    if [ -n "$msg" ]; then
+      echo "Unity Response: FAILURE $msg"
+    else
+      echo "Unity Response: FAILURE ${fail_count:-0} failed, ${pass_count:-0} passed${skip_str}"
+    fi
+    print_failed_tests
+    return 1
+  fi
+}
+
+# Function to parse execute results from Temp/unity_execute_result.json if process exited/recycled
+parse_and_handle_execute_results_file() {
+  local results_file="Temp/unity_execute_result.json"
+  if [ ! -f "$results_file" ]; then
+    return 2
+  fi
+
+  local success
+  success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
+  local payload
+  payload=$(grep '"payload":' "$results_file" 2>/dev/null | sed -E 's/.*"payload":[[:space:]]*"([^"]*)".*/\1/' | head -n 1)
+  local msg
+  msg=$(grep '"message":' "$results_file" 2>/dev/null | sed -E 's/.*"message":[[:space:]]*"([^"]*)".*/\1/' | head -n 1)
+
+  if [ "$success" = "true" ]; then
+    echo ""
+    echo "Done!"
+    if [ -n "$payload" ]; then
+      echo "$payload"
+    else
+      echo "Unity Response: SUCCESS"
+    fi
+    return 0
+  else
+    echo ""
+    echo "Done!"
+    echo "Unity Response: FAILURE"
+    echo "$msg"
+    return 1
+  fi
+}
+
 # Function to run tests via socket (Online)
 run_online_tests() {
   local mode="$1"
@@ -625,7 +698,20 @@ run_online_tests() {
     # Re-read port/query status. The connection will fail during domain reloads, which is expected.
     response=$(send_socket_cmd "POLL_TESTS" 5)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if [ -f "Temp/unity_test_results.json" ] && [ ! -f "Temp/unity_test_running.txt" ]; then
+        parse_and_handle_test_results_file
+        return $?
+      fi
+
       if ! is_unity_still_running; then
+        for wait_i in {1..10}; do
+          if [ -f "Temp/unity_test_results.json" ]; then
+            parse_and_handle_test_results_file
+            return $?
+          fi
+          sleep 0.3
+        done
+
         echo ""
         echo "Error: Unity background process exited during test execution."
         return 1
@@ -662,11 +748,13 @@ run_online_method() {
   echo "Sending command to run method $EXECUTE_METHOD..."
 
   local cmd="EXECUTE_METHOD $EXECUTE_METHOD"
-  for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
-    local escaped="${param//\\/\\\\}"
-    escaped="${escaped//\"/\\\"}"
-    cmd="$cmd \"$escaped\""
-  done
+  if [ ${#EXECUTE_METHOD_PARAMS[@]} -gt 0 ]; then
+    for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
+      local escaped="${param//\\/\\\\}"
+      escaped="${escaped//\"/\\\"}"
+      cmd="$cmd \"$escaped\""
+    done
+  fi
 
   local response=""
   response=$(send_socket_cmd "$cmd" 10)
@@ -681,7 +769,20 @@ run_online_method() {
 
     response=$(send_socket_cmd "POLL_EXECUTE" 5)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
+      if [ -f "Temp/unity_execute_result.json" ] && [ ! -f "Temp/unity_execute_running.txt" ]; then
+        parse_and_handle_execute_results_file
+        return $?
+      fi
+
       if ! is_unity_still_running; then
+        for wait_i in {1..10}; do
+          if [ -f "Temp/unity_execute_result.json" ]; then
+            parse_and_handle_execute_results_file
+            return $?
+          fi
+          sleep 0.3
+        done
+
         echo ""
         echo "Error: Unity background process exited during method execution."
         return 1
