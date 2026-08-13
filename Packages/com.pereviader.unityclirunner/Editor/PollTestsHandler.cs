@@ -8,18 +8,17 @@ namespace UnityCliRunner
     {
         public void Handle(string payload, StreamWriter writer)
         {
-            string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
-            string resultsPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_results.json");
+            RunTestsHandler.CheckAndHandleInactiveRun();
 
-            if (File.Exists(runningPath))
+            if (File.Exists(RunTestsHandler.RunningFilePath))
             {
                 writer.WriteLine("RUNNING");
             }
-            else if (File.Exists(resultsPath))
+            else if (File.Exists(RunTestsHandler.ResultsFilePath))
             {
                 try
                 {
-                    string content = File.ReadAllText(resultsPath);
+                    string content = File.ReadAllText(RunTestsHandler.ResultsFilePath);
                     var res = JsonUtility.FromJson<UnityTestRunResult>(content);
                     string skipStr = res.skipCount > 0 ? $", {res.skipCount} skipped" : "";
                     if (res.success)
