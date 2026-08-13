@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
@@ -11,7 +12,14 @@ namespace UnityCliRunner
     internal class RunTestsHandler : ICommandHandler
     {
         private static MyTestCallbacks s_Callbacks;
+        private static MethodInfo s_IsRunActiveMethod;
+
         internal static bool HasActiveTestFilter { get; set; }
+
+        internal static string TempDirectory => Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+        internal static string RunningFilePath => Path.Combine(TempDirectory, "unity_test_running.txt");
+        internal static string ResultsFilePath => Path.Combine(TempDirectory, "unity_test_results.json");
+        internal static string FailuresFilePath => Path.Combine(TempDirectory, "unity_test_failures.txt");
 
         public static void RegisterCallbacks()
         {
@@ -20,18 +28,56 @@ namespace UnityCliRunner
                 return;
             }
 
-            var existingApis = Resources.FindObjectsOfTypeAll<TestRunnerApi>();
-            if (existingApis != null)
+            foreach (var api in Resources.FindObjectsOfTypeAll<TestRunnerApi>())
             {
-                foreach (var api in existingApis)
-                {
-                    try { UnityEngine.Object.DestroyImmediate(api); } catch { }
-                }
+                try { UnityEngine.Object.DestroyImmediate(api); } catch { }
             }
 
             s_Callbacks = new MyTestCallbacks();
             var runnerApi = ScriptableObject.CreateInstance<TestRunnerApi>();
             runnerApi.RegisterCallbacks(s_Callbacks);
+
+            EditorApplication.update -= UpdateCheck;
+            EditorApplication.update += UpdateCheck;
+        }
+
+        public static bool IsTestRunActive()
+        {
+            try
+            {
+                s_IsRunActiveMethod ??= typeof(TestRunnerApi).GetMethod("IsRunActive", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                return s_IsRunActiveMethod != null && (bool)s_IsRunActiveMethod.Invoke(null, null);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to check IsRunActive: {ex}");
+                return false;
+            }
+        }
+
+        private static void UpdateCheck()
+        {
+            CheckAndHandleInactiveRun();
+        }
+
+        internal static void CheckAndHandleInactiveRun()
+        {
+            if (!File.Exists(RunningFilePath))
+            {
+                return;
+            }
+
+            if (!IsTestRunActive() && !EditorApplication.isCompiling && !EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                if (s_Callbacks != null && s_Callbacks.IsRunning)
+                {
+                    s_Callbacks.OnRunCancelled("Test run was cancelled or interrupted.");
+                }
+                else
+                {
+                    try { File.Delete(RunningFilePath); } catch { }
+                }
+            }
         }
 
         public void Handle(string payload, StreamWriter writer)
@@ -55,7 +101,19 @@ namespace UnityCliRunner
                 return;
             }
 
-            string modeStr = args[0].ToLowerInvariant();
+            TestMode mode = args[0].ToLowerInvariant() switch
+            {
+                "playmode" => TestMode.PlayMode,
+                "editmode" => TestMode.EditMode,
+                _ => (TestMode)(-1)
+            };
+
+            if ((int)mode == -1)
+            {
+                writer.WriteLine("ERROR: Invalid test mode. Must be playmode or editmode");
+                return;
+            }
+
             string filter = "";
             string category = "";
 
@@ -63,29 +121,12 @@ namespace UnityCliRunner
             {
                 if (args[i] == "--filter" && i + 1 < args.Length)
                 {
-                    filter = args[i + 1];
-                    i++;
+                    filter = args[++i];
                 }
                 else if (args[i] == "--category" && i + 1 < args.Length)
                 {
-                    category = args[i + 1];
-                    i++;
+                    category = args[++i];
                 }
-            }
-
-            TestMode mode;
-            if (modeStr == "playmode")
-            {
-                mode = TestMode.PlayMode;
-            }
-            else if (modeStr == "editmode")
-            {
-                mode = TestMode.EditMode;
-            }
-            else
-            {
-                writer.WriteLine("ERROR: Invalid test mode. Must be playmode or editmode");
-                return;
             }
 
             // Write running state files synchronously
@@ -101,19 +142,16 @@ namespace UnityCliRunner
         {
             try
             {
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
-                if (!Directory.Exists(tempDir))
+                if (!Directory.Exists(TempDirectory))
                 {
-                    Directory.CreateDirectory(tempDir);
+                    Directory.CreateDirectory(TempDirectory);
                 }
-                string runningPath = Path.Combine(tempDir, "unity_test_running.txt");
-                string resultsPath = Path.Combine(tempDir, "unity_test_results.json");
 
-                if (File.Exists(resultsPath))
+                if (File.Exists(ResultsFilePath))
                 {
-                    File.Delete(resultsPath);
+                    File.Delete(ResultsFilePath);
                 }
-                File.WriteAllText(runningPath, DateTime.UtcNow.ToString("o"));
+                File.WriteAllText(RunningFilePath, DateTime.UtcNow.ToString("o"));
             }
             catch (Exception ex)
             {
@@ -127,24 +165,17 @@ namespace UnityCliRunner
             {
                 if (s_Callbacks == null)
                 {
-                    s_Callbacks = new MyTestCallbacks();
-                    var runnerApi = ScriptableObject.CreateInstance<TestRunnerApi>();
-                    runnerApi.RegisterCallbacks(s_Callbacks);
+                    RegisterCallbacks();
                 }
+
                 var activeTestRunnerApi = ScriptableObject.CreateInstance<TestRunnerApi>();
 
-                var filter = new Filter();
-                filter.testMode = mode;
-
-                if (!string.IsNullOrEmpty(filterText))
+                var filter = new Filter
                 {
-                    filter.groupNames = new[] { filterText };
-                }
-
-                if (!string.IsNullOrEmpty(categoryText))
-                {
-                    filter.categoryNames = new[] { categoryText };
-                }
+                    testMode = mode,
+                    groupNames = !string.IsNullOrEmpty(filterText) ? new[] { filterText } : null,
+                    categoryNames = !string.IsNullOrEmpty(categoryText) ? new[] { categoryText } : null
+                };
 
                 HasActiveTestFilter = !string.IsNullOrEmpty(filterText) || !string.IsNullOrEmpty(categoryText);
 
@@ -156,20 +187,20 @@ namespace UnityCliRunner
             {
                 Debug.LogError($"UnityCliRunner: Failed to start tests: {ex}");
                 HasActiveTestFilter = false;
-                // Clean up state so we don't hang polling
-                string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
-                if (File.Exists(runningPath))
+                if (File.Exists(RunningFilePath))
                 {
-                    File.Delete(runningPath);
+                    File.Delete(RunningFilePath);
                 }
             }
         }
     }
 
-    public class MyTestCallbacks : ICallbacks
+    public class MyTestCallbacks : ICallbacks, IErrorCallbacks
     {
-        private List<FailedTestInfo> m_FailedTests = new List<FailedTestInfo>();
+        private readonly List<FailedTestInfo> m_FailedTests = new List<FailedTestInfo>();
         private bool m_IsRunning = false;
+
+        public bool IsRunning => m_IsRunning || File.Exists(RunTestsHandler.RunningFilePath);
 
         public void RunStarted(ITestAdaptor testsToRun)
         {
@@ -177,21 +208,58 @@ namespace UnityCliRunner
             m_IsRunning = true;
         }
 
+        public void OnError(string message)
+        {
+            FinalizeTestRun(false, m_FailedTests.Count, 0, 0, string.IsNullOrEmpty(message) ? "Test run failed with error." : message, "Failed");
+        }
+
+        public void OnRunCancelled(string reason = "Test run was cancelled or interrupted.")
+        {
+            FinalizeTestRun(false, m_FailedTests.Count, 0, 0, reason, "Cancelled");
+        }
+
         public void RunFinished(ITestResultAdaptor result)
         {
             try
             {
-                if (!m_IsRunning)
+                if (!IsRunning)
+                {
+                    return;
+                }
+
+                bool isCancelled = result.ResultState == "Cancelled" ||
+                                   result.ResultState.IndexOf("Cancel", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool didNotMatchAnyTests = RunTestsHandler.HasActiveTestFilter && result.FailCount == 0 && result.PassCount == 0 && result.SkipCount == 0;
+                bool isFailed = result.FailCount > 0 || result.TestStatus == TestStatus.Failed || isCancelled || didNotMatchAnyTests;
+
+                bool success = !isFailed;
+                string message = isCancelled ? (!string.IsNullOrEmpty(result.Message) ? result.Message : "Test run was cancelled or interrupted.")
+                               : didNotMatchAnyTests ? "No tests matched the supplied filter."
+                               : "";
+
+                FinalizeTestRun(success, result.FailCount, result.PassCount, result.SkipCount, message, result.ResultState);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Exception in RunFinished callback: {ex}");
+            }
+        }
+
+        private void FinalizeTestRun(bool success, int failCount, int passCount, int skipCount, string message, string resultState)
+        {
+            try
+            {
+                string runningPath = RunTestsHandler.RunningFilePath;
+                string resultsPath = RunTestsHandler.ResultsFilePath;
+                string failuresPath = RunTestsHandler.FailuresFilePath;
+
+                if (!m_IsRunning && !File.Exists(runningPath))
                 {
                     return;
                 }
                 m_IsRunning = false;
 
-                Debug.Log($"UnityCliRunner: RunFinished called on callback instance {GetHashCode()}");
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
-                string runningPath = Path.Combine(tempDir, "unity_test_running.txt");
-                string resultsPath = Path.Combine(tempDir, "unity_test_results.json");
-                string failuresPath = Path.Combine(tempDir, "unity_test_failures.txt");
+                Debug.Log($"UnityCliRunner: Finalizing test run. Success: {success}, ResultState: {resultState}, Message: {message}");
 
                 if (File.Exists(runningPath))
                 {
@@ -204,44 +272,17 @@ namespace UnityCliRunner
 
                 if (m_FailedTests.Count > 0)
                 {
-                    var sb = new StringBuilder();
-                    foreach (var test in m_FailedTests)
-                    {
-                        int durationMs = (int)Math.Round(test.duration * 1000);
-                        string durationStr = durationMs < 1 ? "< 1 ms" : $"{durationMs} ms";
-                        sb.AppendLine($"  \u001b[31mFailed\u001b[0m {test.fullName} [{durationStr}]");
-                        sb.AppendLine("  Error Message:");
-                        if (!string.IsNullOrEmpty(test.message))
-                        {
-                            foreach (var line in test.message.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
-                            {
-                                sb.AppendLine($"   {line}");
-                            }
-                        }
-                        sb.AppendLine("  Stack Trace:");
-                        if (!string.IsNullOrEmpty(test.stackTrace))
-                        {
-                            foreach (var line in test.stackTrace.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
-                            {
-                                sb.AppendLine($"   {line}");
-                            }
-                        }
-                        sb.AppendLine();
-                    }
-
-                    File.WriteAllText(failuresPath, sb.ToString(), new UTF8Encoding(false));
+                    File.WriteAllText(failuresPath, FormatFailures(m_FailedTests), new UTF8Encoding(false));
                 }
-
-                bool didNotMatchAnyTests = RunTestsHandler.HasActiveTestFilter && result.FailCount == 0 && result.PassCount == 0 && result.SkipCount == 0;
 
                 var runResult = new UnityTestRunResult
                 {
-                    success = result.FailCount == 0 && !didNotMatchAnyTests,
-                    failCount = result.FailCount,
-                    passCount = result.PassCount,
-                    skipCount = result.SkipCount,
-                    message = didNotMatchAnyTests ? "No tests matched the supplied filter." : "",
-                    resultState = result.ResultState,
+                    success = success,
+                    failCount = failCount,
+                    passCount = passCount,
+                    skipCount = skipCount,
+                    message = message,
+                    resultState = resultState,
                     failedTests = new List<FailedTestInfo>(m_FailedTests)
                 };
 
@@ -253,8 +294,37 @@ namespace UnityCliRunner
             }
             catch (Exception ex)
             {
-                Debug.LogError($"UnityCliRunner: Exception in RunFinished callback: {ex}");
+                Debug.LogError($"UnityCliRunner: Exception in FinalizeTestRun: {ex}");
             }
+        }
+
+        private static string FormatFailures(List<FailedTestInfo> failedTests)
+        {
+            var sb = new StringBuilder();
+            foreach (var test in failedTests)
+            {
+                int durationMs = (int)Math.Round(test.duration * 1000);
+                string durationStr = durationMs < 1 ? "< 1 ms" : $"{durationMs} ms";
+                sb.AppendLine($"  \u001b[31mFailed\u001b[0m {test.fullName} [{durationStr}]");
+                sb.AppendLine("  Error Message:");
+                if (!string.IsNullOrEmpty(test.message))
+                {
+                    foreach (var line in test.message.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
+                    {
+                        sb.AppendLine($"   {line}");
+                    }
+                }
+                sb.AppendLine("  Stack Trace:");
+                if (!string.IsNullOrEmpty(test.stackTrace))
+                {
+                    foreach (var line in test.stackTrace.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
+                    {
+                        sb.AppendLine($"   {line}");
+                    }
+                }
+                sb.AppendLine();
+            }
+            return sb.ToString();
         }
 
         public void TestStarted(ITestAdaptor test)

@@ -245,6 +245,7 @@ TEST_CASES=(
   "TestCompileWarningsAndPass"
   "TestNoWarningsAndFailures"
   "TestNoWarningsAndSkipped"
+  "TestStopTests"
 )
 
 FAILED_TESTS=0
