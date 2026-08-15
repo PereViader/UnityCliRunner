@@ -261,14 +261,14 @@ fi
 # Function to find Unity path
 find_unity_path() {
   if [ -n "${UNITY_PATH:-}" ] && [ -f "$UNITY_PATH" ]; then
-    echo "$UNITY_PATH"
+    echo "$UNITY_PATH" | tr -d '\r'
     return 0
   fi
 
   # Prioritize unity-editor wrapper from PATH if explicitly requested via environment variable
   if [ "${USE_UNITY_EDITOR_WRAPPER:-false}" = "true" ]; then
     local container_unity=""
-    container_unity=$(command -v unity-editor 2>/dev/null)
+    container_unity=$(command -v unity-editor 2>/dev/null | tr -d '\r')
     if [ -n "$container_unity" ]; then
       echo "$container_unity"
       return 0
@@ -277,7 +277,7 @@ find_unity_path() {
 
   local version=""
   if [ -f "ProjectSettings/ProjectVersion.txt" ]; then
-    version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}')
+    version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')
   fi
 
   if [ -z "$version" ]; then
@@ -294,6 +294,10 @@ find_unity_path() {
   if [ "$is_windows" = true ]; then
     paths=(
       "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
+      "C:/Program Files (x86)/Unity/Hub/Editor/$version/Editor/Unity.exe"
+      "C:/Unity/Hub/Editor/$version/Editor/Unity.exe"
+      "D:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
+      "D:/Unity/Hub/Editor/$version/Editor/Unity.exe"
     )
   elif [[ "$(uname)" == "Darwin" ]]; then
     paths=(
@@ -316,7 +320,15 @@ find_unity_path() {
 
   local command_unity=""
   if [ "$is_windows" = true ]; then
-    command_unity=$(where unity 2>/dev/null | head -n 1)
+    command_unity=$(where unity 2>/dev/null | head -n 1 | tr -d '\r')
+    if [ -z "$command_unity" ]; then
+      for cmd in Unity.exe unity.exe Unity unity; do
+        command_unity=$(command -v "$cmd" 2>/dev/null | tr -d '\r')
+        if [ -n "$command_unity" ]; then
+          break
+        fi
+      done
+    fi
   else
     for cmd in Unity unity; do
       command_unity=$(command -v "$cmd" 2>/dev/null)
