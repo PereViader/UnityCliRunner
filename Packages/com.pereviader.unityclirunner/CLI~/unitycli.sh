@@ -952,7 +952,6 @@ elif [ "$SUBCOMMAND" = "stop" ]; then
         }
       " 2>/dev/null | tr -d '\r')
     else
-      local filesize
       filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
       if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
         pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
