@@ -15,13 +15,12 @@ namespace UnityCliRunner
             try
             {
                 Debug.Log("UnityCliRunner: Triggering AssetDatabase.Refresh()");
-                UnityCliCompilationTracker.DeleteDiagnosticsFile();
-                UnityCliCompilationTracker.ClearActiveEntries();
                 AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
             }
             finally
             {
                 UnityCliCompilationTracker.RefreshPending = false;
+                UnityCliCompilationTracker.WriteActiveErrorsToFile();
             }
         }
     }

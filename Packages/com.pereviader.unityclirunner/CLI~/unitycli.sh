@@ -26,6 +26,7 @@ FILTER=""
 CATEGORY=""
 EXECUTE_METHOD=""
 EXECUTE_METHOD_PARAMS=()
+EVAL_CODE=""
 BG_ACTION=""
 BG_MODE=""
 
@@ -46,6 +47,8 @@ show_usage() {
   echo "    --category <category> Filter tests by category"
   echo "  executemethod <method> [args...] Execute a custom static method (optionally with parameters)"
   echo "                          (e.g., Namespace.Class.Method 4 3 \"{\\\"Value\\\":4}\")"
+  echo "  eval <code>             Evaluate a live C# expression or script dynamically"
+  echo "                          (e.g., \"Application.unityVersion\" or \"1 + 1\")"
   echo "  -h, --help              Show this help message"
   exit "$exit_code"
 }
@@ -135,6 +138,15 @@ case "$SUBCOMMAND" in
     shift $#
     ;;
 
+  eval)
+    if [ $# -eq 0 ]; then
+      echo "Error: eval requires a C# code snippet or expression (e.g., Application.unityVersion)"
+      show_usage
+    fi
+    EVAL_CODE="$*"
+    shift $#
+    ;;
+
   start)
     if [ $# -eq 0 ]; then
       echo "Error: start command requires a mode (batchmode|interactive)"
@@ -176,6 +188,113 @@ case "$SUBCOMMAND" in
     ;;
 esac
 
+# Function to send a command to the socket server
+send_socket_cmd() {
+  local cmd="$1"
+  local timeout="${2:-10}"
+
+  # Read dynamic port
+  local port=""
+  if [ -f "Temp/unity_cli_port.txt" ]; then
+    port=$(cat "Temp/unity_cli_port.txt")
+  fi
+
+  if [ -z "$port" ]; then
+    return 1
+  fi
+
+  local response=""
+  local socket_exit_code=0
+  if command -v zsh >/dev/null 2>&1; then
+    # Try zsh net/tcp module (fastest on macOS and systems with zsh)
+    response=$(
+      zsh -c '
+        zmodload zsh/net/tcp
+        port="$1"
+        cmd="$2"
+        timeout="$3"
+        ztcp 127.0.0.1 "$port" 2>&1 || exit 1
+        fd=$REPLY
+        echo "$cmd" >&$fd
+        read -t "$timeout" line <&$fd
+        echo "$line"
+        ztcp -c $fd
+      ' _ "$port" "$cmd" "$timeout"
+    ) || socket_exit_code=$?
+  elif exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
+    # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
+    response=$(
+      echo "$cmd" >&3 2>/dev/null
+      if read -t "$timeout" line <&3 2>/dev/null; then
+        echo "$line"
+      fi
+      exec 3>&- 2>/dev/null
+    ) 2>/dev/null
+  elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    # PowerShell fallback on Windows
+    export UNITY_CLI_CMD="$cmd"
+    response=$(powershell -NoProfile -Command "
+      \$ErrorActionPreference = 'Stop';
+      try {
+        \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
+        \$c.ReceiveTimeout = \$((\$timeout * 1000));
+        \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
+        \$r = New-Object System.IO.StreamReader(\$c.GetStream());
+        \$w.WriteLine(\$env:UNITY_CLI_CMD);
+        \$w.Flush();
+        \$res = \$r.ReadLine();
+        \$c.Close();
+        Write-Output \$res;
+      } catch {
+        exit 1;
+      }
+    " 2>&1)
+    local powershell_exit=$?
+    socket_exit_code=$powershell_exit
+    unset UNITY_CLI_CMD
+  fi
+
+  if [ "$socket_exit_code" -ne 0 ]; then
+    local lower_resp
+    lower_resp=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lower_resp" == *"operation not permitted"* || "$lower_resp" == *"forbidden by its access permissions"* || "$lower_resp" == *"permissiondenied"* || "$lower_resp" == *"unauthorizedaccessexception"* ]]; then
+      return 42
+    fi
+
+    return 1
+  fi
+
+  if [ -z "$response" ]; then
+    return 1
+  fi
+
+  # Strip carriage returns and trim whitespace
+  response=$(echo "$response" | tr -d '\r')
+  response="${response#"${response%%[![:space:]]*}"}"
+  response="${response%"${response##*[![:space:]]}"}"
+  echo "$response"
+  return 0
+}
+
+print_network_permission_error() {
+  echo "Error: Local network permission is required to connect to UnityCliRunner at 127.0.0.1. If you are running in a sandbox, allow network access and retry." >&2
+}
+
+# Function to check if a PID is alive cross-platform
+is_process_alive() {
+  local pid="$1"
+  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    powershell -NoProfile -Command "Get-Process -Id $pid -ErrorAction SilentlyContinue | Out-Null; if (\$?) { exit 0 } else { exit 1 }" >/dev/null 2>&1
+    return $?
+  else
+    kill -0 "$pid" 2>/dev/null
+    return $?
+  fi
+}
+
 # Function to kill a process by PID
 kill_process() {
   local pid="$1"
@@ -190,6 +309,10 @@ kill_process() {
 
 # Function to check if Unity is still running (locked)
 is_unity_still_running() {
+  if [ -f "Temp/unity_cli_port.txt" ] && _=$(send_socket_cmd "PING" 1 2>/dev/null); then
+    return 0
+  fi
+
   local lockfile=""
   if [ -f "Temp/UnityLockfile" ]; then
     lockfile="Temp/UnityLockfile"
@@ -346,93 +469,6 @@ find_unity_path() {
   return 1
 }
 
-# Function to send a command to the socket server
-send_socket_cmd() {
-  local cmd="$1"
-  local timeout="${2:-10}"
-
-  # Read dynamic port
-  local port=""
-  if [ -f "Temp/unity_cli_port.txt" ]; then
-    port=$(cat "Temp/unity_cli_port.txt")
-  fi
-
-  if [ -z "$port" ]; then
-    return 1
-  fi
-
-  local response=""
-  local socket_exit_code=0
-  if command -v zsh >/dev/null 2>&1; then
-    # Try zsh net/tcp module (fastest on macOS and systems with zsh)
-    response=$(
-      zsh -c '
-        zmodload zsh/net/tcp
-        port="$1"
-        cmd="$2"
-        timeout="$3"
-        ztcp 127.0.0.1 "$port" 2>&1 || exit 1
-        fd=$REPLY
-        echo "$cmd" >&$fd
-        read -t "$timeout" line <&$fd
-        echo "$line"
-        ztcp -c $fd
-      ' _ "$port" "$cmd" "$timeout"
-    ) || socket_exit_code=$?
-  elif exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
-    # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
-    response=$(
-      echo "$cmd" >&3 2>/dev/null
-      if read -t "$timeout" line <&3 2>/dev/null; then
-        echo "$line"
-      fi
-      exec 3>&- 2>/dev/null
-    ) 2>/dev/null
-  elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    # PowerShell fallback on Windows
-    export UNITY_CLI_CMD="$cmd"
-    response=$(powershell -NoProfile -Command "
-      \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
-      \$c.ReceiveTimeout = \$((\$timeout * 1000));
-      \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
-      \$r = New-Object System.IO.StreamReader(\$c.GetStream());
-      \$w.WriteLine(\$env:UNITY_CLI_CMD);
-      \$w.Flush();
-      \$res = \$r.ReadLine();
-      \$c.Close();
-      Write-Output \$res;
-    " 2>&1)
-    local powershell_exit=$?
-    socket_exit_code=$powershell_exit
-    unset UNITY_CLI_CMD
-  fi
-
-  if [ "$socket_exit_code" -ne 0 ]; then
-    local lower_resp
-    lower_resp=$(echo "$response" | tr '[:upper:]' '[:lower:]')
-    if [[ "$lower_resp" == *"operation not permitted"* || "$lower_resp" == *"forbidden by its access permissions"* || "$lower_resp" == *"permissiondenied"* || "$lower_resp" == *"unauthorizedaccessexception"* ]]; then
-      return 42
-    fi
-
-    return 1
-  fi
-
-  if [ -z "$response" ]; then
-    return 1
-  fi
-
-  # Strip carriage returns and trim whitespace
-  response=$(echo "$response" | tr -d '\r')
-  response="${response#"${response%%[![:space:]]*}"}"
-  response="${response%"${response##*[![:space:]]}"}"
-  echo "$response"
-  return 0
-}
-
-print_network_permission_error() {
-  echo "Error: Local network permission is required to connect to UnityCliRunner at 127.0.0.1. If you are running in a sandbox, allow network access and retry." >&2
-}
-
 # Function to start background Unity instance or wait for it to be ready
 start_background_unity() {
   local mode="${1:-batchmode}"
@@ -468,7 +504,7 @@ start_background_unity() {
     
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
-    abs_proj_path="$(pwd)"
+    abs_proj_path="$(pwd -W 2>/dev/null || pwd)"
     local auth_args=()
     local user="${UNITY_EMAIL:-${UNITY_USERNAME:-}}"
     if [ -n "$user" ] && [ -n "${UNITY_PASSWORD:-}" ] && [ -n "${UNITY_LICENSE:-}" ]; then
@@ -495,8 +531,17 @@ start_background_unity() {
     fi
 
     if [ "$is_win" = true ]; then
-      nohup "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
-      unity_pid=$!
+      local ps_args=()
+      for a in "${launch_args[@]}"; do
+        local esc="${a//\"/\\\"}"
+        ps_args+=("\"$esc\"")
+      done
+      local args_str
+      args_str=$(IFS=', '; echo "${ps_args[*]}")
+      unity_pid=$(powershell -NoProfile -Command "
+        \$p = Start-Process -FilePath '$UNITY_EXE' -ArgumentList @($args_str) -PassThru;
+        \$p.Id
+      " 2>/dev/null | tr -d '\r')
     else
       nohup "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
@@ -545,7 +590,7 @@ start_background_unity() {
     # Check if the process exited unexpectedly
     local process_exited=false
     if [ "$needs_launch" = true ] && [ -n "$unity_pid" ]; then
-      if ! kill -0 "$unity_pid" 2>/dev/null; then
+      if ! is_process_alive "$unity_pid"; then
         process_exited=true
       fi
     elif [ "$needs_launch" = false ]; then
@@ -678,6 +723,59 @@ parse_and_handle_execute_results_file() {
     echo "Done!"
     echo "Unity Response: FAILURE"
     echo "$msg"
+    return 1
+  fi
+}
+
+# Function to parse eval results from Temp/unity_eval_result.json
+parse_and_handle_eval_results_file() {
+  local results_file="Temp/unity_eval_result.json"
+  if [ ! -f "$results_file" ]; then
+    return 2
+  fi
+
+  local is_windows=false
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
+    is_windows=true
+  fi
+
+  if [ "$is_windows" = true ] && command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -Command "
+      \$content = Get-Content 'Temp/unity_eval_result.json' -Raw -Encoding UTF8;
+      \$json = ConvertFrom-Json \$content;
+      if (\$json.success) {
+          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
+              Write-Output \$json.payload;
+          }
+          exit 0;
+      } else {
+          [Console]::Error.WriteLine(\$json.message);
+          exit 1;
+      }
+    "
+    return $?
+  fi
+
+  local success
+  success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
+  local payload
+  payload=$(grep '"payload":' "$results_file" 2>/dev/null | sed -E 's/.*"payload":[[:space:]]*"([^"]*)".*/\1/' | head -n 1)
+  local msg
+  msg=$(grep '"message":' "$results_file" 2>/dev/null | sed -E 's/.*"message":[[:space:]]*"([^"]*)".*/\1/' | head -n 1)
+
+  if [ "$success" = "true" ]; then
+    if [ -n "$payload" ] && [ "$payload" != "null" ]; then
+      echo -e "$payload"
+    elif [ "$payload" = "null" ]; then
+      echo "null"
+    fi
+    return 0
+  else
+    if [ -n "$msg" ]; then
+      echo -e "$msg" >&2
+    else
+      echo "Evaluation failed." >&2
+    fi
     return 1
   fi
 }
@@ -831,6 +929,66 @@ run_online_method() {
   done
 }
 
+# Function to evaluate C# snippet via socket (Online)
+run_online_eval() {
+  local cmd="EVAL $EVAL_CODE"
+  local response=""
+
+  response=$(send_socket_cmd "$cmd" 30)
+  local send_status=$?
+
+  if [ -f "Temp/unity_eval_result.json" ] && [ ! -f "Temp/unity_eval_running.txt" ]; then
+    parse_and_handle_eval_results_file
+    return $?
+  fi
+
+  if [ $send_status -ne 0 ] || [ -z "$response" ]; then
+    if ! is_unity_still_running; then
+      echo "Error: Unity background process exited during eval execution." >&2
+      return 1
+    fi
+
+    # Poll if needed
+    local elapsed=0
+    while [ $elapsed -lt 30 ]; do
+      sleep 0.2
+      elapsed=$((elapsed + 1))
+      response=$(send_socket_cmd "POLL_EVAL" 5 2>/dev/null)
+      if [ -f "Temp/unity_eval_result.json" ] && [ ! -f "Temp/unity_eval_running.txt" ]; then
+        parse_and_handle_eval_results_file
+        return $?
+      fi
+      if [ "$response" = "RUNNING" ]; then
+        continue
+      elif [[ "$response" == SUCCESS* ]] || [[ "$response" == FAILURE* ]] || [[ "$response" == ERROR* ]]; then
+        break
+      fi
+    done
+  fi
+
+  if [ -f "Temp/unity_eval_result.json" ]; then
+    parse_and_handle_eval_results_file
+    return $?
+  fi
+
+  if [[ "$response" == SUCCESS* ]]; then
+    local payload="${response#SUCCESS}"
+    payload="${payload#"${payload%%[![:space:]]*}"}"
+    payload="${payload%"${payload##*[![:space:]]}"}"
+    if [ -n "$payload" ]; then
+      echo "$payload"
+    fi
+    return 0
+  else
+    local err="${response#FAILURE}"
+    err="${err#ERROR:}"
+    err="${err#"${err%%[![:space:]]*}"}"
+    err="${err%"${err##*[![:space:]]}"}"
+    echo "$err" >&2
+    return 1
+  fi
+}
+
 # Function to parse compilation errors and warnings from a log file
 # and print them in dotnet build format.
 parse_and_print_compilation_results() {
@@ -889,8 +1047,8 @@ parse_and_print_compilation_results() {
 # --- Main Execution ---
 
 # Clean up stale compilation errors, results, and failures files, and execute files
-rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt Temp/unity_stdout_stderr.txt unity_stdout_stderr.txt unity_background_log.txt 2>/dev/null
-rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt 2>/dev/null
+rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
+rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt Temp/unity_eval_result.json Temp/unity_eval_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "start" ]; then
   start_background_unity "$BG_MODE"
@@ -1018,6 +1176,14 @@ elif [ "$SUBCOMMAND" = "status" ]; then
   exit 0
 fi
 
+if [ "$SUBCOMMAND" = "eval" ]; then
+  if [ "$IS_RUNNING" = false ]; then
+    start_background_unity batchmode
+  fi
+  run_online_eval
+  exit $?
+fi
+
 if [ "$IS_RUNNING" = false ]; then
   if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "recompile" ] || [ "$SUBCOMMAND" = "test" ] || [ "$SUBCOMMAND" = "executemethod" ]; then
     start_background_unity batchmode
@@ -1136,6 +1302,13 @@ if [ "$IS_RUNNING" = true ]; then
       break
     elif [ "$response" = "COMPILATION_ERROR" ]; then
       echo ""
+      for wait_diag in {1..25}; do
+        if [ -s "Temp/unity_compilation_errors.txt" ]; then
+          break
+        fi
+        sleep 0.1
+      done
+      sleep 0.2
       if [ -f "Temp/unity_compilation_errors.txt" ] && parse_and_print_compilation_results "Temp/unity_compilation_errors.txt"; then
         :
       else

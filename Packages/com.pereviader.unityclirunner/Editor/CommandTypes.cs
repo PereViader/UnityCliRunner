@@ -33,4 +33,13 @@ namespace UnityCliRunner
         public double duration;
         public string payload;
     }
+
+    [Serializable]
+    public class UnityEvalResult
+    {
+        public bool success;
+        public string message;
+        public double duration;
+        public string payload;
+    }
 }

@@ -10,6 +10,7 @@ A lightweight command-line runner that bridges your shell and AI coding agents w
 * **Trigger Asset Database Refresh**: Instantly recompile your C# code and feed any compilation errors or warnings directly back to your terminal or AI coding agent.
 * **Run Editor & PlayMode Tests**: Execute unit and integration tests seamlessly as part of your feature implementation workflow.
 * **Run Static Methods**: Execute any C# static method with support for primitive parameters and JSON deserialization.
+* **Evaluate Dynamic C# Code (`eval`)**: Execute ad-hoc C# expressions or code snippets live in-memory in the running Unity Editor without domain reloads or creating temporary files.
 
 ---
 
@@ -122,6 +123,31 @@ Overloaded static methods are resolved automatically by matching the number of a
 - **Primitives & Strings**: Printed directly to the console.
 - **Complex Types**: Automatically serialized and printed as a JSON payload using `JsonUtility.ToJson`.
 - **Void/Null**: Prints `Unity Response: SUCCESS` (via socket) or no extra payload.
+
+---
+
+## Dynamic C# Evaluation (`eval`)
+
+The `eval` subcommand dynamically compiles and executes arbitrary C# expressions or code snippets in the running Unity Editor without creating files or triggering domain reloads:
+
+```bash
+# Evaluate a single expression
+bash unitycli.sh eval "Application.unityVersion"
+bash unitycli.sh eval "1 + 1"
+bash unitycli.sh eval "SceneManager.GetActiveScene().name"
+
+# Evaluate multi-statement blocks with return
+bash unitycli.sh eval "var list = new List<int> { 1, 2, 3 }; return list.Sum();"
+
+# Inspect and format GameObjects and components
+bash unitycli.sh eval "GameObject.FindObjectsOfType<Camera>().Length"
+```
+
+### Key Features:
+- **Instant Execution**: In-memory compilation via Roslyn compiler assemblies loaded dynamically by UnityCliRunner.
+- **Rich Formatting**: Primitives, Booleans, Strings, GameObjects, Components, and Collections are automatically formatted and printed to standard output.
+- **Standard Diagnostics**: Syntax and compiler errors are reported with accurate line/column locations in standard compiler format (`eval(line, col): error CSxxxx: ...`).
+- **Safe Execution**: Runtime exceptions report the exact exception message and stack trace, exiting with code `1`.
 
 ---
 

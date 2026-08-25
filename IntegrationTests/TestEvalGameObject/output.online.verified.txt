@@ -1,0 +1,2 @@
+SampleEntity (GameObject) [active: True, tag: "Untagged", layer: 0, components: Transform]
+EXIT_CODE: 0
