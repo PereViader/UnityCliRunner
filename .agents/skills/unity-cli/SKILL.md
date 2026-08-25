@@ -1,6 +1,6 @@
 ---
 name: unity-cli
-description: Use it to run Unity EditMode or PlayMode tests, trigger a Unity AssetDatabase refresh and recompilation, force a full C# recompilation, inspect Unity compiler warnings or errors printed to the terminal, debug failed Unity tests, keep a background Unity instance warm for faster repeated runs, check/stop/wait for that background instance, or execute a Unity static method with optional primitive or JSON object parameters and terminal-returned results.
+description: Use it to run Unity EditMode or PlayMode tests, trigger a Unity AssetDatabase refresh and recompilation, force a full C# recompilation, inspect Unity compiler warnings or errors printed to the terminal, debug failed Unity tests, evaluate dynamic C# expressions/scripts live in-memory, keep a background Unity instance warm for faster repeated runs, check/stop/wait for that background instance, or execute a Unity static method with optional primitive or JSON object parameters and terminal-returned results.
 ---
 
 # Unity CLI
@@ -115,3 +115,21 @@ The runner resolves overloads by method name and argument count. If multiple sta
 Methods can return values. Successful primitive, string, decimal, bool, and `null` results are printed directly; object results are serialized with `JsonUtility.ToJson`; empty `void` successes print `Unity Response: SUCCESS`. Failures print the failure payload and return non-zero.
 
 Like tests, `executemethod` reuses a running Unity socket when possible and otherwise automatically starts the background instance if it is not running. It also performs the AssetDatabase refresh/compilation readiness flow before invoking the method.
+
+## Dynamic C# Evaluation (eval)
+
+Use `eval` to run arbitrary C# expressions or code snippets live in the Unity Editor AppDomain without creating files or triggering domain reloads.
+
+```bash
+bash ./unitycli.sh eval "Application.unityVersion"
+bash ./unitycli.sh eval "SceneManager.GetActiveScene().name"
+bash ./unitycli.sh eval "var x = 10; var y = 20; return x + y;"
+bash ./unitycli.sh eval 'new GameObject("MyGameObject")'
+```
+
+- **Instant Evaluation**: In-memory compilation via Roslyn compiler assemblies loaded dynamically by UnityCliRunner.
+- **Smart Wrapping**: Single expressions (e.g. `1 + 1`), blocks with explicit `return`, and void statements (e.g. `Debug.Log("hi");`) are handled automatically.
+- **Formatting**: Primitives, Strings, Booleans, GameObjects, Components, and Collections are automatically formatted and printed to stdout.
+- **Diagnostics & Errors**: Syntax or compilation errors are formatted in standard compiler error format (`eval(line, col): error CSxxxx: ...`) with exit code `1`.
+- **Runtime Exceptions**: Unhandled exceptions print the full exception message and stack trace with exit code `1`.
+- **Fast Execution**: `eval` runs directly on the active Editor state without waiting for AssetDatabase refresh or triggering domain reload.

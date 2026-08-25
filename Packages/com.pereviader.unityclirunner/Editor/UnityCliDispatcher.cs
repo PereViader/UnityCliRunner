@@ -20,7 +20,7 @@ namespace UnityCliRunner
             s_Queue.Enqueue(action);
         }
 
-        private static void Update()
+        public static void Update()
         {
             while (s_Queue.TryDequeue(out var action))
             {

@@ -1,0 +1,7 @@
+eval(1,32): error CS1026: ) expected
+eval(1,32): error CS1002: ; expected
+eval(1,32): error CS1646: Keyword, identifier, or string expected after verbatim specifier: @
+eval(1,33): error CS1646: Keyword, identifier, or string expected after verbatim specifier: @
+eval(1,9): error CS0026: Keyword 'this' is not valid in a static property, static method, or static field initializer
+eval(1,17): error CS0246: The type or namespace name 'invalid' could not be found (are you missing a using directive or an assembly reference?)
+EXIT_CODE: 1

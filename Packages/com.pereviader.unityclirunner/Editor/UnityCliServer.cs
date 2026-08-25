@@ -20,6 +20,8 @@ namespace UnityCliRunner
         private static Thread _serverThread;
         private static bool _isRunning;
 
+        public static bool IsRunning => _isRunning;
+
         private static readonly Dictionary<string, ICommandHandler> s_Handlers = new Dictionary<string, ICommandHandler>
         {
             { "PING", new PingHandler() },
@@ -30,7 +32,9 @@ namespace UnityCliRunner
             { "RUN_TESTS", new RunTestsHandler() },
             { "POLL_TESTS", new PollTestsHandler() },
             { "EXECUTE_METHOD", new ExecuteMethodHandler() },
-            { "POLL_EXECUTE", new PollExecuteHandler() }
+            { "POLL_EXECUTE", new PollExecuteHandler() },
+            { "EVAL", new EvalHandler() },
+            { "POLL_EVAL", new PollEvalHandler() }
         };
 
         static UnityCliServer()
@@ -58,7 +62,7 @@ namespace UnityCliRunner
             _isRunning = true;
             _serverThread = new Thread(ServerLoop)
             {
-                IsBackground = true,
+                IsBackground = false,
                 Name = "UnityCliServerThread"
             };
             _serverThread.Start();
@@ -186,7 +190,7 @@ namespace UnityCliRunner
                         return;
                     }
 
-                    if (handler is PingHandler || handler is PollTestsHandler || handler is PollExecuteHandler || handler is PollRefreshHandler)
+                    if (handler is PingHandler || handler is PollTestsHandler || handler is PollExecuteHandler || handler is PollRefreshHandler || handler is PollEvalHandler)
                     {
                         handler.Handle(payload, writer);
                     }

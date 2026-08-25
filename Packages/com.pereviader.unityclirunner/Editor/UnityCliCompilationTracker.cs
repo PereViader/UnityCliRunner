@@ -66,14 +66,7 @@ namespace UnityCliRunner
         {
             s_IsCompiling = false;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
-            if (s_ScriptCompilationFailed)
-            {
-                WriteActiveErrorsToFile();
-            }
-            else
-            {
-                DeleteDiagnosticsFile();
-            }
+            WriteActiveErrorsToFile();
         }
 
         public static void UpdateCompilationState()
@@ -230,11 +223,7 @@ namespace UnityCliRunner
                 {
                     File.WriteAllLines(errorsPath, diagnostics, new UTF8Encoding(false));
                 }
-                else if(EditorUtility.scriptCompilationFailed)
-                {
-                    WriteFallbackDiagnosticsIfCompilationFailed("Unity editor reports scriptCompilationFailed is true, but no compiler log entries were captured from the Editor Console.");
-                }
-                else
+                else if(!EditorUtility.scriptCompilationFailed)
                 {
                     DeleteDiagnosticsFile();
                 }

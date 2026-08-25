@@ -179,6 +179,8 @@ normalize_output() {
     -e '/Filename: .*UnityCliServer.cs/d' \
     -e 's|UnityCliServer\.cs:[0-9]+|UnityCliServer.cs:LINE|g' \
     -e 's|UnityCliServer\.cs Line: [0-9]+|UnityCliServer.cs Line: LINE|g' \
+    -e 's|<[a-f0-9]{32}>|<ASSEMBLY_HASH>|g' \
+    -e 's|<[a-f0-9]{16,}>|<ASSEMBLY_HASH>|g' \
     -e 's|\r||g' \
     "$input_file" > "$output_file"
 }
@@ -271,6 +273,17 @@ ONLINE_CASES=(
   "TestExecuteReturnsInt"
   "TestExecuteReturnsObject"
   "TestExecuteParams"
+  "TestEvalSuccess"
+  "TestEvalExpression"
+  "TestEvalSyntaxError"
+  "TestEvalMultiStatement"
+  "TestEvalVoidStatement"
+  "TestEvalVoidMethod"
+  "TestEvalNull"
+  "TestEvalDestroyedObject"
+  "TestEvalGameObject"
+  "TestEvalCollection"
+  "TestEvalException"
   "TestFilterCategory"
   "TestBackgroundStatusOnline"
   "TestBackgroundStartAlreadyRunning"
@@ -283,6 +296,7 @@ AUTOSTART_CASES=(
   "TestBackgroundStatusOffline"
   "TestBackgroundStart"
   "TestBackgroundStartAlreadyRunning"
+  "TestEvalAutostart"
 )
 
 has_matching_cases() {
@@ -395,6 +409,19 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
   run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
   run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
 
+  # eval tests (online)
+  run_integration_case "TestEvalSuccess" "eval 1 + 1" "online"
+  run_integration_case "TestEvalExpression" "eval Mathf.Sqrt(16f)" "online"
+  run_integration_case "TestEvalSyntaxError" "eval this is invalid syntax @@" "online"
+  run_integration_case "TestEvalMultiStatement" "eval int a = 10; int b = 20; return a + b;" "online"
+  run_integration_case "TestEvalVoidStatement" "eval UnityEngine.Debug.Log(42);" "online"
+  run_integration_case "TestEvalVoidMethod" "eval System.GC.Collect()" "online"
+  run_integration_case "TestEvalNull" "eval (object)null" "online"
+  run_integration_case "TestEvalDestroyedObject" "eval GameObject go = new GameObject(\"TempObj\"); GameObject.DestroyImmediate(go); return go;" "online"
+  run_integration_case "TestEvalGameObject" "eval new GameObject(\"SampleEntity\")" "online"
+  run_integration_case "TestEvalCollection" "eval new int[] { 10, 20, 30 }" "online"
+  run_integration_case "TestEvalException" "eval throw new System.InvalidOperationException(\"test-eval-error\");" "online"
+
   # filter test (online)
   run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
 
@@ -426,7 +453,13 @@ if has_matching_cases "${AUTOSTART_CASES[@]}"; then
   # 3. Run start batchmode when already running (should say Unity is already running).
   run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
 
-  # 4. Stop Unity.
+  # 4. Stop Unity before testing auto-start eval from stopped state.
+  bash ./unitycli.sh stop
+
+  # 5. Run eval when stopped (should auto-start Unity and evaluate).
+  run_integration_case "TestEvalAutostart" "eval 2 + 2" "autostart"
+
+  # 6. Stop Unity.
   bash ./unitycli.sh stop
 fi
 
