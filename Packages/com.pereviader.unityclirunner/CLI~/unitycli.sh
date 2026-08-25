@@ -221,14 +221,16 @@ send_socket_cmd() {
         ztcp -c $fd
       ' _ "$port" "$cmd" "$timeout"
     ) || socket_exit_code=$?
-  elif exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
+  elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
     # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
     response=$(
-      echo "$cmd" >&3 2>/dev/null
-      if read -t "$timeout" line <&3 2>/dev/null; then
-        echo "$line"
+      if exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
+        echo "$cmd" >&3 2>/dev/null
+        if read -t "$timeout" line <&3 2>/dev/null; then
+          echo "$line"
+        fi
+        exec 3>&- 2>/dev/null
       fi
-      exec 3>&- 2>/dev/null
     ) 2>/dev/null
   elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
     # PowerShell fallback on Windows
