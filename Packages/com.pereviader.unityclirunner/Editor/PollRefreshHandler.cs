@@ -14,8 +14,6 @@ namespace UnityCliRunner
 
         private string GetRefreshPollResponse()
         {
-            UnityCliCompilationTracker.UpdateCompilationState();
-
             if (UnityCliCompilationTracker.RefreshPending || UnityCliCompilationTracker.CompilationRequested)
             {
                 return "COMPILING";
@@ -33,11 +31,9 @@ namespace UnityCliRunner
 
             if (UnityCliCompilationTracker.ScriptCompilationFailed)
             {
-                UnityCliCompilationTracker.WriteActiveErrorsToFile();
                 return "COMPILATION_ERROR";
             }
 
-            UnityCliCompilationTracker.WriteActiveErrorsToFile();
             return "READY";
         }
     }
