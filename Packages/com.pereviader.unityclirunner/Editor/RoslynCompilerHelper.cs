@@ -220,7 +220,7 @@ namespace UnityCliRunner
                     }
 
                     // Build initial metadata references
-                    BuildMetadataReferences(dataPath);
+                    BuildMetadataReferences();
 
                     s_IsSupported = true;
                 }
@@ -232,83 +232,75 @@ namespace UnityCliRunner
             }
         }
 
-        private static void BuildMetadataReferences(string dataPath)
+        private static void BuildMetadataReferences()
         {
             var refList = new List<object>();
             var addedLocations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var addedAssemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            void AddRef(string path)
+            void AddRef(string path, string assemblyName = null)
             {
-                if (!string.IsNullOrEmpty(path) && File.Exists(path) && addedLocations.Add(path))
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+                if (!addedLocations.Add(path)) return;
+
+                if (!string.IsNullOrEmpty(assemblyName))
                 {
-                    try
-                    {
-                        object r;
-                        var pars = s_CreateFromFileMethod.GetParameters();
-                        if (pars.Length == 1)
-                        {
-                            r = s_CreateFromFileMethod.Invoke(null, new object[] { path });
-                        }
-                        else
-                        {
-                            var args = new object[pars.Length];
-                            args[0] = path;
-                            for (int i = 1; i < pars.Length; i++)
-                            {
-                                args[i] = pars[i].DefaultValue != DBNull.Value ? pars[i].DefaultValue : null;
-                            }
-                            r = s_CreateFromFileMethod.Invoke(null, args);
-                        }
-
-                        if (r != null)
-                        {
-                            refList.Add(r);
-                        }
-                    }
-                    catch { }
+                    if (!addedAssemblyNames.Add(assemblyName)) return;
                 }
-            }
 
-            // 1. All currently loaded assemblies in AppDomain
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
                 try
                 {
-                    if (!asm.IsDynamic && !string.IsNullOrEmpty(asm.Location))
+                    object r;
+                    var pars = s_CreateFromFileMethod.GetParameters();
+                    if (pars.Length == 1)
                     {
-                        AddRef(asm.Location);
+                        r = s_CreateFromFileMethod.Invoke(null, new object[] { path });
+                    }
+                    else
+                    {
+                        var args = new object[pars.Length];
+                        args[0] = path;
+                        for (int i = 1; i < pars.Length; i++)
+                        {
+                            args[i] = pars[i].DefaultValue != DBNull.Value ? pars[i].DefaultValue : null;
+                        }
+                        r = s_CreateFromFileMethod.Invoke(null, args);
+                    }
+
+                    if (r != null)
+                    {
+                        refList.Add(r);
                     }
                 }
                 catch { }
             }
 
+            void AddAssembly(Assembly asm)
+            {
+                if (asm == null || asm.IsDynamic) return;
+                try
+                {
+                    string loc = asm.Location;
+                    if (string.IsNullOrEmpty(loc) || !File.Exists(loc)) return;
+                    string name = asm.GetName().Name;
+                    AddRef(loc, name);
+                }
+                catch { }
+            }
+
+            // 1. All currently loaded assemblies in AppDomain
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                AddAssembly(asm);
+            }
+
             // 2. Core framework types
-            try { AddRef(typeof(object).Assembly.Location); } catch { }
-            try { AddRef(typeof(System.Linq.Enumerable).Assembly.Location); } catch { }
-            try { AddRef(typeof(System.Collections.Generic.List<>).Assembly.Location); } catch { }
-            try { AddRef(typeof(UnityEngine.Object).Assembly.Location); } catch { }
-            try { AddRef(typeof(UnityEngine.GameObject).Assembly.Location); } catch { }
-            try { AddRef(typeof(UnityEditor.Editor).Assembly.Location); } catch { }
-
-            // 3. Unity Reference Assemblies folder
-            string refAssembliesDir = Path.Combine(dataPath, "UnityReferenceAssemblies");
-            if (Directory.Exists(refAssembliesDir))
-            {
-                foreach (var dll in Directory.GetFiles(refAssembliesDir, "*.dll", SearchOption.AllDirectories))
-                {
-                    AddRef(dll);
-                }
-            }
-
-            // 4. Managed folder in Editor
-            string managedDir = Path.Combine(dataPath, "Managed");
-            if (Directory.Exists(managedDir))
-            {
-                foreach (var dll in Directory.GetFiles(managedDir, "*.dll", SearchOption.AllDirectories))
-                {
-                    AddRef(dll);
-                }
-            }
+            try { AddAssembly(typeof(object).Assembly); } catch { }
+            try { AddAssembly(typeof(System.Linq.Enumerable).Assembly); } catch { }
+            try { AddAssembly(typeof(System.Collections.Generic.List<>).Assembly); } catch { }
+            try { AddAssembly(typeof(UnityEngine.Object).Assembly); } catch { }
+            try { AddAssembly(typeof(UnityEngine.GameObject).Assembly); } catch { }
+            try { AddAssembly(typeof(UnityEditor.Editor).Assembly); } catch { }
 
             s_CachedMetadataReferences = refList;
         }
