@@ -379,16 +379,14 @@ send_socket_cmd() {
         ztcp -c $fd
       ' _ "$port" "$cmd" "$timeout"
     ) || socket_exit_code=$?
-  elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
+  elif exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
     # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
     response=$(
-      if exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
-        echo "$cmd" >&3 2>/dev/null
-        if read -t "$timeout" line <&3 2>/dev/null; then
-          echo "$line"
-        fi
-        exec 3>&- 2>/dev/null
+      echo "$cmd" >&3 2>/dev/null
+      if read -t "$timeout" line <&3 2>/dev/null; then
+        echo "$line"
       fi
+      exec 3>&- 2>/dev/null
     ) 2>/dev/null
   elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
     # PowerShell fallback on Windows
@@ -497,7 +495,7 @@ start_background_unity() {
     fi
 
     if [ "$is_win" = true ]; then
-      "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+      nohup "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
     else
       nohup "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
@@ -1094,9 +1092,12 @@ if [ "$IS_RUNNING" = true ]; then
   else
     echo -n "Waiting for AssetDatabase refresh/compilation to finish..."
   fi
+  refresh_timeout="${UNITY_CLI_REFRESH_TIMEOUT:-120}"
+  elapsed=0
   while true; do
     # Sleep 1s
     sleep 1
+    elapsed=$((elapsed + 1))
     
     # Check status. send_socket_cmd reads the port file for each connection attempt.
     response=""
@@ -1112,6 +1113,12 @@ if [ "$IS_RUNNING" = true ]; then
         exit 1
       fi
       # Connection failure (compiling or domain reload in progress)
+      if [ "$elapsed" -ge "$refresh_timeout" ]; then
+        echo ""
+        echo "Error: Timed out waiting for AssetDatabase refresh/compilation to finish ($refresh_timeout seconds)." >&2
+        echo "Unity background instance is unresponsive. Check Unity Editor logs or restart the background instance." >&2
+        exit 1
+      fi
       echo -n "."
       continue
     fi
@@ -1136,6 +1143,12 @@ if [ "$IS_RUNNING" = true ]; then
       fi
       exit 1
     else
+      if [ "$elapsed" -ge "$refresh_timeout" ]; then
+        echo ""
+        echo "Error: Timed out waiting for AssetDatabase refresh/compilation to finish ($refresh_timeout seconds). Last status: $response" >&2
+        echo "Unity may be stuck in an infinite asset import loop, modal dialog, or corrupted Library cache." >&2
+        exit 1
+      fi
       echo -n "."
     fi
   done

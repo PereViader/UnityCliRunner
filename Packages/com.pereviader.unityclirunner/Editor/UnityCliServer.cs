@@ -186,7 +186,7 @@ namespace UnityCliRunner
                         return;
                     }
 
-                    if (handler is PingHandler || handler is PollTestsHandler || handler is PollExecuteHandler)
+                    if (handler is PingHandler || handler is PollTestsHandler || handler is PollExecuteHandler || handler is PollRefreshHandler)
                     {
                         handler.Handle(payload, writer);
                     }

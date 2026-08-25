@@ -39,13 +39,41 @@ namespace UnityCliRunner
                 if (value)
                 {
                     s_CompilationRequestTime = EditorApplication.timeSinceStartup;
+                    s_ScriptCompilationFailed = false;
+                    DeleteDiagnosticsFile();
                 }
             }
         }
 
         static UnityCliCompilationTracker()
         {
+            DeleteDiagnosticsFile();
+            UpdateCompilationState();
             EditorApplication.update += UpdateCompilationState;
+            UnityEditor.Compilation.CompilationPipeline.compilationStarted += OnCompilationStarted;
+            UnityEditor.Compilation.CompilationPipeline.compilationFinished += OnCompilationFinished;
+        }
+
+        private static void OnCompilationStarted(object obj)
+        {
+            s_IsCompiling = true;
+            s_CompilationRequested = false;
+            s_ScriptCompilationFailed = false;
+            DeleteDiagnosticsFile();
+        }
+
+        private static void OnCompilationFinished(object obj)
+        {
+            s_IsCompiling = false;
+            s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
+            if (s_ScriptCompilationFailed)
+            {
+                WriteActiveErrorsToFile();
+            }
+            else
+            {
+                DeleteDiagnosticsFile();
+            }
         }
 
         public static void UpdateCompilationState()
@@ -64,6 +92,11 @@ namespace UnityCliRunner
                 {
                     s_CompilationRequested = false;
                 }
+            }
+
+            if (!s_IsCompiling && !s_CompilationRequested && !s_RefreshPending)
+            {
+                WriteActiveErrorsToFile();
             }
         }
 

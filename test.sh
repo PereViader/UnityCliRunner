@@ -219,24 +219,38 @@ if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "
   fi
 fi
 
-# Check if Unity is running
-IS_RUNNING=false
-if bash ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
-  IS_RUNNING=true
-fi
+# Parse CLI arguments for test case filtering
+FILTER_PATTERNS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --filter)
+      shift
+      if [ $# -gt 0 ]; then
+        FILTER_PATTERNS+=("$1")
+      fi
+      ;;
+    --filter=*)
+      FILTER_PATTERNS+=("${1#*=}")
+      ;;
+    *)
+      FILTER_PATTERNS+=("$1")
+      ;;
+  esac
+  shift
+done
 
-UNITY_EXE=$(find_unity_path)
-if [ -z "$UNITY_EXE" ]; then
-  echo "Error: Unity executable not found."
-  exit 1
-fi
-
-run_setup "online"
-if [ "$IS_RUNNING" = false ]; then
-  bash ./unitycli.sh start batchmode
-else
-  echo "Unity is already running."
-fi
+matches_filter() {
+  local tc="$1"
+  if [ ${#FILTER_PATTERNS[@]} -eq 0 ]; then
+    return 0
+  fi
+  for pat in "${FILTER_PATTERNS[@]}"; do
+    if [[ "$tc" == "$pat" || "$tc" == *"$pat"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # Define test cases
 TEST_CASES=(
@@ -248,13 +262,52 @@ TEST_CASES=(
   "TestStopTests"
 )
 
+ONLINE_CASES=(
+  "${TEST_CASES[@]}"
+  "TestExecuteSuccess"
+  "TestExecuteFailure"
+  "TestExecuteNotFound"
+  "TestExecuteCompileError"
+  "TestExecuteReturnsInt"
+  "TestExecuteReturnsObject"
+  "TestExecuteParams"
+  "TestFilterCategory"
+  "TestBackgroundStatusOnline"
+  "TestBackgroundStartAlreadyRunning"
+  "TestRecompile"
+  "TestRefresh"
+  "TestPollRefreshNonBlocking"
+)
+
+AUTOSTART_CASES=(
+  "TestBackgroundStatusOffline"
+  "TestBackgroundStart"
+  "TestBackgroundStartAlreadyRunning"
+)
+
+has_matching_cases() {
+  local list=("$@")
+  for c in "${list[@]}"; do
+    if matches_filter "$c"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 FAILED_TESTS=0
+TOTAL_TESTS_RUN=0
 
 run_integration_case() {
   local tc="$1"
   local cmd_args="$2"
   local mode="$3" # "online" or "offline"
 
+  if ! matches_filter "$tc"; then
+    return 0
+  fi
+
+  TOTAL_TESTS_RUN=$((TOTAL_TESTS_RUN + 1))
   echo "--- Running test case: $tc ($mode) with command: bash ./unitycli.sh $cmd_args ---"
   
   if [ -f "IntegrationTests/$tc/DummyTest.cs" ]; then
@@ -305,58 +358,86 @@ run_integration_case() {
   fi
 }
 
+if has_matching_cases "${ONLINE_CASES[@]}"; then
+  echo "============================================="
+  echo "PHASE 1: Running integration tests in ONLINE mode"
+  echo "============================================="
+
+  # Check if Unity is running
+  IS_RUNNING=false
+  if bash ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
+    IS_RUNNING=true
+  fi
+
+  UNITY_EXE=$(find_unity_path)
+  if [ -z "$UNITY_EXE" ]; then
+    echo "Error: Unity executable not found."
+    exit 1
+  fi
+
+  run_setup "online"
+  if [ "$IS_RUNNING" = false ]; then
+    bash ./unitycli.sh start batchmode
+  else
+    echo "Unity is already running."
+  fi
+
+  for tc in "${TEST_CASES[@]}"; do
+    run_integration_case "$tc" "test --editmode" "online"
+  done
+
+  # executemethod tests (online)
+  run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
+  run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "online"
+  run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "online"
+  run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
+  run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "online"
+  run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
+  run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
+
+  # filter test (online)
+  run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
+
+  # status/start tests (online)
+  run_integration_case "TestBackgroundStatusOnline" "status" "online"
+  run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "online"
+
+  # refresh/recompile tests (online)
+  run_integration_case "TestRefresh" "refresh" "online"
+  run_integration_case "TestPollRefreshNonBlocking" "executemethod Tests.DummyExecuteClass.PollRefreshWhileBusy" "online"
+  run_integration_case "TestRecompile" "recompile" "online"
+
+  # Close Unity
+  run_teardown "online"
+  bash ./unitycli.sh stop
+fi
+
+if has_matching_cases "${AUTOSTART_CASES[@]}"; then
+  echo "============================================="
+  echo "PHASE 2: Running integration tests for AUTO-START"
+  echo "============================================="
+
+  # 1. Start with stopped Unity. Run status (should be Not Running).
+  run_integration_case "TestBackgroundStatusOffline" "status" "autostart"
+
+  # 2. Run start batchmode when stopped (should start and wait).
+  run_integration_case "TestBackgroundStart" "start batchmode" "autostart"
+
+  # 3. Run start batchmode when already running (should say Unity is already running).
+  run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
+
+  # 4. Stop Unity.
+  bash ./unitycli.sh stop
+fi
+
 echo "============================================="
-echo "PHASE 1: Running integration tests in ONLINE mode"
-echo "============================================="
-
-for tc in "${TEST_CASES[@]}"; do
-  run_integration_case "$tc" "test --editmode" "online"
-done
-
-# executemethod tests (online)
-run_integration_case "TestExecuteSuccess" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
-run_integration_case "TestExecuteFailure" "executemethod Tests.DummyExecuteClass.FailMethod" "online"
-run_integration_case "TestExecuteNotFound" "executemethod Tests.DummyExecuteClass.NonExistentMethod" "online"
-run_integration_case "TestExecuteCompileError" "executemethod Tests.DummyExecuteClass.SuccessMethod" "online"
-run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "online"
-run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
-run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
-
-# filter test (online)
-run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
-
-# status/start tests (online)
-run_integration_case "TestBackgroundStatusOnline" "status" "online"
-run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "online"
-
-# recompile tests (online)
-run_integration_case "TestRecompile" "recompile" "online"
-
-# Close Unity
-run_teardown "online"
-bash ./unitycli.sh stop
-
-echo "============================================="
-echo "PHASE 2: Running integration tests for AUTO-START"
-echo "============================================="
-
-# 1. Start with stopped Unity. Run status (should be Not Running).
-run_integration_case "TestBackgroundStatusOffline" "status" "autostart"
-
-# 2. Run start batchmode when stopped (should start and wait).
-run_integration_case "TestBackgroundStart" "start batchmode" "autostart"
-
-# 3. Run start batchmode when already running (should say Unity is already running).
-run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
-
-# 4. Stop Unity.
-bash ./unitycli.sh stop
-
-echo "============================================="
+if [ $TOTAL_TESTS_RUN -eq 0 ]; then
+  echo "WARNING: No tests matched filter pattern(s): ${FILTER_PATTERNS[*]}"
+fi
 if [ $FAILED_TESTS -eq 0 ]; then
-  echo "ALL INTEGRATION TESTS PASSED SUCCESSFULLY!"
+  echo "ALL INTEGRATION TESTS PASSED SUCCESSFULLY! ($TOTAL_TESTS_RUN test(s) run)"
   exit 0
 else
-  echo "INTEGRATION TESTS FAILED: $FAILED_TESTS failure(s)"
+  echo "INTEGRATION TESTS FAILED: $FAILED_TESTS failure(s) out of $TOTAL_TESTS_RUN test(s) run"
   exit 1
 fi
