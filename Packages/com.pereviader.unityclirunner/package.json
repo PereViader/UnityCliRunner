@@ -1,6 +1,6 @@
 {
   "name": "com.pereviader.unityclirunner",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "displayName": "Unity CLI Runner",
   "description": "A lightweight, high-performance tool that bridges external command line interfaces (and AI coding agents) with the Unity Editor. It enables sub-second compilation loops, clean test execution, and static method invocations by communicating with a running Unity Editor (or headless background instance) via loopback TCP sockets.",
   "unity": "2021.3",
