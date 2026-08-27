@@ -9,6 +9,88 @@ if [ -n "${UNITY_CLI_PROJECT_ROOT:-}" ]; then
   cd "$UNITY_CLI_PROJECT_ROOT" || exit 1
 fi
 
+# Detect the host once. The script is always run by Bash, including on
+# Windows through Git Bash/MSYS/Cygwin, so uname is more reliable here than
+# mutable environment variables.
+detect_platform() {
+  case "$(uname -s 2>/dev/null || true)" in
+    Darwin)
+      echo "macos"
+      ;;
+    Linux)
+      echo "linux"
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      echo "windows"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
+
+PLATFORM="$(detect_platform)"
+if [ "$PLATFORM" = "unknown" ]; then
+  echo "Error: Unsupported host platform. Run unitycli.sh from Bash on Linux, macOS, or Windows Git Bash." >&2
+  exit 1
+fi
+
+is_windows_platform() {
+  [ "$PLATFORM" = "windows" ]
+}
+
+# Convert paths between the POSIX view used by Bash and the native Windows
+# view used by Win32 programs. On Unix this is intentionally a no-op.
+to_shell_path() {
+  local path="$1"
+  if is_windows_platform && command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$path" 2>/dev/null || printf '%s\n' "$path"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+to_native_path() {
+  local path="$1"
+  if is_windows_platform && command -v cygpath >/dev/null 2>&1; then
+    cygpath -m -a "$path" 2>/dev/null || printf '%s\n' "$path"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+PROJECT_PATH="$(pwd)"
+PROJECT_NATIVE_PATH="$(to_native_path "$PROJECT_PATH")"
+export UNITY_CLI_PROJECT_NATIVE="$PROJECT_NATIVE_PATH"
+
+find_powershell() {
+  local command_name
+  for command_name in powershell.exe powershell pwsh.exe pwsh; do
+    if command -v "$command_name" >/dev/null 2>&1; then
+      command -v "$command_name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+decode_base64() {
+  local decoder
+  if ! command -v base64 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if base64 -d </dev/null >/dev/null 2>&1; then
+    decoder="-d"
+  elif base64 -D </dev/null >/dev/null 2>&1; then
+    decoder="-D"
+  else
+    return 1
+  fi
+
+  base64 "$decoder"
+}
+
 # Cleanup background tail on exit
 tail_pid=""
 cleanup() {
@@ -196,64 +278,56 @@ send_socket_cmd() {
   # Read dynamic port
   local port=""
   if [ -f "Temp/unity_cli_port.txt" ]; then
-    port=$(cat "Temp/unity_cli_port.txt")
+    port=$(cat "Temp/unity_cli_port.txt" | tr -d '[:space:]')
   fi
 
-  if [ -z "$port" ]; then
+  if [ -z "$port" ] || ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
     return 1
   fi
 
   local response=""
   local socket_exit_code=0
-  if command -v zsh >/dev/null 2>&1; then
-    # Try zsh net/tcp module (fastest on macOS and systems with zsh)
-    response=$(
-      zsh -c '
-        zmodload zsh/net/tcp
-        port="$1"
-        cmd="$2"
-        timeout="$3"
-        ztcp 127.0.0.1 "$port" 2>&1 || exit 1
-        fd=$REPLY
-        echo "$cmd" >&$fd
-        read -t "$timeout" line <&$fd
-        echo "$line"
-        ztcp -c $fd
-      ' _ "$port" "$cmd" "$timeout"
-    ) || socket_exit_code=$?
-  elif (echo >/dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; then
-    # Try bash /dev/tcp redirection (fastest on Git Bash / Linux)
-    response=$(
-      if exec 3<>/dev/tcp/127.0.0.1/$port 2>/dev/null; then
-        echo "$cmd" >&3 2>/dev/null
-        if read -t "$timeout" line <&3 2>/dev/null; then
-          echo "$line"
-        fi
-        exec 3>&- 2>/dev/null
-      fi
-    ) 2>/dev/null
-  elif [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    # PowerShell fallback on Windows
-    export UNITY_CLI_CMD="$cmd"
-    response=$(powershell -NoProfile -Command "
-      \$ErrorActionPreference = 'Stop';
-      try {
-        \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
-        \$c.ReceiveTimeout = \$((\$timeout * 1000));
-        \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
-        \$r = New-Object System.IO.StreamReader(\$c.GetStream());
-        \$w.WriteLine(\$env:UNITY_CLI_CMD);
-        \$w.Flush();
-        \$res = \$r.ReadLine();
-        \$c.Close();
-        Write-Output \$res;
-      } catch {
-        exit 1;
-      }
-    " 2>&1)
-    local powershell_exit=$?
-    socket_exit_code=$powershell_exit
-    unset UNITY_CLI_CMD
+  # Bash implements /dev/tcp on Linux, macOS, and Git Bash. Do not probe the
+  # port first: that creates a second connection and races with domain reloads.
+  # The surrounding redirection is important because Bash can otherwise print
+  # connection-refused diagnostics before the command-level redirection runs.
+  response=$(
+    {
+      exec 3<>"/dev/tcp/127.0.0.1/$port" || exit 1
+      printf '%s\n' "$cmd" >&3 || exit 1
+      IFS= read -r -t "$timeout" line <&3 || exit 1
+      printf '%s\n' "$line"
+    } 2>/dev/null
+  ) || socket_exit_code=$?
+
+  if [ "$socket_exit_code" -ne 0 ] && is_windows_platform; then
+    # PowerShell is retained only as a Windows fallback for environments where
+    # the Git Bash /dev/tcp extension cannot connect to a native Win32 socket.
+    local powershell_command=""
+    powershell_command=$(find_powershell || true)
+    if [ -n "$powershell_command" ]; then
+      socket_exit_code=0
+      local timeout_ms=$((timeout * 1000))
+      export UNITY_CLI_CMD="$cmd"
+      response=$("$powershell_command" -NoProfile -Command "
+        \$ErrorActionPreference = 'Stop';
+        try {
+          \$c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $port);
+          \$c.ReceiveTimeout = $timeout_ms;
+          \$w = New-Object System.IO.StreamWriter(\$c.GetStream());
+          \$r = New-Object System.IO.StreamReader(\$c.GetStream());
+          \$w.WriteLine(\$env:UNITY_CLI_CMD);
+          \$w.Flush();
+          \$res = \$r.ReadLine();
+          \$c.Close();
+          Write-Output \$res;
+        } catch {
+          Write-Error \$_.Exception.GetType().Name;
+          exit 1;
+        }
+      " 2>&1) || socket_exit_code=$?
+      unset UNITY_CLI_CMD
+    fi
   fi
 
   if [ "$socket_exit_code" -ne 0 ]; then
@@ -282,37 +356,198 @@ print_network_permission_error() {
   echo "Error: Local network permission is required to connect to UnityCliRunner at 127.0.0.1. If you are running in a sandbox, allow network access and retry." >&2
 }
 
-# Function to check if a PID is alive cross-platform
+# Check whether a process is alive. Bash can inspect POSIX processes directly;
+# tasklist is the native Windows fallback. PowerShell is used only if that
+# fallback is unavailable or cannot answer the query.
 is_process_alive() {
   local pid="$1"
   if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
     return 1
   fi
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    powershell -NoProfile -Command "Get-Process -Id $pid -ErrorAction SilentlyContinue | Out-Null; if (\$?) { exit 0 } else { exit 1 }" >/dev/null 2>&1
-    return $?
-  else
-    kill -0 "$pid" 2>/dev/null
-    return $?
-  fi
-}
 
-# Function to kill a process by PID
-kill_process() {
-  local pid="$1"
-  if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
-    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-      taskkill //PID "$pid" //F >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1
-    else
-      kill -9 "$pid" >/dev/null 2>&1
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  if is_windows_platform; then
+    local tasklist_command=""
+    local tasklist_name
+    for tasklist_name in tasklist.exe tasklist; do
+      if command -v "$tasklist_name" >/dev/null 2>&1; then
+        tasklist_command=$(command -v "$tasklist_name")
+        break
+      fi
+    done
+    if [ -n "$tasklist_command" ]; then
+      local tasklist_output=""
+      local tasklist_status=0
+      tasklist_output=$("$tasklist_command" //FI "PID eq $pid" //FO CSV //NH 2>/dev/null) || tasklist_status=$?
+      if [ "$tasklist_status" -eq 0 ]; then
+        if printf '%s\n' "$tasklist_output" | grep -q -F "\"$pid\""; then
+          return 0
+        fi
+        return 1
+      fi
+    fi
+
+    local powershell_command=""
+    powershell_command=$(find_powershell || true)
+    if [ -n "$powershell_command" ]; then
+      "$powershell_command" -NoProfile -Command "
+        \$process = Get-Process -Id $pid -ErrorAction SilentlyContinue;
+        if (\$null -ne \$process) { exit 0 } else { exit 1 }
+      " >/dev/null 2>&1
+      return $?
     fi
   fi
+
+  return 1
 }
 
-# Function to check if Unity is still running (locked)
-is_unity_still_running() {
-  if [ -f "Temp/unity_cli_port.txt" ] && _=$(send_socket_cmd "PING" 1 2>/dev/null); then
+# Find the Unity lockfile used by this project.
+get_unity_lockfile() {
+  if [ -f "Temp/UnityLockfile" ]; then
+    echo "Temp/UnityLockfile"
+  elif [ -f "Temp/UnityLockFile" ]; then
+    echo "Temp/UnityLockFile"
+  fi
+}
+
+# Return a live PID associated with the project lockfile, if one can be found.
+# UnityLockfile is zero bytes on macOS, so the PID must be obtained from the
+# file owner rather than from the file contents on that platform.
+get_unity_lock_owner_pid() {
+  local lockfile="$1"
+  local pid=""
+  local filesize=""
+
+  if [ ! -f "$lockfile" ]; then
+    return 1
+  fi
+
+  filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
+  if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
+    pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
+  fi
+
+  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    pid=$(cat "$lockfile" 2>/dev/null | tr -d '\r')
+    pid="${pid#"${pid%%[![:space:]]*}"}"
+    pid="${pid%"${pid##*[![:space:]]}"}"
+  fi
+
+  if [[ "$pid" =~ ^[0-9]+$ ]] && is_process_alive "$pid"; then
+    echo "$pid"
     return 0
+  fi
+
+  # lsof -t emits only PIDs. Unlike fuser's macOS behaviour, its exit status
+  # is non-zero when the file has no owner.
+  if command -v lsof >/dev/null 2>&1; then
+    pid=$(lsof -nP -t "$lockfile" 2>/dev/null | head -n 1)
+    if [[ "$pid" =~ ^[0-9]+$ ]] && is_process_alive "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  fi
+
+  # Keep fuser as a Linux fallback, but inspect its output. On macOS it
+  # returns success for an unowned file and prints only "file:".
+  if command -v fuser >/dev/null 2>&1; then
+    local fuser_output=""
+    local candidate=""
+    fuser_output=$(fuser "$lockfile" 2>&1 || true)
+    if [[ "$fuser_output" == *:* ]]; then
+      fuser_output="${fuser_output#*:}"
+    fi
+    for candidate in $fuser_output; do
+      if [[ "$candidate" =~ ^[0-9]+$ ]] && is_process_alive "$candidate"; then
+        echo "$candidate"
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
+remove_stale_unity_lockfiles() {
+  rm -f Temp/UnityLockfile Temp/UnityLockFile 2>/dev/null
+}
+
+is_unity_socket_ready() {
+  local timeout="${1:-1}"
+  local response=""
+  response=$(send_socket_cmd "PING" "$timeout" 2>/dev/null) || return 1
+  [ "$response" = "PONG" ]
+}
+
+# Kill exactly the supplied process. Never fall back to killing Unity by image
+# name because that can terminate unrelated projects/editors.
+kill_process() {
+  local pid="$1"
+  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  if is_windows_platform; then
+    if command -v taskkill.exe >/dev/null 2>&1; then
+      taskkill.exe //PID "$pid" //F >/dev/null 2>&1
+      return $?
+    elif command -v taskkill >/dev/null 2>&1; then
+      taskkill //PID "$pid" //F >/dev/null 2>&1
+      return $?
+    fi
+  fi
+
+  kill -9 "$pid" >/dev/null 2>&1
+}
+
+# Find the Unity process for this project on Windows. Unity's lockfile is
+# opened with sharing restrictions, so querying the command line is the only
+# reliable fallback when the socket and our own PID file are unavailable.
+find_windows_unity_pid() {
+  if ! is_windows_platform; then
+    return 1
+  fi
+
+  local powershell_command=""
+  powershell_command=$(find_powershell || true)
+  if [ -z "$powershell_command" ]; then
+    return 1
+  fi
+
+  "$powershell_command" -NoProfile -Command "
+    \$project = [string]\$env:UNITY_CLI_PROJECT_NATIVE;
+    if ([string]::IsNullOrEmpty(\$project)) { exit 1 }
+    \$project = \$project.Replace('/', '\').TrimEnd('\');
+    \$process = Get-CimInstance Win32_Process -Filter \"Name = 'Unity.exe'\" |
+      Where-Object {
+        \$commandLine = [string]\$_.CommandLine;
+        if ([string]::IsNullOrEmpty(\$commandLine)) { return \$false }
+        \$normalizedCommand = \$commandLine.Replace('/', '\');
+        return \$normalizedCommand.IndexOf(\$project, [StringComparison]::OrdinalIgnoreCase) -ge 0;
+      } | Select-Object -First 1;
+    if (\$null -ne \$process) { \$process.ProcessId }
+  " 2>/dev/null | tr -d '\r'
+}
+
+# Function to check if Unity is still running.
+is_unity_still_running() {
+  # Socket readiness is checked separately; use the project identity markers
+  # below for liveness so a stale port file cannot keep Unity marked active.
+  # Prefer the exact PID recorded when this CLI launched Unity. This works
+  # during startup before the socket server has written its port file.
+  local pid_file="Temp/unity_cli_process.pid"
+  if [ -f "$pid_file" ]; then
+    local pid=""
+    pid=$(cat "$pid_file" 2>/dev/null | tr -d '\r')
+    pid="${pid#"${pid%%[![:space:]]*}"}"
+    pid="${pid%"${pid##*[![:space:]]}"}"
+    if is_process_alive "$pid"; then
+      return 0
+    fi
+    rm -f "$pid_file" 2>/dev/null
   fi
 
   local lockfile=""
@@ -322,20 +557,21 @@ is_unity_still_running() {
     lockfile="Temp/UnityLockFile"
   fi
 
-  if [ -z "$lockfile" ]; then
+  if is_windows_platform; then
+    local windows_pid=""
+    windows_pid=$(find_windows_unity_pid || true)
+    if [[ "$windows_pid" =~ ^[0-9]+$ ]] && is_process_alive "$windows_pid"; then
+      return 0
+    fi
+
+    if [ -n "$lockfile" ]; then
+      remove_stale_unity_lockfiles
+    fi
     return 1
   fi
 
-  # Check if we are on Windows
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    # On Windows, if the file is locked by a running Unity instance, cat will fail.
-    if ! cat "$lockfile" >/dev/null 2>&1; then
-      return 0
-    else
-      # Not locked -> stale lockfile
-      rm -f "$lockfile" 2>/dev/null
-      return 1
-    fi
+  if [ -z "$lockfile" ]; then
+    return 1
   fi
 
   # On Unix-like systems (Linux/macOS)
@@ -346,33 +582,16 @@ is_unity_still_running() {
     fi
   fi
 
-  # 2. Fallback to PID check
+  # 2. Check the actual owner. This is required on macOS where the lockfile
+  # is a zero-byte file and fuser may succeed without finding a process.
   local pid=""
-  local filesize
-  filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
-  if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
-    pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
-  fi
-
-  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
-    # Fallback to cat
-    pid=$(cat "$lockfile" 2>/dev/null | tr -d '\r')
-    pid="${pid#"${pid%%[![:space:]]*}"}"
-    pid="${pid%"${pid##*[![:space:]]}"}"
-  fi
-
-  if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]]; then
-    if kill -0 "$pid" 2>/dev/null || ps -p "$pid" >/dev/null 2>&1; then
-      return 0
-    fi
-  fi
-
-  if lsof "$lockfile" >/dev/null 2>&1 || fuser "$lockfile" >/dev/null 2>&1; then
+  pid=$(get_unity_lock_owner_pid "$lockfile" 2>/dev/null || true)
+  if [[ "$pid" =~ ^[0-9]+$ ]]; then
     return 0
   fi
 
   # Stale lockfile
-  rm -f "$lockfile" 2>/dev/null
+  remove_stale_unity_lockfiles
   return 1
 }
 
@@ -385,9 +604,14 @@ fi
 
 # Function to find Unity path
 find_unity_path() {
-  if [ -n "${UNITY_PATH:-}" ] && [ -f "$UNITY_PATH" ]; then
-    echo "$UNITY_PATH" | tr -d '\r'
-    return 0
+  local configured_path="${UNITY_PATH:-${UNITY_EDITOR:-}}"
+  if [ -n "$configured_path" ]; then
+    local shell_configured_path=""
+    shell_configured_path=$(to_shell_path "$configured_path" | tr -d '\r')
+    if [ -f "$shell_configured_path" ]; then
+      printf '%s\n' "$shell_configured_path"
+      return 0
+    fi
   fi
 
   # Prioritize unity-editor wrapper from PATH if explicitly requested via environment variable
@@ -405,67 +629,59 @@ find_unity_path() {
     version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')
   fi
 
-  if [ -z "$version" ]; then
-    echo "Error: Could not detect Unity version from ProjectSettings/ProjectVersion.txt" >&2
-    return 1
-  fi
-
-  local is_windows=false
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    is_windows=true
-  fi
-
   local paths=()
-  if [ "$is_windows" = true ]; then
-    paths=(
-      "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
-      "C:/Program Files (x86)/Unity/Hub/Editor/$version/Editor/Unity.exe"
-      "C:/Unity/Hub/Editor/$version/Editor/Unity.exe"
-      "D:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
-      "D:/Unity/Hub/Editor/$version/Editor/Unity.exe"
-    )
-  elif [[ "$(uname)" == "Darwin" ]]; then
-    paths=(
-      "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
-    )
-  else
-    paths=(
-      "$HOME/Unity/Hub/Editor/$version/Editor/Unity"
-      "/opt/unity/Editor/Unity"
-      "/opt/Unity/Editor/Unity"
-    )
+  if [ -n "$version" ]; then
+    if is_windows_platform; then
+      [ -n "${ProgramFiles:-}" ] && paths+=("$ProgramFiles/Unity/Hub/Editor/$version/Editor/Unity.exe")
+      [ -n "${ProgramW6432:-}" ] && paths+=("$ProgramW6432/Unity/Hub/Editor/$version/Editor/Unity.exe")
+      [ -n "${LOCALAPPDATA:-}" ] && paths+=("$LOCALAPPDATA/Unity/Hub/Editor/$version/Editor/Unity.exe")
+      paths+=(
+        "C:/Program Files/Unity/Hub/Editor/$version/Editor/Unity.exe"
+        "C:/Program Files (x86)/Unity/Hub/Editor/$version/Editor/Unity.exe"
+        "C:/Unity/Hub/Editor/$version/Editor/Unity.exe"
+      )
+    elif [ "$PLATFORM" = "macos" ]; then
+      paths=(
+        "/Applications/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+        "$HOME/Unity/Hub/Editor/$version/Unity.app/Contents/MacOS/Unity"
+      )
+    else
+      paths=(
+        "$HOME/Unity/Hub/Editor/$version/Editor/Unity"
+        "/opt/unity/Editor/Unity"
+        "/opt/Unity/Editor/Unity"
+      )
+    fi
   fi
 
   for p in "${paths[@]}"; do
-    if [ -f "$p" ]; then
-      echo "$p"
+    local shell_path=""
+    shell_path=$(to_shell_path "$p" | tr -d '\r')
+    if [ -f "$shell_path" ]; then
+      printf '%s\n' "$shell_path"
       return 0
     fi
   done
 
   local command_unity=""
-  if [ "$is_windows" = true ]; then
-    command_unity=$(where unity 2>/dev/null | head -n 1 | tr -d '\r')
-    if [ -z "$command_unity" ]; then
-      for cmd in Unity.exe unity.exe Unity unity; do
-        command_unity=$(command -v "$cmd" 2>/dev/null | tr -d '\r')
-        if [ -n "$command_unity" ]; then
-          break
-        fi
-      done
+  local cmd
+  for cmd in unity-editor Unity Unity.exe unity.exe unity; do
+    command_unity=$(command -v "$cmd" 2>/dev/null | tr -d '\r')
+    if [ -n "$command_unity" ]; then
+      printf '%s\n' "$command_unity"
+      return 0
     fi
-  else
-    for cmd in Unity unity; do
-      command_unity=$(command -v "$cmd" 2>/dev/null)
-      if [ -n "$command_unity" ]; then
-        break
-      fi
-    done
-  fi
+  done
 
-  if [ -n "$command_unity" ]; then
-    echo "$command_unity"
-    return 0
+  if is_windows_platform && command -v where.exe >/dev/null 2>&1; then
+    command_unity=$(where.exe unity 2>/dev/null | head -n 1 | tr -d '\r')
+    if [ -n "$command_unity" ]; then
+      shell_path=$(to_shell_path "$command_unity" | tr -d '\r')
+      if [ -f "$shell_path" ]; then
+        printf '%s\n' "$shell_path"
+        return 0
+      fi
+    fi
   fi
 
   return 1
@@ -480,7 +696,7 @@ start_background_unity() {
   if is_unity_still_running; then
     needs_launch=false
     # Check if already ready
-    if [ -f "Temp/unity_cli_port.txt" ] && _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+    if [ -f "Temp/unity_cli_port.txt" ] && is_unity_socket_ready 2; then
       local resp
       resp=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
       if [ "$resp" = "READY" ] || [ "$resp" = "COMPILATION_ERROR" ]; then
@@ -496,7 +712,11 @@ start_background_unity() {
   if [ "$needs_launch" = true ]; then
     UNITY_EXE=$(find_unity_path)
     if [ -z "$UNITY_EXE" ]; then
-      echo "Error: Unity executable not found."
+      local project_version=""
+      if [ -f "ProjectSettings/ProjectVersion.txt" ]; then
+        project_version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')
+      fi
+      echo "Error: Unity executable not found for Unity version ${project_version:-unknown}."
       exit 1
     fi
 
@@ -506,21 +726,20 @@ start_background_unity() {
     
     # Run Unity in background (batchmode or interactive)
     local abs_proj_path
-    abs_proj_path="$(pwd -W 2>/dev/null || pwd)"
+    abs_proj_path="$PROJECT_NATIVE_PATH"
     local auth_args=()
     local user="${UNITY_EMAIL:-${UNITY_USERNAME:-}}"
     if [ -n "$user" ] && [ -n "${UNITY_PASSWORD:-}" ] && [ -n "${UNITY_LICENSE:-}" ]; then
       local dev_data
-      dev_data=$(echo "$UNITY_LICENSE" | grep -oP '(?<=<DeveloperData Value=")[^"]*' || true)
+      # Use POSIX sed; macOS's default grep does not support GNU -P.
+      dev_data=$(printf '%s' "$UNITY_LICENSE" | tr -d '\r\n' | sed -n 's/.*<DeveloperData Value="\([^"]*\)".*/\1/p')
       if [ -n "$dev_data" ]; then
         local serial
-        serial=$(echo "$dev_data" | base64 -d 2>/dev/null | tail -c +5)
-        auth_args+=("-username" "$user" "-password" "$UNITY_PASSWORD" "-serial" "$serial")
+        serial=$(printf '%s' "$dev_data" | decode_base64 | dd bs=1 skip=4 2>/dev/null)
+        if [ -n "$serial" ]; then
+          auth_args+=("-username" "$user" "-password" "$UNITY_PASSWORD" "-serial" "$serial")
+        fi
       fi
-    fi
-    local is_win=false
-    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-      is_win=true
     fi
 
     local launch_args=()
@@ -532,29 +751,60 @@ start_background_unity() {
       launch_args+=("${auth_args[@]}")
     fi
 
-    if [ "$is_win" = true ]; then
-      local ps_args=()
+    if is_windows_platform; then
+      # Pass each argument through the environment so PowerShell does not
+      # reinterpret spaces, quotes, dollar signs, or backslashes in values.
+      local arg_count=${#launch_args[@]}
+      local arg_index=0
+      export UNITY_CLI_ARG_COUNT="$arg_count"
       for a in "${launch_args[@]}"; do
-        local esc="${a//\"/\\\"}"
-        ps_args+=("\"$esc\"")
+        export "UNITY_CLI_ARG_$arg_index=$a"
+        arg_index=$((arg_index + 1))
       done
-      local args_str
-      args_str=$(IFS=', '; echo "${ps_args[*]}")
-      unity_pid=$(powershell -NoProfile -Command "
-        \$p = Start-Process -FilePath '$UNITY_EXE' -ArgumentList @($args_str) -PassThru;
-        \$p.Id
-      " 2>/dev/null | tr -d '\r')
+      local unity_exe_native="$UNITY_EXE"
+      if [ -f "$UNITY_EXE" ]; then
+        unity_exe_native=$(to_native_path "$UNITY_EXE" | tr -d '\r')
+      fi
+      local powershell_command=""
+      powershell_command=$(find_powershell || true)
+      if [ -n "$powershell_command" ]; then
+        export UNITY_CLI_UNITY_EXE="$unity_exe_native"
+        unity_pid=$("$powershell_command" -NoProfile -Command "
+          \$arguments = @();
+          for (\$i = 0; \$i -lt [int]\$env:UNITY_CLI_ARG_COUNT; \$i++) {
+            \$arguments += [Environment]::GetEnvironmentVariable(('UNITY_CLI_ARG_' + \$i));
+          }
+          \$p = Start-Process -FilePath \$env:UNITY_CLI_UNITY_EXE -ArgumentList \$arguments -PassThru;
+          \$p.Id
+        " 2>/dev/null | tr -d '\r')
+        unset UNITY_CLI_UNITY_EXE
+      else
+        # Git Bash can still launch Unity directly if PowerShell is unavailable;
+        # the PID is retained as the best available fallback.
+        "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
+        unity_pid=$!
+      fi
+      arg_index=0
+      while [ "$arg_index" -lt "$arg_count" ]; do
+        unset "UNITY_CLI_ARG_$arg_index"
+        arg_index=$((arg_index + 1))
+      done
+      unset UNITY_CLI_ARG_COUNT
     else
       nohup "$UNITY_EXE" "${launch_args[@]}" >>unity_stdout_stderr.txt 2>&1 &
       unity_pid=$!
+    fi
+
+    if [[ "$unity_pid" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$unity_pid" > Temp/unity_cli_process.pid
     fi
   fi
 
   local started=false
   # Wait up to 90 seconds (45 iterations * 2s sleep)
   for i in {1..45}; do
-    if [ -f "Temp/unity_cli_port.txt" ]; then
-      if _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+    if is_unity_still_running && [ -f "Temp/unity_cli_port.txt" ]; then
+      if is_unity_socket_ready 2; then
         local response
         response=$(send_socket_cmd "POLL_REFRESH" 2 2>/dev/null)
         if [ "$response" = "READY" ] || [ "$response" = "COMPILATION_ERROR" ]; then
@@ -656,6 +906,88 @@ print_failed_tests() {
   fi
 }
 
+# PowerShell is deliberately the last JSON parser option and is only
+# available on Windows after the portable parsers have been exhausted.
+parse_json_with_powershell() {
+  local result_type="$1"
+  local results_file="$2"
+  if ! is_windows_platform; then
+    return 2
+  fi
+
+  local powershell_command=""
+  powershell_command=$(find_powershell || true)
+  if [ -z "$powershell_command" ]; then
+    return 2
+  fi
+
+  local native_results_file="$results_file"
+  if is_windows_platform; then
+    native_results_file=$(to_native_path "$PROJECT_PATH/$results_file" | tr -d '\r')
+  fi
+  export UNITY_CLI_RESULT_FILE="$native_results_file"
+  local status=0
+  case "$result_type" in
+    test)
+      "$powershell_command" -NoProfile -Command "
+        \$content = Get-Content \$env:UNITY_CLI_RESULT_FILE -Raw -Encoding UTF8;
+        \$json = ConvertFrom-Json \$content;
+        \$skip = if (\$json.skipCount -and \$json.skipCount -gt 0) { \", \$(\$json.skipCount) skipped\" } else { \"\" };
+        Write-Output \"\"
+        Write-Output \"Done!\"
+        if (\$json.success) {
+          Write-Output \"Unity Response: SUCCESS \$(\$json.passCount) passed\$skip\";
+          exit 0;
+        }
+        if (\$json.message -ne \$null -and \$json.message -ne '') {
+          Write-Output \"Unity Response: FAILURE \$(\$json.message)\";
+        } else {
+          Write-Output \"Unity Response: FAILURE \$(\$json.failCount) failed, \$(\$json.passCount) passed\$skip\";
+        }
+        exit 1;
+      " || status=$?
+      ;;
+    execute)
+      "$powershell_command" -NoProfile -Command "
+        \$content = Get-Content \$env:UNITY_CLI_RESULT_FILE -Raw -Encoding UTF8;
+        \$json = ConvertFrom-Json \$content;
+        Write-Output \"\"
+        Write-Output \"Done!\"
+        if (\$json.success) {
+          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
+            Write-Output \$json.payload;
+          } else {
+            Write-Output \"Unity Response: SUCCESS\";
+          }
+          exit 0;
+        }
+        Write-Output \"Unity Response: FAILURE\";
+        Write-Output \$json.message;
+        exit 1;
+      " || status=$?
+      ;;
+    eval)
+      "$powershell_command" -NoProfile -Command "
+        \$content = Get-Content \$env:UNITY_CLI_RESULT_FILE -Raw -Encoding UTF8;
+        \$json = ConvertFrom-Json \$content;
+        if (\$json.success) {
+          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
+            Write-Output \$json.payload;
+          }
+          exit 0;
+        }
+        [Console]::Error.WriteLine(\$json.message);
+        exit 1;
+      " || status=$?
+      ;;
+    *)
+      status=2
+      ;;
+  esac
+  unset UNITY_CLI_RESULT_FILE
+  return $status
+}
+
 # Function to parse test results from Temp/unity_test_results.json if process exited/recycled
 parse_and_handle_test_results_file() {
   local results_file="Temp/unity_test_results.json"
@@ -663,39 +995,37 @@ parse_and_handle_test_results_file() {
     return 2
   fi
 
-  local is_windows=false
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    is_windows=true
-  fi
-
-  if [ "$is_windows" = true ] && command -v powershell >/dev/null 2>&1; then
-    powershell -NoProfile -Command "
-      \$content = Get-Content '$results_file' -Raw -Encoding UTF8;
-      \$json = ConvertFrom-Json \$content;
-      \$skip = if (\$json.skipCount -and \$json.skipCount -gt 0) { \", \$(\$json.skipCount) skipped\" } else { \"\" };
-      Write-Output \"\"
-      Write-Output \"Done!\"
-      if (\$json.success) {
-          Write-Output \"Unity Response: SUCCESS \$(\$json.passCount) passed\$skip\";
-          exit 0;
-      } else {
-          if (\$json.message -ne \$null -and \$json.message -ne '') {
-              Write-Output \"Unity Response: FAILURE \$(\$json.message)\";
-          } else {
-              Write-Output \"Unity Response: FAILURE \$(\$json.failCount) failed, \$(\$json.passCount) passed\$skip\";
-          }
-          exit 1;
-      }
-    "
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
+    python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = json.load(f)
+    pass_cnt = data.get("passCount", 0)
+    fail_cnt = data.get("failCount", 0)
+    skip_cnt = data.get("skipCount", 0)
+    skip_str = f", {skip_cnt} skipped" if skip_cnt > 0 else ""
+    print("\nDone!")
+    if data.get("success"):
+        print(f"Unity Response: SUCCESS {pass_cnt} passed{skip_str}")
+        sys.exit(0)
+    else:
+        msg = data.get("message")
+        if msg:
+            print(f"Unity Response: FAILURE {msg}")
+        else:
+            print(f"Unity Response: FAILURE {fail_cnt} failed, {pass_cnt} passed{skip_str}")
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+' "$results_file"
     local status=$?
     if [ $status -ne 0 ]; then
       print_failed_tests
     fi
     return $status
-  fi
-
-  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
-    python3 -c '
+  elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' 2>/dev/null; then
+    python -c '
 import json, sys
 try:
     with open(sys.argv[1], "r", encoding="utf-8") as f:
@@ -751,6 +1081,60 @@ except Exception:
       print_failed_tests
     fi
     return $status
+  elif command -v node >/dev/null 2>&1; then
+    node -e '
+      const fs = require("fs");
+      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const skip = data.skipCount > 0 ? `, ${data.skipCount} skipped` : "";
+      console.log("\nDone!");
+      if (data.success) {
+        console.log(`Unity Response: SUCCESS ${data.passCount || 0} passed${skip}`);
+        process.exit(0);
+      }
+      if (data.message) console.log(`Unity Response: FAILURE ${data.message}`);
+      else console.log(`Unity Response: FAILURE ${data.failCount || 0} failed, ${data.passCount || 0} passed${skip}`);
+      process.exit(1);
+    ' "$results_file"
+    local status=$?
+    if [ $status -ne 0 ]; then
+      print_failed_tests
+    fi
+    return $status
+  elif command -v jq >/dev/null 2>&1 && jq empty "$results_file" >/dev/null 2>&1; then
+    echo ""
+    echo "Done!"
+    local success
+    success=$(jq -r '.success' "$results_file")
+    if [ "$success" = "true" ]; then
+      local skip_count
+      skip_count=$(jq -r '.skipCount // 0' "$results_file")
+      local skip_str=""
+      if [ "$skip_count" -gt 0 ]; then
+        skip_str=", $skip_count skipped"
+      fi
+      echo "Unity Response: SUCCESS $(jq -r '.passCount // 0' "$results_file") passed$skip_str"
+      return 0
+    fi
+    local message
+    message=$(jq -r '.message // empty' "$results_file")
+    if [ -n "$message" ]; then
+      echo "Unity Response: FAILURE $message"
+    else
+      echo "Unity Response: FAILURE $(jq -r '.failCount // 0' "$results_file") failed, $(jq -r '.passCount // 0' "$results_file") passed"
+    fi
+    print_failed_tests
+    return 1
+  fi
+
+  if is_windows_platform; then
+    parse_json_with_powershell "test" "$results_file"
+    local status=$?
+    if [ "$status" -ne 2 ]; then
+      if [ "$status" -ne 0 ]; then
+        print_failed_tests
+      fi
+      return "$status"
+    fi
   fi
 
   local success
@@ -792,33 +1176,6 @@ parse_and_handle_execute_results_file() {
   local results_file="Temp/unity_execute_result.json"
   if [ ! -f "$results_file" ]; then
     return 2
-  fi
-
-  local is_windows=false
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    is_windows=true
-  fi
-
-  if [ "$is_windows" = true ] && command -v powershell >/dev/null 2>&1; then
-    powershell -NoProfile -Command "
-      \$content = Get-Content '$results_file' -Raw -Encoding UTF8;
-      \$json = ConvertFrom-Json \$content;
-      Write-Output \"\"
-      Write-Output \"Done!\"
-      if (\$json.success) {
-          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
-              Write-Output \$json.payload;
-          } else {
-              Write-Output \"Unity Response: SUCCESS\";
-          }
-          exit 0;
-      } else {
-          Write-Output \"Unity Response: FAILURE\";
-          Write-Output \$json.message;
-          exit 1;
-      }
-    "
-    return $?
   fi
 
   if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
@@ -898,6 +1255,14 @@ except Exception:
     fi
   fi
 
+  if is_windows_platform; then
+    parse_json_with_powershell "execute" "$results_file"
+    local status=$?
+    if [ "$status" -ne 2 ]; then
+      return "$status"
+    fi
+  fi
+
   local success
   success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
   local payload
@@ -928,28 +1293,6 @@ parse_and_handle_eval_results_file() {
   local results_file="Temp/unity_eval_result.json"
   if [ ! -f "$results_file" ]; then
     return 2
-  fi
-
-  local is_windows=false
-  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-    is_windows=true
-  fi
-
-  if [ "$is_windows" = true ] && command -v powershell >/dev/null 2>&1; then
-    powershell -NoProfile -Command "
-      \$content = Get-Content '$results_file' -Raw -Encoding UTF8;
-      \$json = ConvertFrom-Json \$content;
-      if (\$json.success) {
-          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
-              Write-Output \$json.payload;
-          }
-          exit 0;
-      } else {
-          [Console]::Error.WriteLine(\$json.message);
-          exit 1;
-      }
-    "
-    return $?
   fi
 
   if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
@@ -1030,6 +1373,14 @@ except Exception as e:
     else
       jq -r '.message // "Evaluation failed."' "$results_file" >&2
       return 1
+    fi
+  fi
+
+  if is_windows_platform; then
+    parse_json_with_powershell "eval" "$results_file"
+    local status=$?
+    if [ "$status" -ne 2 ]; then
+      return "$status"
     fi
   fi
 
@@ -1333,7 +1684,7 @@ if [ "$SUBCOMMAND" = "start" ]; then
 
 elif [ "$SUBCOMMAND" = "stop" ]; then
   running=false
-  if [ "$IS_RUNNING" = true ] || _=$(send_socket_cmd "PING" 2 2>/dev/null); then
+  if [ "$IS_RUNNING" = true ]; then
     running=true
   fi
 
@@ -1345,12 +1696,12 @@ elif [ "$SUBCOMMAND" = "stop" ]; then
   echo -n "Stopping Unity background instance..."
 
   stopped=false
-  if [ -f "Temp/unity_cli_port.txt" ]; then
+  if is_unity_socket_ready 2; then
     response=$(send_socket_cmd "EXIT" 5 2>/dev/null)
     if [ "$response" = "EXITING" ]; then
-      # Wait up to 15 seconds for lockfile to clear
+      # Wait up to 15 seconds for Unity and its socket to disappear.
       for i in {1..15}; do
-        if [ ! -f "Temp/UnityLockfile" ] && [ ! -f "Temp/UnityLockFile" ]; then
+        if ! is_unity_still_running; then
           stopped=true
           break
         fi
@@ -1360,6 +1711,7 @@ elif [ "$SUBCOMMAND" = "stop" ]; then
   fi
 
   if [ "$stopped" = true ]; then
+    rm -f Temp/unity_cli_process.pid 2>/dev/null
     echo ""
     echo "Stopped cleanly."
     exit 0
@@ -1373,50 +1725,52 @@ elif [ "$SUBCOMMAND" = "stop" ]; then
     lockfile="Temp/UnityLockFile"
   fi
 
-  if [ -n "$lockfile" ]; then
-    pid=""
-    if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-      # On Windows, read PID from running processes to bypass lockfile sharing violations
-      pid=$(powershell -NoProfile -Command "
-        \$currentDir = (Get-Item .).FullName;
-        \$processes = Get-CimInstance Win32_Process -Filter \"Name = 'Unity.exe'\" | Where-Object { \$_.CommandLine -like \"*\$currentDir*\" -or \$_.CommandLine.Replace('\\', '/') -like \"*\$(\$currentDir.Replace('\\', '/'))*\" };
-        if (\$processes) {
-            \$processes.ProcessId | Select-Object -First 1;
-        }
-      " 2>/dev/null | tr -d '\r')
-    else
-      filesize=$(wc -c < "$lockfile" 2>/dev/null | tr -d '[:space:]')
-      if [ "$filesize" = "4" ] && command -v od >/dev/null 2>&1; then
-        pid=$(od -An -t d4 -N 4 "$lockfile" 2>/dev/null | tr -d '[:space:]')
-      fi
+  pid=""
+  if [ -f "Temp/unity_cli_process.pid" ]; then
+    pid=$(cat "Temp/unity_cli_process.pid" 2>/dev/null | tr -d '\r')
+    pid="${pid#"${pid%%[![:space:]]*}"}"
+    pid="${pid%"${pid##*[![:space:]]}"}"
+  fi
 
-      if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
-        pid=$(cat "$lockfile" 2>/dev/null)
-        pid="${pid#"${pid%%[![:space:]]*}"}"
-        pid="${pid%"${pid##*[![:space:]]}"}"
-      fi
+  if [ -z "$pid" ] || ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    if is_windows_platform; then
+      pid=$(find_windows_unity_pid || true)
+    elif [ -n "$lockfile" ]; then
+      pid=$(get_unity_lock_owner_pid "$lockfile" 2>/dev/null || true)
     fi
+  fi
 
-    if [[ "$pid" =~ ^[0-9]+$ ]]; then
-      kill_process "$pid"
-    else
-      if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" || "${OSTYPE:-}" == "mingw"* || "${OS:-}" == "Windows_NT" ]]; then
-        taskkill //IM Unity.exe //F >/dev/null 2>&1
-      fi
+  if [[ "$pid" =~ ^[0-9]+$ ]]; then
+    if ! kill_process "$pid"; then
+      echo ""
+      echo "Error: Could not stop Unity process (PID $pid)." >&2
+      exit 1
     fi
-
-    # Wait up to 5 seconds for lockfile to disappear
-    for i in {1..5}; do
-      if [ ! -f "$lockfile" ]; then
+    rm -f Temp/unity_cli_process.pid 2>/dev/null
+    # Wait up to 15 seconds for the project-specific Unity process to stop.
+    for i in {1..15}; do
+      if ! is_unity_still_running; then
+        stopped=true
         break
       fi
       sleep 1
     done
+  else
+    echo ""
+    echo "Error: Could not identify the Unity process for this project; refusing to terminate by image name." >&2
+    exit 1
+  fi
+
+  if [ "$stopped" = true ]; then
+    echo ""
+    echo "Stopped."
+    exit 0
   fi
 
   echo ""
-  echo "Stopped."
-  exit 0
+  echo "Error: Unity background instance could not be stopped." >&2
+  echo "The project lockfile or socket is still active; no process was killed." >&2
+  exit 1
 elif [ "$SUBCOMMAND" = "wait-ready" ]; then
   if [ "$IS_RUNNING" = false ]; then
     echo "Error: Unity is not running for this project."

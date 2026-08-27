@@ -7,7 +7,14 @@ description: Use it to run Unity EditMode or PlayMode tests, trigger a Unity Ass
 
 ## Overview
 
-`unitycli.sh` allows interacting with Unity3d to refresh the AssetDatabase before test/method work, surface compilation diagnostics in the terminal, print failed test details.
+`unitycli.sh` allows interacting with Unity3d to refresh the AssetDatabase before test/method work, surface compilation diagnostics in the terminal, print failed test details, and run either reusable project commands or one-off C# snippets.
+
+Choose the execution mode based on the intent:
+
+- Use `eval` for one-off inspection, debugging, or small mutations of the currently loaded Editor or Play Mode state. It compiles a snippet in memory, does not refresh the AssetDatabase, and does not stop Play Mode.
+- Use `executemethod` for a reusable project-defined static method that should have explicit arguments, predictable output, and refresh-before-run behavior. It refreshes/recompiles before invocation and runs after Play Mode has been stopped.
+
+An `eval` snippet can call a static method, but it does not provide the same refresh, lifecycle, argument-conversion, or result-format contract as `executemethod`.
 
 On windows, run it using the git bash.
 
@@ -98,9 +105,9 @@ Use `stop` when the background instance is no longer needed; it asks the socket 
 
 ## Execute Static Methods
 
-Use `executemethod` to run a static method available in the Unity editor AppDomain. The method name must be `FullyQualifiedType.Method`; public and non-public static methods can be found.
+Use `executemethod` when a project already exposes a reusable static method for an operation, especially when the operation will be repeated by an agent, script, or CI job. The method name must be `FullyQualifiedType.Method`; public and non-public static methods can be found.
 
-Use `executemethod` before debugging Unity-only APIs that do not compile under plain `dotnet`, and when custom editor methods provide a better inspection or generation surface than ad hoc file parsing.
+Use it for project-owned editor utilities, asset generation, setup/teardown commands, or other operations that benefit from a compilation check and a stable method-oriented interface. For one-off scene inspection or live Play Mode work, prefer `eval` instead.
 
 ```bash
 bash ./unitycli.sh executemethod Namespace.Class.Method
@@ -114,11 +121,11 @@ The runner resolves overloads by method name and argument count. If multiple sta
 
 Methods can return values. Successful primitive, string, decimal, bool, and `null` results are printed directly; object results are serialized with `JsonUtility.ToJson`; empty `void` successes print `Unity Response: SUCCESS`. Failures print the failure payload and return non-zero.
 
-Like tests, `executemethod` reuses a running Unity socket when possible and otherwise automatically starts the background instance if it is not running. It also performs the AssetDatabase refresh/compilation readiness flow before invoking the method.
+Like tests, `executemethod` reuses a running Unity socket when possible and otherwise automatically starts the background instance if it is not running. It performs the AssetDatabase refresh/compilation readiness flow before invoking the method and stops Play Mode before execution. This makes it suitable for current-source, repeatable commands, but not for observing the live Play Mode state.
 
 ## Dynamic C# Evaluation (eval)
 
-Use `eval` to run arbitrary C# expressions or code snippets live in the Unity Editor AppDomain without creating files or triggering domain reloads.
+Use `eval` for one-off C# expressions or code snippets against the currently loaded Unity Editor state, without creating files or triggering a domain reload. It is the preferred command for quick queries, debugging, and small live-state mutations.
 
 ```bash
 bash ./unitycli.sh eval "Application.unityVersion"
@@ -132,4 +139,6 @@ bash ./unitycli.sh eval 'new GameObject("MyGameObject")'
 - **Formatting**: Primitives, Strings, Booleans, GameObjects, Components, and Collections are automatically formatted and printed to stdout.
 - **Diagnostics & Errors**: Syntax or compilation errors are formatted in standard compiler error format (`eval(line, col): error CSxxxx: ...`) with exit code `1`.
 - **Runtime Exceptions**: Unhandled exceptions print the full exception message and stack trace with exit code `1`.
-- **Fast Execution**: `eval` runs directly on the active Editor state without waiting for AssetDatabase refresh or triggering domain reload.
+- **Live-State Execution**: `eval` runs directly against the active Editor state without waiting for AssetDatabase refresh or stopping Play Mode.
+
+If scripts or assets have changed and Unity has not reloaded them yet, run `refresh` before `eval`. The formatted output is designed for readable diagnostics, so prefer `executemethod` when a stable machine-readable result or a reusable project command is needed.
