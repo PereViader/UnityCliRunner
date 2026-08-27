@@ -11,10 +11,16 @@ namespace UnityCliRunner
 {
     internal class RunTestsHandler : ICommandHandler
     {
+        private const string ActiveTestFilterSessionKey = "UnityCliRunner.HasActiveTestFilter";
+
         private static MyTestCallbacks s_Callbacks;
         private static MethodInfo s_IsRunActiveMethod;
 
-        internal static bool HasActiveTestFilter { get; set; }
+        internal static bool HasActiveTestFilter
+        {
+            get => SessionState.GetBool(ActiveTestFilterSessionKey, false);
+            set => SessionState.SetBool(ActiveTestFilterSessionKey, value);
+        }
 
         internal static string TempDirectory => Path.Combine(Directory.GetCurrentDirectory(), "Temp");
         internal static string RunningFilePath => Path.Combine(TempDirectory, "unity_test_running.txt");
@@ -76,6 +82,7 @@ namespace UnityCliRunner
                 else
                 {
                     try { File.Delete(RunningFilePath); } catch { }
+                    HasActiveTestFilter = false;
                 }
             }
         }
