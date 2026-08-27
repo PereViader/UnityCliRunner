@@ -31,7 +31,18 @@ namespace UnityCliRunner
 
             if (UnityCliCompilationTracker.ScriptCompilationFailed)
             {
-                return "COMPILATION_ERROR";
+                string diagnosticsPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_compilation_errors.txt");
+                if (!File.Exists(diagnosticsPath) || new FileInfo(diagnosticsPath).Length == 0)
+                {
+                    UnityCliCompilationTracker.WriteActiveErrorsToFile();
+                }
+
+                if (File.Exists(diagnosticsPath) && new FileInfo(diagnosticsPath).Length > 0)
+                {
+                    return "COMPILATION_ERROR";
+                }
+
+                return "COMPILING";
             }
 
             return "READY";

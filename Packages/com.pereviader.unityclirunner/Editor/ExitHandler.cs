@@ -6,6 +6,12 @@ namespace UnityCliRunner
 {
     internal class ExitHandler : ICommandHandler
     {
+        private static void ExitUnity()
+        {
+            UnityCliServer.StopServer();
+            EditorApplication.Exit(0);
+        }
+
         public void Handle(string payload, StreamWriter writer)
         {
             writer.WriteLine("EXITING");
@@ -25,14 +31,14 @@ namespace UnityCliRunner
                     {
                         EditorApplication.update -= waitForOperations;
                         Debug.Log("UnityCliRunner: Operations finished. Exiting now.");
-                        EditorApplication.Exit(0);
+                        ExitUnity();
                     }
                 };
                 EditorApplication.update += waitForOperations;
             }
             else
             {
-                EditorApplication.Exit(0);
+                ExitUnity();
             }
         }
     }

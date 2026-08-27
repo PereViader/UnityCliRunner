@@ -50,7 +50,7 @@ namespace UnityCliRunner
             // Start server
             StartServer();
 
-            // Hook domain unload to stop server cleanly
+            // Stop the listener and remove its runtime marker on domain reload.
             AssemblyReloadEvents.beforeAssemblyReload += StopServer;
         }
 
@@ -68,7 +68,7 @@ namespace UnityCliRunner
             _serverThread.Start();
         }
 
-        private static void StopServer()
+        internal static void StopServer()
         {
             if(!_isRunning)
                 return;
@@ -84,6 +84,8 @@ namespace UnityCliRunner
             {
                 _serverThread.Join(500);
             }
+
+            DeletePortFile();
 
             Debug.Log("UnityCliRunner: Socket server stopped.");
         }
@@ -301,6 +303,22 @@ namespace UnityCliRunner
             catch(Exception e)
             {
                 Debug.LogError($"UnityCliRunner: Failed to write port file: {e}");
+            }
+        }
+
+        internal static void DeletePortFile()
+        {
+            try
+            {
+                string portFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", PortFileName);
+                if(File.Exists(portFilePath))
+                {
+                    File.Delete(portFilePath);
+                }
+            }
+            catch(Exception e)
+            {
+                Debug.LogWarning($"UnityCliRunner: Failed to remove port file: {e}");
             }
         }
 
