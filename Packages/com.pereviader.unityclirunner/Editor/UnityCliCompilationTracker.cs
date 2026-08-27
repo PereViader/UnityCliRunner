@@ -42,7 +42,6 @@ namespace UnityCliRunner
                 if (value)
                 {
                     s_CompilationRequestTime = EditorApplication.timeSinceStartup;
-                    s_ScriptCompilationFailed = false;
                 }
             }
         }
@@ -114,6 +113,11 @@ namespace UnityCliRunner
 
             if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\):\s*(error|warning)\s+[a-zA-Z0-9]+:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             {
+                int newlineIdx = msg.IndexOfAny(new[] { '\r', '\n' });
+                if (newlineIdx >= 0)
+                {
+                    msg = msg.Substring(0, newlineIdx).Trim();
+                }
                 return msg;
             }
 
@@ -125,6 +129,12 @@ namespace UnityCliRunner
             else if (msg.StartsWith("warning ", StringComparison.OrdinalIgnoreCase))
             {
                 msg = msg.Substring(8).TrimStart();
+            }
+
+            int nlIdx = msg.IndexOfAny(new[] { '\r', '\n' });
+            if (nlIdx >= 0)
+            {
+                msg = msg.Substring(0, nlIdx).Trim();
             }
 
             if (!string.IsNullOrEmpty(file) && line > 0)
@@ -155,12 +165,8 @@ namespace UnityCliRunner
                 else if (EditorApplication.timeSinceStartup - s_CompilationRequestTime > 1.5)
                 {
                     s_CompilationRequested = false;
+                    WriteActiveErrorsToFile();
                 }
-            }
-
-            if (!s_IsCompiling && !s_CompilationRequested && !s_RefreshPending)
-            {
-                WriteActiveErrorsToFile();
             }
         }
 
@@ -297,7 +303,7 @@ namespace UnityCliRunner
 
                 if (diagnostics.Count > 0)
                 {
-                    File.WriteAllLines(errorsPath, diagnostics, new UTF8Encoding(false));
+                    WriteDiagnosticsFileAtomically(errorsPath, diagnostics);
                 }
                 else if (EditorUtility.scriptCompilationFailed)
                 {
@@ -315,6 +321,31 @@ namespace UnityCliRunner
             }
         }
 
+        private static void WriteDiagnosticsFileAtomically(string errorsPath, IEnumerable<string> lines)
+        {
+            string tmpPath = errorsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllLines(tmpPath, lines, new UTF8Encoding(false));
+                if (File.Exists(errorsPath))
+                {
+                    File.Delete(errorsPath);
+                }
+                File.Move(tmpPath, errorsPath);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to write diagnostics file atomically to {errorsPath}: {e}");
+            }
+            finally
+            {
+                if (File.Exists(tmpPath))
+                {
+                    try { File.Delete(tmpPath); } catch { }
+                }
+            }
+        }
+
         private static void WriteFallbackDiagnosticsIfCompilationFailed(string message)
         {
             try
@@ -327,7 +358,7 @@ namespace UnityCliRunner
 
                 string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
                 string diagnostic = $"UnityCliRunner(1,1): error UC0001: {message}";
-                File.WriteAllText(diagnosticsPath, diagnostic + Environment.NewLine, new UTF8Encoding(false));
+                WriteDiagnosticsFileAtomically(diagnosticsPath, new[] { diagnostic });
             }
             catch(Exception e)
             {
