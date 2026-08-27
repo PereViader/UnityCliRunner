@@ -49,9 +49,10 @@ namespace UnityCliRunner
 
         static UnityCliCompilationTracker()
         {
-            DeleteDiagnosticsFile();
             UpdateCompilationState();
+            WriteActiveErrorsToFile();
             EditorApplication.update += UpdateCompilationState;
+            EditorApplication.quitting += DeleteDiagnosticsFile;
             UnityEditor.Compilation.CompilationPipeline.compilationStarted += OnCompilationStarted;
             UnityEditor.Compilation.CompilationPipeline.compilationFinished += OnCompilationFinished;
             UnityEditor.Compilation.CompilationPipeline.assemblyCompilationFinished += OnAssemblyCompilationFinished;

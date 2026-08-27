@@ -1674,8 +1674,8 @@ parse_and_print_compilation_results() {
 
 # --- Main Execution ---
 
-# Clean up stale compilation errors, results, and failures files, and execute files
-rm -f Temp/unity_compilation_errors.txt Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
+# Clean up transient runtime markers and previous test/execute/eval result files
+rm -f Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
 rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt Temp/unity_eval_result.json Temp/unity_eval_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "start" ]; then
