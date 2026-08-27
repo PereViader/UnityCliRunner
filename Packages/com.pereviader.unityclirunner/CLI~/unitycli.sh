@@ -906,88 +906,6 @@ print_failed_tests() {
   fi
 }
 
-# PowerShell is deliberately the last JSON parser option and is only
-# available on Windows after the portable parsers have been exhausted.
-parse_json_with_powershell() {
-  local result_type="$1"
-  local results_file="$2"
-  if ! is_windows_platform; then
-    return 2
-  fi
-
-  local powershell_command=""
-  powershell_command=$(find_powershell || true)
-  if [ -z "$powershell_command" ]; then
-    return 2
-  fi
-
-  local native_results_file="$results_file"
-  if is_windows_platform; then
-    native_results_file=$(to_native_path "$PROJECT_PATH/$results_file" | tr -d '\r')
-  fi
-  export UNITY_CLI_RESULT_FILE="$native_results_file"
-  local status=0
-  case "$result_type" in
-    test)
-      "$powershell_command" -NoProfile -Command "
-        \$content = Get-Content \$env:UNITY_CLI_RESULT_FILE -Raw -Encoding UTF8;
-        \$json = ConvertFrom-Json \$content;
-        \$skip = if (\$json.skipCount -and \$json.skipCount -gt 0) { \", \$(\$json.skipCount) skipped\" } else { \"\" };
-        Write-Output \"\"
-        Write-Output \"Done!\"
-        if (\$json.success) {
-          Write-Output \"Unity Response: SUCCESS \$(\$json.passCount) passed\$skip\";
-          exit 0;
-        }
-        if (\$json.message -ne \$null -and \$json.message -ne '') {
-          Write-Output \"Unity Response: FAILURE \$(\$json.message)\";
-        } else {
-          Write-Output \"Unity Response: FAILURE \$(\$json.failCount) failed, \$(\$json.passCount) passed\$skip\";
-        }
-        exit 1;
-      " || status=$?
-      ;;
-    execute)
-      "$powershell_command" -NoProfile -Command "
-        \$content = Get-Content \$env:UNITY_CLI_RESULT_FILE -Raw -Encoding UTF8;
-        \$json = ConvertFrom-Json \$content;
-        Write-Output \"\"
-        Write-Output \"Done!\"
-        if (\$json.success) {
-          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
-            Write-Output \$json.payload;
-          } else {
-            Write-Output \"Unity Response: SUCCESS\";
-          }
-          exit 0;
-        }
-        Write-Output \"Unity Response: FAILURE\";
-        Write-Output \$json.message;
-        exit 1;
-      " || status=$?
-      ;;
-    eval)
-      "$powershell_command" -NoProfile -Command "
-        \$content = Get-Content \$env:UNITY_CLI_RESULT_FILE -Raw -Encoding UTF8;
-        \$json = ConvertFrom-Json \$content;
-        if (\$json.success) {
-          if (\$json.payload -ne \$null -and \$json.payload -ne '') {
-            Write-Output \$json.payload;
-          }
-          exit 0;
-        }
-        [Console]::Error.WriteLine(\$json.message);
-        exit 1;
-      " || status=$?
-      ;;
-    *)
-      status=2
-      ;;
-  esac
-  unset UNITY_CLI_RESULT_FILE
-  return $status
-}
-
 # Function to parse test results from Temp/unity_test_results.json if process exited/recycled
 parse_and_handle_test_results_file() {
   local results_file="Temp/unity_test_results.json"
@@ -995,180 +913,38 @@ parse_and_handle_test_results_file() {
     return 2
   fi
 
-  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
-    python3 -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    pass_cnt = data.get("passCount", 0)
-    fail_cnt = data.get("failCount", 0)
-    skip_cnt = data.get("skipCount", 0)
-    skip_str = f", {skip_cnt} skipped" if skip_cnt > 0 else ""
-    print("\nDone!")
-    if data.get("success"):
-        print(f"Unity Response: SUCCESS {pass_cnt} passed{skip_str}")
-        sys.exit(0)
-    else:
-        msg = data.get("message")
-        if msg:
-            print(f"Unity Response: FAILURE {msg}")
-        else:
-            print(f"Unity Response: FAILURE {fail_cnt} failed, {pass_cnt} passed{skip_str}")
-        sys.exit(1)
-except Exception:
-    sys.exit(1)
-' "$results_file"
-    local status=$?
-    if [ $status -ne 0 ]; then
-      print_failed_tests
-    fi
-    return $status
-  elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' 2>/dev/null; then
-    python -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    pass_cnt = data.get("passCount", 0)
-    fail_cnt = data.get("failCount", 0)
-    skip_cnt = data.get("skipCount", 0)
-    skip_str = f", {skip_cnt} skipped" if skip_cnt > 0 else ""
-    print("\nDone!")
-    if data.get("success"):
-        print(f"Unity Response: SUCCESS {pass_cnt} passed{skip_str}")
-        sys.exit(0)
-    else:
-        msg = data.get("message")
-        if msg:
-            print(f"Unity Response: FAILURE {msg}")
-        else:
-            print(f"Unity Response: FAILURE {fail_cnt} failed, {pass_cnt} passed{skip_str}")
-        sys.exit(1)
-except Exception:
-    sys.exit(1)
-' "$results_file"
-    local status=$?
-    if [ $status -ne 0 ]; then
-      print_failed_tests
-    fi
-    return $status
-  elif command -v perl >/dev/null 2>&1 && perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
-    perl -MJSON::PP -e '
-      local $/;
-      open(my $f, "<:utf8", $ARGV[0]) or exit 2;
-      my $data = decode_json(<$f>);
-      my $pass_cnt = $data->{passCount} || 0;
-      my $fail_cnt = $data->{failCount} || 0;
-      my $skip_cnt = $data->{skipCount} || 0;
-      my $skip_str = $skip_cnt > 0 ? ", $skip_cnt skipped" : "";
-      print "\nDone!\n";
-      if ($data->{success}) {
-        print "Unity Response: SUCCESS $pass_cnt passed$skip_str\n";
-        exit 0;
+  if ! command -v perl >/dev/null 2>&1 || ! perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
+    echo "Error: Perl with JSON::PP module is required to parse test results." >&2
+    return 1
+  fi
+
+  perl -MJSON::PP -e '
+    local $/;
+    open(my $f, "<:utf8", $ARGV[0]) or exit 2;
+    my $data = decode_json(<$f>);
+    my $pass_cnt = $data->{passCount} || 0;
+    my $fail_cnt = $data->{failCount} || 0;
+    my $skip_cnt = $data->{skipCount} || 0;
+    my $skip_str = $skip_cnt > 0 ? ", $skip_cnt skipped" : "";
+    print "\nDone!\n";
+    if ($data->{success}) {
+      print "Unity Response: SUCCESS $pass_cnt passed$skip_str\n";
+      exit 0;
+    } else {
+      my $msg = $data->{message};
+      if (defined $msg && $msg ne "") {
+        print "Unity Response: FAILURE $msg\n";
       } else {
-        my $msg = $data->{message};
-        if (defined $msg && $msg ne "") {
-          print "Unity Response: FAILURE $msg\n";
-        } else {
-          print "Unity Response: FAILURE $fail_cnt failed, $pass_cnt passed$skip_str\n";
-        }
-        exit 1;
+        print "Unity Response: FAILURE $fail_cnt failed, $pass_cnt passed$skip_str\n";
       }
-    ' "$results_file"
-    local status=$?
-    if [ $status -ne 0 ]; then
-      print_failed_tests
-    fi
-    return $status
-  elif command -v node >/dev/null 2>&1; then
-    node -e '
-      const fs = require("fs");
-      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      const skip = data.skipCount > 0 ? `, ${data.skipCount} skipped` : "";
-      console.log("\nDone!");
-      if (data.success) {
-        console.log(`Unity Response: SUCCESS ${data.passCount || 0} passed${skip}`);
-        process.exit(0);
-      }
-      if (data.message) console.log(`Unity Response: FAILURE ${data.message}`);
-      else console.log(`Unity Response: FAILURE ${data.failCount || 0} failed, ${data.passCount || 0} passed${skip}`);
-      process.exit(1);
-    ' "$results_file"
-    local status=$?
-    if [ $status -ne 0 ]; then
-      print_failed_tests
-    fi
-    return $status
-  elif command -v jq >/dev/null 2>&1 && jq empty "$results_file" >/dev/null 2>&1; then
-    echo ""
-    echo "Done!"
-    local success
-    success=$(jq -r '.success' "$results_file")
-    if [ "$success" = "true" ]; then
-      local skip_count
-      skip_count=$(jq -r '.skipCount // 0' "$results_file")
-      local skip_str=""
-      if [ "$skip_count" -gt 0 ]; then
-        skip_str=", $skip_count skipped"
-      fi
-      echo "Unity Response: SUCCESS $(jq -r '.passCount // 0' "$results_file") passed$skip_str"
-      return 0
-    fi
-    local message
-    message=$(jq -r '.message // empty' "$results_file")
-    if [ -n "$message" ]; then
-      echo "Unity Response: FAILURE $message"
-    else
-      echo "Unity Response: FAILURE $(jq -r '.failCount // 0' "$results_file") failed, $(jq -r '.passCount // 0' "$results_file") passed"
-    fi
+      exit 1;
+    }
+  ' "$results_file"
+  local status=$?
+  if [ $status -ne 0 ]; then
     print_failed_tests
-    return 1
   fi
-
-  if is_windows_platform; then
-    parse_json_with_powershell "test" "$results_file"
-    local status=$?
-    if [ "$status" -ne 2 ]; then
-      if [ "$status" -ne 0 ]; then
-        print_failed_tests
-      fi
-      return "$status"
-    fi
-  fi
-
-  local success
-  success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
-  local pass_count
-  pass_count=$(grep '"passCount":' "$results_file" 2>/dev/null | sed -E 's/.*"passCount":[[:space:]]*([0-9]+).*/\1/' | head -n 1)
-  local fail_count
-  fail_count=$(grep '"failCount":' "$results_file" 2>/dev/null | sed -E 's/.*"failCount":[[:space:]]*([0-9]+).*/\1/' | head -n 1)
-  local skip_count
-  skip_count=$(grep '"skipCount":' "$results_file" 2>/dev/null | sed -E 's/.*"skipCount":[[:space:]]*([0-9]+).*/\1/' | head -n 1)
-  local msg
-  msg=$(grep '"message":' "$results_file" 2>/dev/null | sed -E 's/.*"message":[[:space:]]*"(([^"\\]|\\.)*)".*/\1/' | sed 's/\\"/"/g' | head -n 1)
-
-  local skip_str=""
-  if [ -n "$skip_count" ] && [ "$skip_count" -gt 0 ]; then
-    skip_str=", $skip_count skipped"
-  fi
-
-  if [ "$success" = "true" ]; then
-    echo ""
-    echo "Done!"
-    echo "Unity Response: SUCCESS ${pass_count:-0} passed${skip_str}"
-    return 0
-  else
-    echo ""
-    echo "Done!"
-    if [ -n "$msg" ]; then
-      echo "Unity Response: FAILURE $msg"
-    else
-      echo "Unity Response: FAILURE ${fail_count:-0} failed, ${pass_count:-0} passed${skip_str}"
-    fi
-    print_failed_tests
-    return 1
-  fi
+  return $status
 }
 
 # Function to parse execute results from Temp/unity_execute_result.json if process exited/recycled
@@ -1178,114 +954,30 @@ parse_and_handle_execute_results_file() {
     return 2
   fi
 
-  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
-    python3 -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    print("\nDone!")
-    if data.get("success"):
-        payload = data.get("payload")
-        if payload is not None and payload != "":
-            print(payload)
-        else:
-            print("Unity Response: SUCCESS")
-        sys.exit(0)
-    else:
-        print("Unity Response: FAILURE")
-        print(data.get("message", ""))
-        sys.exit(1)
-except Exception:
-    sys.exit(1)
-' "$results_file"
-    return $?
-  elif command -v perl >/dev/null 2>&1 && perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
-    perl -MJSON::PP -e '
-      local $/;
-      open(my $f, "<:utf8", $ARGV[0]) or exit 2;
-      my $data = decode_json(<$f>);
-      print "\nDone!\n";
-      if ($data->{success}) {
-        if (defined $data->{payload} && $data->{payload} ne "") {
-          print $data->{payload} . "\n";
-        } else {
-          print "Unity Response: SUCCESS\n";
-        }
-        exit 0;
-      } else {
-        print "Unity Response: FAILURE\n";
-        print ($data->{message} || "") . "\n";
-        exit 1;
-      }
-    ' "$results_file"
-    return $?
-  elif command -v node >/dev/null 2>&1; then
-    node -e '
-      const fs = require("fs");
-      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      console.log("\nDone!");
-      if (data.success) {
-        if (data.payload !== null && data.payload !== undefined && data.payload !== "") console.log(data.payload);
-        else console.log("Unity Response: SUCCESS");
-        process.exit(0);
-      } else {
-        console.log("Unity Response: FAILURE");
-        console.log(data.message || "");
-        process.exit(1);
-      }
-    ' "$results_file"
-    return $?
-  elif command -v jq >/dev/null 2>&1; then
-    echo ""
-    echo "Done!"
-    if jq -e '.success' "$results_file" >/dev/null 2>&1; then
-      local pl
-      pl=$(jq -r '.payload // empty' "$results_file")
-      if [ -n "$pl" ]; then
-        echo "$pl"
-      else
-        echo "Unity Response: SUCCESS"
-      fi
-      return 0
-    else
-      echo "Unity Response: FAILURE"
-      jq -r '.message // ""' "$results_file"
-      return 1
-    fi
-  fi
-
-  if is_windows_platform; then
-    parse_json_with_powershell "execute" "$results_file"
-    local status=$?
-    if [ "$status" -ne 2 ]; then
-      return "$status"
-    fi
-  fi
-
-  local success
-  success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
-  local payload
-  payload=$(grep '"payload":' "$results_file" 2>/dev/null | sed -E 's/.*"payload":[[:space:]]*"(([^"\\]|\\.)*)".*/\1/' | sed 's/\\"/"/g' | head -n 1)
-  local msg
-  msg=$(grep '"message":' "$results_file" 2>/dev/null | sed -E 's/.*"message":[[:space:]]*"(([^"\\]|\\.)*)".*/\1/' | sed 's/\\"/"/g' | head -n 1)
-
-  if [ "$success" = "true" ]; then
-    echo ""
-    echo "Done!"
-    if [ -n "$payload" ]; then
-      echo "$payload"
-    else
-      echo "Unity Response: SUCCESS"
-    fi
-    return 0
-  else
-    echo ""
-    echo "Done!"
-    echo "Unity Response: FAILURE"
-    echo "$msg"
+  if ! command -v perl >/dev/null 2>&1 || ! perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
+    echo "Error: Perl with JSON::PP module is required to parse execute results." >&2
     return 1
   fi
+
+  perl -MJSON::PP -e '
+    local $/;
+    open(my $f, "<:utf8", $ARGV[0]) or exit 2;
+    my $data = decode_json(<$f>);
+    print "\nDone!\n";
+    if ($data->{success}) {
+      if (defined $data->{payload} && $data->{payload} ne "") {
+        print $data->{payload} . "\n";
+      } else {
+        print "Unity Response: SUCCESS\n";
+      }
+      exit 0;
+    } else {
+      print "Unity Response: FAILURE\n";
+      print ($data->{message} || "") . "\n";
+      exit 1;
+    }
+  ' "$results_file"
+  return $?
 }
 
 # Function to parse eval results from Temp/unity_eval_result.json
@@ -1295,117 +987,24 @@ parse_and_handle_eval_results_file() {
     return 2
   fi
 
-  if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
-    python3 -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if data.get("success"):
-        payload = data.get("payload")
-        if payload is not None and payload != "":
-            print(payload)
-        sys.exit(0)
-    else:
-        msg = data.get("message", "Evaluation failed.")
-        print(msg, file=sys.stderr)
-        sys.exit(1)
-except Exception as e:
-    print(e, file=sys.stderr)
-    sys.exit(1)
-' "$results_file"
-    return $?
-  elif command -v python >/dev/null 2>&1 && python -c 'import sys, json; sys.exit(0)' 2>/dev/null; then
-    python -c '
-import json, sys
-try:
-    with open(sys.argv[1], "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if data.get("success"):
-        payload = data.get("payload")
-        if payload is not None and payload != "":
-            print(payload)
-        sys.exit(0)
-    else:
-        msg = data.get("message", "Evaluation failed.")
-        print(msg, file=sys.stderr)
-        sys.exit(1)
-except Exception as e:
-    print(e, file=sys.stderr)
-    sys.exit(1)
-' "$results_file"
-    return $?
-  elif command -v perl >/dev/null 2>&1 && perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
-    perl -MJSON::PP -e '
-      local $/;
-      open(my $f, "<:utf8", $ARGV[0]) or exit 2;
-      my $data = decode_json(<$f>);
-      if ($data->{success}) {
-        print $data->{payload} . "\n" if defined $data->{payload} && $data->{payload} ne "";
-        exit 0;
-      } else {
-        warn ($data->{message} || "Evaluation failed.") . "\n";
-        exit 1;
-      }
-    ' "$results_file"
-    return $?
-  elif command -v node >/dev/null 2>&1; then
-    node -e '
-      const fs = require("fs");
-      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      if (data.success) {
-        if (data.payload !== null && data.payload !== undefined && data.payload !== "") console.log(data.payload);
-        process.exit(0);
-      } else {
-        console.error(data.message || "Evaluation failed.");
-        process.exit(1);
-      }
-    ' "$results_file"
-    return $?
-  elif command -v jq >/dev/null 2>&1; then
-    if jq -e '.success' "$results_file" >/dev/null 2>&1; then
-      local pl
-      pl=$(jq -r '.payload // empty' "$results_file")
-      if [ -n "$pl" ]; then
-        echo "$pl"
-      fi
-      return 0
-    else
-      jq -r '.message // "Evaluation failed."' "$results_file" >&2
-      return 1
-    fi
-  fi
-
-  if is_windows_platform; then
-    parse_json_with_powershell "eval" "$results_file"
-    local status=$?
-    if [ "$status" -ne 2 ]; then
-      return "$status"
-    fi
-  fi
-
-  local success
-  success=$(grep '"success":' "$results_file" 2>/dev/null | sed -E 's/.*"success":[[:space:]]*(true|false).*/\1/' | head -n 1)
-  local payload
-  payload=$(grep '"payload":' "$results_file" 2>/dev/null | sed -E 's/.*"payload":[[:space:]]*"(([^"\\]|\\.)*)".*/\1/' | sed 's/\\"/"/g' | head -n 1)
-  local msg
-  msg=$(grep '"message":' "$results_file" 2>/dev/null | sed -E 's/.*"message":[[:space:]]*"(([^"\\]|\\.)*)".*/\1/' | sed 's/\\"/"/g' | head -n 1)
-
-  if [ "$success" = "true" ]; then
-    if [ -n "$payload" ] && [ "$payload" != "null" ]; then
-      echo "$payload"
-    elif [ "$payload" = "null" ]; then
-      echo "null"
-    fi
-    return 0
-  else
-    if [ -n "$msg" ]; then
-      echo "$msg" >&2
-    else
-      echo "Evaluation failed." >&2
-    fi
+  if ! command -v perl >/dev/null 2>&1 || ! perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
+    echo "Error: Perl with JSON::PP module is required to parse eval results." >&2
     return 1
   fi
+
+  perl -MJSON::PP -e '
+    local $/;
+    open(my $f, "<:utf8", $ARGV[0]) or exit 2;
+    my $data = decode_json(<$f>);
+    if ($data->{success}) {
+      print $data->{payload} . "\n" if defined $data->{payload} && $data->{payload} ne "";
+      exit 0;
+    } else {
+      warn ($data->{message} || "Evaluation failed.") . "\n";
+      exit 1;
+    }
+  ' "$results_file"
+  return $?
 }
 
 # Function to run tests via socket (Online)
