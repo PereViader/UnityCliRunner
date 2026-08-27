@@ -13,8 +13,8 @@ namespace UnityCliRunner
     {
         private const string CompilationDiagnosticsFileName = "unity_compilation_errors.txt";
 
-        private static readonly List<string> s_PipelineDiagnostics = new List<string>();
-        private static readonly object s_PipelineDiagnosticsLock = new object();
+        private static readonly Dictionary<string, List<string>> s_AssemblyDiagnostics = new Dictionary<string, List<string>>();
+        private static readonly object s_DiagnosticsLock = new object();
 
         private static volatile bool s_IsCompiling;
         private static volatile bool s_IsUpdating;
@@ -62,12 +62,6 @@ namespace UnityCliRunner
         {
             s_IsCompiling = true;
             s_CompilationRequested = false;
-            s_ScriptCompilationFailed = false;
-            lock (s_PipelineDiagnosticsLock)
-            {
-                s_PipelineDiagnostics.Clear();
-            }
-            DeleteDiagnosticsFile();
         }
 
         private static void OnCompilationFinished(object obj)
@@ -79,25 +73,71 @@ namespace UnityCliRunner
 
         private static void OnAssemblyCompilationFinished(string assemblyPath, UnityEditor.Compilation.CompilerMessage[] messages)
         {
-            if (messages == null || messages.Length == 0)
-                return;
-
-            lock (s_PipelineDiagnosticsLock)
+            string key = assemblyPath ?? "";
+            lock (s_DiagnosticsLock)
             {
+                if (messages == null || messages.Length == 0)
+                {
+                    s_AssemblyDiagnostics.Remove(key);
+                    return;
+                }
+
+                var list = new List<string>();
                 foreach (var msg in messages)
                 {
                     if (msg.type == UnityEditor.Compilation.CompilerMessageType.Error || msg.type == UnityEditor.Compilation.CompilerMessageType.Warning)
                     {
-                        string typeStr = msg.type == UnityEditor.Compilation.CompilerMessageType.Error ? "error" : "warning";
-                        string lineStr = msg.message;
-                        if (!string.IsNullOrEmpty(msg.file) && !lineStr.Contains(msg.file))
+                        bool isError = msg.type == UnityEditor.Compilation.CompilerMessageType.Error;
+                        string formatted = FormatCompilerDiagnostic(msg.message, msg.file, msg.line, msg.column, isError);
+                        if (!string.IsNullOrEmpty(formatted))
                         {
-                            lineStr = $"{msg.file}({msg.line},{msg.column}): {typeStr} {msg.message}";
+                            list.Add(formatted);
                         }
-                        s_PipelineDiagnostics.Add(lineStr);
                     }
                 }
+
+                if (list.Count > 0)
+                {
+                    s_AssemblyDiagnostics[key] = list;
+                }
+                else
+                {
+                    s_AssemblyDiagnostics.Remove(key);
+                }
             }
+        }
+
+        private static string FormatCompilerDiagnostic(string rawMessage, string file, int line, int column, bool isError)
+        {
+            string msg = (rawMessage ?? "").Trim();
+            if (string.IsNullOrEmpty(msg)) return null;
+
+            if (System.Text.RegularExpressions.Regex.IsMatch(msg, @"^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\):\s*(error|warning)\s+[a-zA-Z0-9]+:", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                return msg;
+            }
+
+            string typeStr = isError ? "error" : "warning";
+            if (msg.StartsWith("error ", StringComparison.OrdinalIgnoreCase))
+            {
+                msg = msg.Substring(6).TrimStart();
+            }
+            else if (msg.StartsWith("warning ", StringComparison.OrdinalIgnoreCase))
+            {
+                msg = msg.Substring(8).TrimStart();
+            }
+
+            if (!string.IsNullOrEmpty(file) && line > 0)
+            {
+                return $"{file}({line},{column}): {typeStr} {msg}";
+            }
+
+            if (!string.IsNullOrEmpty(file))
+            {
+                return $"{file}: {typeStr} {msg}";
+            }
+
+            return $"{typeStr} {msg}";
         }
 
         public static void UpdateCompilationState()
@@ -186,11 +226,14 @@ namespace UnityCliRunner
                 string errorsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
                 var diagnostics = new List<string>();
 
-                lock (s_PipelineDiagnosticsLock)
+                lock (s_DiagnosticsLock)
                 {
-                    if (s_PipelineDiagnostics.Count > 0)
+                    foreach (var list in s_AssemblyDiagnostics.Values)
                     {
-                        diagnostics.AddRange(s_PipelineDiagnostics);
+                        if (list != null && list.Count > 0)
+                        {
+                            diagnostics.AddRange(list);
+                        }
                     }
                 }
 
@@ -204,7 +247,8 @@ namespace UnityCliRunner
                     var startGettingEntriesMethod = logEntriesType?.GetMethod("StartGettingEntries", BindingFlags.Static | BindingFlags.Public);
                     var endGettingEntriesMethod = logEntriesType?.GetMethod("EndGettingEntries", BindingFlags.Static | BindingFlags.Public);
 
-                    var messageField = logEntryType?.GetField("message", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var messageField = logEntryType?.GetField("message", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                                    ?? logEntryType?.GetField("condition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     var fileField = logEntryType?.GetField("file", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     var lineField = logEntryType?.GetField("line", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     var columnField = logEntryType?.GetField("column", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -236,18 +280,11 @@ namespace UnityCliRunner
                                     int line = lineField != null ? (int) lineField.GetValue(currentEntry) : 0;
                                     int column = columnField != null ? (int) columnField.GetValue(currentEntry) : 0;
 
-                                    string typeStr = isCompileError ? "error" : "warning";
-                                    if (string.IsNullOrEmpty(message))
+                                    string formatted = FormatCompilerDiagnostic(message, file, line, column, isCompileError);
+                                    if (!string.IsNullOrEmpty(formatted))
                                     {
-                                        continue;
+                                        diagnostics.Add(formatted);
                                     }
-
-                                    string lineStr = message;
-                                    if (!string.IsNullOrEmpty(file) && !lineStr.Contains(file))
-                                    {
-                                        lineStr = $"{file}({line},{column}): {typeStr} {message}";
-                                    }
-                                    diagnostics.Add(lineStr);
                                 }
                             }
                         }
