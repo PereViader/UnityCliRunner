@@ -7,12 +7,30 @@ using UnityEngine;
 
 namespace UnityCliRunner
 {
+    [UnityEditor.InitializeOnLoad]
     internal static class CommandHelper
     {
         // Capture this once on Unity's main thread. User execute/eval code can
         // change Environment.CurrentDirectory, which must not redirect protocol
         // files to an arbitrary directory.
-        internal static readonly string ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        private static string s_ProjectRoot;
+
+        internal static string ProjectRoot
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_ProjectRoot))
+                {
+                    s_ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+                }
+                return s_ProjectRoot;
+            }
+        }
+
+        static CommandHelper()
+        {
+            s_ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        }
 
         public static string[] SplitArguments(string commandLine)
         {

@@ -186,9 +186,6 @@ namespace UnityCliRunner
                     Directory.CreateDirectory(TempDirectory);
                 }
 
-                DeleteIfExists(ResultsFilePath);
-                DeleteIfExists(FailuresFilePath);
-
                 var state = new UnityTestRunState
                 {
                     runId = runId,
@@ -344,23 +341,7 @@ namespace UnityCliRunner
 
         internal static void WriteAtomic(string path, string content, string runId)
         {
-            string tempPath = path + "." + runId + ".tmp";
-            try
-            {
-                File.WriteAllText(tempPath, content, new UTF8Encoding(false));
-                if (File.Exists(path))
-                {
-                    File.Replace(tempPath, path, null);
-                }
-                else
-                {
-                    File.Move(tempPath, path);
-                }
-            }
-            finally
-            {
-                DeleteIfExists(tempPath);
-            }
+            UnityCliOperationStore.WriteAtomic(path, content, runId);
         }
     }
 

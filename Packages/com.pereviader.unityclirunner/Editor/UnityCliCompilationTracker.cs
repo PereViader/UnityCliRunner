@@ -50,8 +50,29 @@ namespace UnityCliRunner
             }
         }
 
+        private static bool s_Initialized;
+        private static readonly object s_InitLock = new object();
+
+        public static void EnsureInitialized()
+        {
+            if (s_Initialized) return;
+            lock (s_InitLock)
+            {
+                if (s_Initialized) return;
+                s_Initialized = true;
+                InitializeMainThread();
+            }
+        }
+
         static UnityCliCompilationTracker()
         {
+            EnsureInitialized();
+        }
+
+        private static void InitializeMainThread()
+        {
+            _ = CommandHelper.ProjectRoot;
+            UnityCliOperationStore.EnsureInitialized();
             UpdateCompilationState();
             var operation = UnityCliOperationStore.Read();
             LoadRefreshResultCache();
@@ -62,10 +83,15 @@ namespace UnityCliRunner
             {
                 WriteActiveErrorsToFile();
             }
+            EditorApplication.update -= UpdateCompilationState;
             EditorApplication.update += UpdateCompilationState;
+            EditorApplication.quitting -= DeleteDiagnosticsFile;
             EditorApplication.quitting += DeleteDiagnosticsFile;
+            UnityEditor.Compilation.CompilationPipeline.compilationStarted -= OnCompilationStarted;
             UnityEditor.Compilation.CompilationPipeline.compilationStarted += OnCompilationStarted;
+            UnityEditor.Compilation.CompilationPipeline.compilationFinished -= OnCompilationFinished;
             UnityEditor.Compilation.CompilationPipeline.compilationFinished += OnCompilationFinished;
+            UnityEditor.Compilation.CompilationPipeline.assemblyCompilationFinished -= OnAssemblyCompilationFinished;
             UnityEditor.Compilation.CompilationPipeline.assemblyCompilationFinished += OnAssemblyCompilationFinished;
         }
 
@@ -480,26 +506,14 @@ namespace UnityCliRunner
 
         private static void WriteDiagnosticsFileAtomically(string errorsPath, IEnumerable<string> lines)
         {
-            string tmpPath = errorsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                File.WriteAllLines(tmpPath, lines, new UTF8Encoding(false));
-                if (File.Exists(errorsPath))
-                {
-                    File.Delete(errorsPath);
-                }
-                File.Move(tmpPath, errorsPath);
+                string content = string.Join(Environment.NewLine, lines);
+                UnityCliOperationStore.WriteAtomic(errorsPath, content, Guid.NewGuid().ToString("N"));
             }
             catch (Exception e)
             {
                 Debug.LogError($"UnityCliRunner: Failed to write diagnostics file atomically to {errorsPath}: {e}");
-            }
-            finally
-            {
-                if (File.Exists(tmpPath))
-                {
-                    try { File.Delete(tmpPath); } catch { }
-                }
             }
         }
 

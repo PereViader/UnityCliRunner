@@ -49,6 +49,10 @@ namespace UnityCliRunner
                 return;
             }
 
+            _ = CommandHelper.ProjectRoot;
+            UnityCliOperationStore.EnsureInitialized();
+            UnityCliCompilationTracker.EnsureInitialized();
+
             RecoverOperationAfterEditorRestart();
 
             // Register callbacks for tests
