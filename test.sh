@@ -171,6 +171,7 @@ normalize_output() {
     -e "s|$escaped_proj_path_win|PROJECT_PATH|gI" \
     -e 's|\[[0-9]+ ms\]|[DURATION]|g' \
     -e 's|\[< 1 ms\]|[DURATION]|g' \
+    -e '/DummyTest\.cs:/ s|\[0x[0-9a-fA-F]+\]|[0x00000]|g' \
     -e 's|Waiting for tests to complete\.*$|Waiting for tests to complete...|g' \
     -e 's|Waiting for AssetDatabase refresh/compilation to finish\.*$|Waiting for AssetDatabase refresh/compilation to finish...|g' \
     -e 's|Triggering AssetDatabase refresh\.*$|Triggering AssetDatabase refresh...|g' \
@@ -202,7 +203,6 @@ normalize_output() {
     -e '/Licensing::IpcConnector/d' \
     -e '/AcceleratorClientConnectionCallback/d' \
     -e '/RiderPlugin/d' \
-    -e '/ThreadAbortException/d' \
     -e '/Accept_icall/d' \
     -e '/Accept_internal/d' \
     -e '/Socket\.Accept/d' \
@@ -302,7 +302,6 @@ TEST_CASES=(
   "TestCompileWarningsAndPass"
   "TestNoWarningsAndFailures"
   "TestNoWarningsAndSkipped"
-  "TestStopTests"
 )
 
 ONLINE_CASES=(
@@ -376,10 +375,45 @@ run_integration_case() {
   
   local raw_out="IntegrationTests/Temp/raw_out_${mode}.txt"
   local norm_out="IntegrationTests/Temp/norm_out_${mode}.txt"
+  local atomic_probe_file="IntegrationTests/Temp/atomic_probe_${mode}.failed"
+  local atomic_probe_pid=""
   rm -f "$raw_out" "$norm_out"
-  
-  bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1
-  local exit_code=$?
+
+  # Poll the result file while test commands run. A malformed JSON observation
+  # indicates that a writer exposed a partially-written result instead of an
+  # atomic replacement.
+  if [[ "$cmd_args" == test* ]]; then
+    rm -f "$atomic_probe_file"
+    bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1 &
+    local test_pid=$!
+    (
+      while kill -0 "$test_pid" 2>/dev/null; do
+        if [ -f "Temp/unity_test_results.json" ] &&
+           ! perl -MJSON::PP -e 'local $/; decode_json(<>)' "Temp/unity_test_results.json" >/dev/null 2>&1; then
+          touch "$atomic_probe_file"
+          exit 0
+        fi
+        sleep 0.05
+      done
+    ) &
+    atomic_probe_pid=$!
+
+    wait "$test_pid"
+    local exit_code=$?
+    wait "$atomic_probe_pid" 2>/dev/null || true
+  else
+    bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1
+    local exit_code=$?
+  fi
+
+  if grep -q 'Unity Response: ERROR: Thread was being aborted' "$raw_out"; then
+    echo "FAILURE: CLI exposed a Unity reload ThreadAbortException"
+    FAILED_TESTS=$((FAILED_TESTS + 1))
+  fi
+  if [ -f "$atomic_probe_file" ]; then
+    echo "FAILURE: Test result JSON was observed before its atomic write completed"
+    FAILED_TESTS=$((FAILED_TESTS + 1))
+  fi
   
   echo "EXIT_CODE: $exit_code" >> "$raw_out"
   

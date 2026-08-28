@@ -100,6 +100,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+new_operation_id() {
+  # Token-safe on Bash 3.2 (macOS), Linux, and Windows Git Bash. It only needs
+  # to be unique within one project, not cryptographically random.
+  printf 'cli-%s-%s-%s-%s\n' "$(date +%s)" "$$" "$RANDOM" "$RANDOM"
+}
+
 # Default options
 SUBCOMMAND=""
 MODE_PLAYMODE=false
@@ -906,10 +912,39 @@ print_failed_tests() {
   fi
 }
 
+json_result_matches() {
+  local file="$1"
+  local field="$2"
+  local expected="$3"
+  [ -f "$file" ] || return 1
+  command -v perl >/dev/null 2>&1 || return 1
+  perl -MJSON::PP -e '
+    local $/;
+    open(my $f, "<:utf8", $ARGV[0]) or exit 1;
+    my $data = eval { decode_json(<$f>) } or exit 1;
+    exit((defined $data->{$ARGV[1]} && $data->{$ARGV[1]} eq $ARGV[2]) ? 0 : 1);
+  ' "$file" "$field" "$expected" 2>/dev/null
+}
+
+test_running_matches() {
+  json_result_matches "Temp/unity_test_running.txt" "runId" "$1"
+}
+
+plain_marker_matches() {
+  local file="$1"
+  local expected="$2"
+  [ -f "$file" ] || return 1
+  [ "$(tr -d '[:space:]' < "$file" 2>/dev/null)" = "$expected" ]
+}
+
 # Function to parse test results from Temp/unity_test_results.json if process exited/recycled
 parse_and_handle_test_results_file() {
   local results_file="Temp/unity_test_results.json"
+  local expected_operation_id="${1:-}"
   if [ ! -f "$results_file" ]; then
+    return 2
+  fi
+  if [ -n "$expected_operation_id" ] && ! json_result_matches "$results_file" "runId" "$expected_operation_id"; then
     return 2
   fi
 
@@ -932,7 +967,10 @@ parse_and_handle_test_results_file() {
       exit 0;
     } else {
       my $msg = $data->{message};
-      if (defined $msg && $msg ne "") {
+      my $state = $data->{resultState} || "";
+      if ($state eq "Interrupted") {
+        print "Unity Response: INTERRUPTION " . (($msg // "") ne "" ? $msg : "Test run was interrupted by Unity domain reload or shutdown.") . "\n";
+      } elsif (defined $msg && $msg ne "") {
         print "Unity Response: FAILURE $msg\n";
       } else {
         print "Unity Response: FAILURE $fail_cnt failed, $pass_cnt passed$skip_str\n";
@@ -950,7 +988,11 @@ parse_and_handle_test_results_file() {
 # Function to parse execute results from Temp/unity_execute_result.json if process exited/recycled
 parse_and_handle_execute_results_file() {
   local results_file="Temp/unity_execute_result.json"
+  local expected_operation_id="${1:-}"
   if [ ! -f "$results_file" ]; then
+    return 2
+  fi
+  if [ -n "$expected_operation_id" ] && ! json_result_matches "$results_file" "operationId" "$expected_operation_id"; then
     return 2
   fi
 
@@ -971,6 +1013,9 @@ parse_and_handle_execute_results_file() {
         print "Unity Response: SUCCESS\n";
       }
       exit 0;
+    } elsif ($data->{interrupted}) {
+      print "Unity Response: INTERRUPTION " . (($data->{message} // "") ne "" ? $data->{message} : "Command interrupted by Unity recompilation outside the Unity CLI workflow.") . "\n";
+      exit 1;
     } else {
       print "Unity Response: FAILURE\n";
       print ($data->{message} || "") . "\n";
@@ -983,7 +1028,11 @@ parse_and_handle_execute_results_file() {
 # Function to parse eval results from Temp/unity_eval_result.json
 parse_and_handle_eval_results_file() {
   local results_file="Temp/unity_eval_result.json"
+  local expected_operation_id="${1:-}"
   if [ ! -f "$results_file" ]; then
+    return 2
+  fi
+  if [ -n "$expected_operation_id" ] && ! json_result_matches "$results_file" "operationId" "$expected_operation_id"; then
     return 2
   fi
 
@@ -999,8 +1048,11 @@ parse_and_handle_eval_results_file() {
     if ($data->{success}) {
       print $data->{payload} . "\n" if defined $data->{payload} && $data->{payload} ne "";
       exit 0;
+    } elsif ($data->{interrupted}) {
+      print STDERR (($data->{message} || "Command interrupted by Unity recompilation outside the Unity CLI workflow.") . "\n");
+      exit 1;
     } else {
-      warn ($data->{message} || "Evaluation failed.") . "\n";
+      warn (($data->{message} || "Evaluation failed.") . "\n");
       exit 1;
     }
   ' "$results_file"
@@ -1010,45 +1062,109 @@ parse_and_handle_eval_results_file() {
 # Function to run tests via socket (Online)
 run_online_tests() {
   local mode="$1"
+  local operation_id
+  operation_id=$(new_operation_id)
   echo "Sending command to run $mode tests..."
 
-  local response=""
-  local cmd="RUN_TESTS $mode"
+  local cmd="RUN_TESTS $operation_id $mode"
   if [ -n "$FILTER" ]; then
     cmd="$cmd --filter \"$FILTER\""
   fi
   if [ -n "$CATEGORY" ]; then
     cmd="$cmd --category \"$CATEGORY\""
   fi
-  response=$(send_socket_cmd "$cmd" 10)
-  if [ $? -ne 0 ] || [ -z "$response" ] || [[ "$response" == ERROR* ]] || [[ "$response" == FAILURE* ]]; then
-    echo "Unity Response: $response"
-    return 1
-  fi
-  
-  echo -n "Waiting for tests to complete..."
-  while true; do
-    sleep 1
+  local response=""
+  local socket_exit_code=0
+  local retry=0
+  local max_retries=2
 
-    # Re-read port/query status. The connection will fail during domain reloads, which is expected.
-    response=$(send_socket_cmd "POLL_TESTS" 5)
-    if [ $? -ne 0 ] || [ -z "$response" ]; then
-      if [ -f "Temp/unity_test_results.json" ] && [ ! -f "Temp/unity_test_running.txt" ]; then
-        parse_and_handle_test_results_file
+  # RUN_TESTS persists its run state before sending RUNNING. If the socket is
+  # closed by a domain reload, recover from that state instead of assuming the
+  # command never reached Unity. A retry is allowed only while no run record
+  # exists, so an already-dispatched command can never be duplicated.
+  while [ "$retry" -le "$max_retries" ]; do
+    response=$(send_socket_cmd "$cmd" 10)
+    socket_exit_code=$?
+
+    if [ "$socket_exit_code" -eq 0 ] && [ "$response" = "RUNNING" ]; then
+      break
+    fi
+
+    if json_result_matches "Temp/unity_test_results.json" "runId" "$operation_id"; then
+      parse_and_handle_test_results_file "$operation_id"
+      return $?
+    fi
+
+    if test_running_matches "$operation_id"; then
+      break
+    fi
+
+    if [ "$socket_exit_code" -eq 42 ]; then
+      print_network_permission_error
+      return 1
+    fi
+
+    local lower_response
+    lower_response=$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')
+    local reload_related=false
+    if [ "$socket_exit_code" -ne 0 ] || [ -z "$response" ] ||
+       [[ "$lower_response" == *"thread was being aborted"* ]] ||
+       [[ "$lower_response" == *"domain reload"* ]] ||
+       [[ "$lower_response" == *"connection"* ]] ||
+       [[ "$lower_response" == *"eof"* ]]; then
+      reload_related=true
+    fi
+
+    if [ "$reload_related" = false ]; then
+      echo "Unity Response: $response"
+      return 1
+    fi
+
+    if [ "$retry" -eq "$max_retries" ]; then
+      echo ""
+      echo "Error: Unity did not acknowledge the test run and no run state was recorded."
+      return 1
+    fi
+
+    retry=$((retry + 1))
+    sleep "$retry"
+  done
+
+  echo -n "Waiting for tests to complete..."
+  local test_timeout="${UNITY_CLI_TEST_TIMEOUT:-300}"
+  local elapsed=0
+  while [ "$elapsed" -lt "$test_timeout" ]; do
+    sleep 1
+    elapsed=$((elapsed + 1))
+
+    # The result is written atomically and is authoritative even if the
+    # polling socket is unavailable or the running marker is being removed.
+    if json_result_matches "Temp/unity_test_results.json" "runId" "$operation_id"; then
+      parse_and_handle_test_results_file "$operation_id"
+      return $?
+    fi
+
+    response=$(send_socket_cmd "POLL_TESTS $operation_id" 5)
+    socket_exit_code=$?
+
+    if [ "$socket_exit_code" -ne 0 ] || [ -z "$response" ]; then
+      if json_result_matches "Temp/unity_test_results.json" "runId" "$operation_id"; then
+        parse_and_handle_test_results_file "$operation_id"
         return $?
       fi
 
       if ! is_unity_still_running; then
+        # Unity may have completed the write just as its process disappeared.
         for wait_i in {1..10}; do
-          if [ -f "Temp/unity_test_results.json" ]; then
-            parse_and_handle_test_results_file
+          if json_result_matches "Temp/unity_test_results.json" "runId" "$operation_id"; then
+            parse_and_handle_test_results_file "$operation_id"
             return $?
           fi
           sleep 0.3
         done
 
         echo ""
-        echo "Error: Unity background process exited during test execution."
+        echo "Error: Unity stopped before a completed test result was available."
         return 1
       fi
       echo -n "."
@@ -1062,6 +1178,11 @@ run_online_tests() {
       echo "Done!"
       echo "Unity Response: $response"
       return 0
+    elif [[ "$response" == INTERRUPTION* ]]; then
+      echo ""
+      echo "Done!"
+      echo "Unity Response: $response"
+      return 1
     elif [[ "$response" == FAILURE* ]]; then
       echo ""
       echo "Done!"
@@ -1069,20 +1190,30 @@ run_online_tests() {
       print_failed_tests
       return 1
     else
-      # If IDLE or ERROR
-      echo ""
-      echo "Done!"
-      echo "Unity Response: $response"
-      return 2
+      # IDLE and transient server errors are not proof that a dispatched run
+      # failed. Keep polling until the result, process exit, or timeout settles
+      # the run authoritatively.
+      echo -n "."
     fi
   done
+
+  if json_result_matches "Temp/unity_test_results.json" "runId" "$operation_id"; then
+    parse_and_handle_test_results_file "$operation_id"
+    return $?
+  fi
+
+  echo ""
+  echo "Error: Timed out waiting for Unity test result ($test_timeout seconds)."
+  return 1
 }
 
 # Function to run a method via socket (Online)
 run_online_method() {
   echo "Sending command to run method $EXECUTE_METHOD..."
 
-  local cmd="EXECUTE_METHOD $EXECUTE_METHOD"
+  local operation_id
+  operation_id=$(new_operation_id)
+  local cmd="EXECUTE_METHOD $operation_id $EXECUTE_METHOD"
   if [ ${#EXECUTE_METHOD_PARAMS[@]} -gt 0 ]; then
     for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
       local escaped="${param//\\/\\\\}"
@@ -1093,7 +1224,20 @@ run_online_method() {
 
   local response=""
   response=$(send_socket_cmd "$cmd" 10)
-  if [ $? -ne 0 ] || [[ "$response" == ERROR* ]]; then
+  local send_status=$?
+  if [ "$send_status" -ne 0 ]; then
+    if json_result_matches "Temp/unity_execute_result.json" "operationId" "$operation_id"; then
+      echo -n "Waiting for method execution to complete..."
+      parse_and_handle_execute_results_file "$operation_id"
+      return $?
+    fi
+    if ! plain_marker_matches "Temp/unity_execute_running.txt" "$operation_id" &&
+       ! json_result_matches "Temp/unity_cli_operation.json" "operationId" "$operation_id"; then
+      echo "Error starting method execution: Unity did not acknowledge or persist the operation."
+      return 1
+    fi
+  fi
+  if [[ "$response" == ERROR* ]] || [[ "$response" == BUSY* ]] || [[ "$response" == FAILURE* ]]; then
     echo "Error starting method execution: $response"
     return 1
   fi
@@ -1102,17 +1246,17 @@ run_online_method() {
   while true; do
     sleep 1
 
-    response=$(send_socket_cmd "POLL_EXECUTE" 5)
+    response=$(send_socket_cmd "POLL_EXECUTE $operation_id" 5)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
-      if [ -f "Temp/unity_execute_result.json" ] && [ ! -f "Temp/unity_execute_running.txt" ]; then
-        parse_and_handle_execute_results_file
+      if json_result_matches "Temp/unity_execute_result.json" "operationId" "$operation_id"; then
+        parse_and_handle_execute_results_file "$operation_id"
         return $?
       fi
 
       if ! is_unity_still_running; then
         for wait_i in {1..10}; do
-          if [ -f "Temp/unity_execute_result.json" ]; then
-            parse_and_handle_execute_results_file
+          if json_result_matches "Temp/unity_execute_result.json" "operationId" "$operation_id"; then
+            parse_and_handle_execute_results_file "$operation_id"
             return $?
           fi
           sleep 0.3
@@ -1141,6 +1285,11 @@ run_online_method() {
         echo "Unity Response: SUCCESS"
       fi
       return 0
+    elif [[ "$response" == INTERRUPTION* ]]; then
+      echo ""
+      echo "Done!"
+      echo "Unity Response: $response"
+      return 1
     elif [[ "$response" == FAILURE* ]]; then
       echo ""
       echo "Done!"
@@ -1158,14 +1307,16 @@ run_online_method() {
 
 # Function to evaluate C# snippet via socket (Online)
 run_online_eval() {
-  local cmd="EVAL $EVAL_CODE"
+  local operation_id
+  operation_id=$(new_operation_id)
+  local cmd="EVAL $operation_id $EVAL_CODE"
   local response=""
 
   response=$(send_socket_cmd "$cmd" 30)
   local send_status=$?
 
-  if [ -f "Temp/unity_eval_result.json" ] && [ ! -f "Temp/unity_eval_running.txt" ]; then
-    parse_and_handle_eval_results_file
+  if json_result_matches "Temp/unity_eval_result.json" "operationId" "$operation_id"; then
+    parse_and_handle_eval_results_file "$operation_id"
     return $?
   fi
 
@@ -1180,25 +1331,30 @@ run_online_eval() {
     while [ $elapsed -lt 30 ]; do
       sleep 0.2
       elapsed=$((elapsed + 1))
-      response=$(send_socket_cmd "POLL_EVAL" 5 2>/dev/null)
-      if [ -f "Temp/unity_eval_result.json" ] && [ ! -f "Temp/unity_eval_running.txt" ]; then
-        parse_and_handle_eval_results_file
+      response=$(send_socket_cmd "POLL_EVAL $operation_id" 5 2>/dev/null)
+      if json_result_matches "Temp/unity_eval_result.json" "operationId" "$operation_id"; then
+        parse_and_handle_eval_results_file "$operation_id"
         return $?
       fi
       if [ "$response" = "RUNNING" ]; then
         continue
-      elif [[ "$response" == SUCCESS* ]] || [[ "$response" == FAILURE* ]] || [[ "$response" == ERROR* ]]; then
+      elif [[ "$response" == SUCCESS* ]] || [[ "$response" == FAILURE* ]] || [[ "$response" == INTERRUPTION* ]] || [[ "$response" == ERROR* ]]; then
         break
       fi
     done
   fi
 
-  if [ -f "Temp/unity_eval_result.json" ]; then
-    parse_and_handle_eval_results_file
+  if json_result_matches "Temp/unity_eval_result.json" "operationId" "$operation_id"; then
+    parse_and_handle_eval_results_file "$operation_id"
     return $?
   fi
 
-  if [[ "$response" == SUCCESS* ]]; then
+  if [[ "$response" == INTERRUPTION* ]]; then
+    local interruption="${response#INTERRUPTION}"
+    interruption="${interruption#${interruption%%[![:space:]]*}}"
+    echo "$interruption" >&2
+    return 1
+  elif [[ "$response" == SUCCESS* ]]; then
     local payload="${response#SUCCESS}"
     payload="${payload#"${payload%%[![:space:]]*}"}"
     payload="${payload%"${payload##*[![:space:]]}"}"
@@ -1272,10 +1428,6 @@ parse_and_print_compilation_results() {
 }
 
 # --- Main Execution ---
-
-# Clean up transient runtime markers and previous test/execute/eval result files
-rm -f Temp/unity_test_running.txt Temp/unity_test_results.json Temp/unity_test_failures.txt 2>/dev/null
-rm -f Temp/unity_execute_result.json Temp/unity_execute_running.txt Temp/unity_eval_result.json Temp/unity_eval_running.txt 2>/dev/null
 
 if [ "$SUBCOMMAND" = "start" ]; then
   start_background_unity "$BG_MODE"
@@ -1406,6 +1558,9 @@ elif [ "$SUBCOMMAND" = "status" ]; then
   exit 0
 fi
 
+# Operation artifacts are owned by Unity and correlated by operation id. The
+# client must never delete a running marker: another CLI process may own it.
+
 if [ "$SUBCOMMAND" = "eval" ]; then
   if [ "$IS_RUNNING" = false ]; then
     start_background_unity batchmode
@@ -1426,13 +1581,20 @@ if [ "$IS_RUNNING" = true ]; then
   fi
   
   # Step 1: Trigger AssetDatabase refresh or recompile
+  refresh_operation_id=$(new_operation_id)
   if [ "$SUBCOMMAND" = "recompile" ]; then
     echo -n "Triggering force recompilation..."
     while true; do
-      if _=$(send_socket_cmd "RECOMPILE" 2>/dev/null); then
+      trigger_response=""
+      if trigger_response=$(send_socket_cmd "RECOMPILE $refresh_operation_id" 2>/dev/null); then
+        if [ "$trigger_response" = "RECOMPILING" ]; then
+          echo ""
+          echo "Done!"
+          break
+        fi
         echo ""
-        echo "Done!"
-        break
+        echo "Error: Unity rejected recompilation: $trigger_response" >&2
+        exit 1
       fi
 
       socket_exit_code=$?
@@ -1454,10 +1616,16 @@ if [ "$IS_RUNNING" = true ]; then
   else
     echo -n "Triggering AssetDatabase refresh..."
     while true; do
-      if _=$(send_socket_cmd "REFRESH" 2>/dev/null); then
+      trigger_response=""
+      if trigger_response=$(send_socket_cmd "REFRESH $refresh_operation_id" 2>/dev/null); then
+        if [ "$trigger_response" = "REFRESHING" ]; then
+          echo ""
+          echo "Done!"
+          break
+        fi
         echo ""
-        echo "Done!"
-        break
+        echo "Error: Unity rejected refresh: $trigger_response" >&2
+        exit 1
       fi
 
       socket_exit_code=$?
@@ -1497,7 +1665,7 @@ if [ "$IS_RUNNING" = true ]; then
     
     # Check status. send_socket_cmd reads the port file for each connection attempt.
     response=""
-    response=$(send_socket_cmd "POLL_REFRESH" 2)
+    response=$(send_socket_cmd "POLL_REFRESH $refresh_operation_id" 2)
     if [ $? -ne 0 ] || [ -z "$response" ]; then
       if ! is_unity_still_running; then
         echo ""
@@ -1519,7 +1687,15 @@ if [ "$IS_RUNNING" = true ]; then
       continue
     fi
     
-    if [ "$response" = "READY" ]; then
+    if [[ "$response" == INTERRUPTION* ]]; then
+      echo ""
+      echo "Unity Response: $response" >&2
+      exit 1
+    elif [[ "$response" == BUSY* ]]; then
+      echo ""
+      echo "Error: Lost ownership of refresh operation: $response" >&2
+      exit 1
+    elif [ "$response" = "READY" ]; then
       echo ""
       echo "Unity is ready!"
       if [ -f "Temp/unity_compilation_errors.txt" ]; then

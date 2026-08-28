@@ -14,23 +14,41 @@ namespace UnityCliRunner
     {
         public void Handle(string payload, StreamWriter writer)
         {
+            string[] requestParts = (payload ?? "").Split(new[] { ' ' }, 2);
+            if (requestParts.Length < 2 || string.IsNullOrWhiteSpace(requestParts[1]))
+            {
+                writer.WriteLine("ERROR: Missing operation id or code snippet");
+                return;
+            }
+
+            string operationId = requestParts[0];
+            string rawCode = requestParts[1].Trim();
+            var begin = UnityCliOperationStore.TryBegin(operationId, "eval", "Compiling", out var existing);
+            if (begin == BeginOperationResult.Invalid)
+            {
+                writer.WriteLine("ERROR: Missing or invalid operation id");
+                return;
+            }
+            if (begin == BeginOperationResult.Busy)
+            {
+                writer.WriteLine($"BUSY {existing.kind} {existing.operationId}");
+                return;
+            }
+            if (begin == BeginOperationResult.AlreadyStarted)
+            {
+                writer.WriteLine("RUNNING");
+                return;
+            }
+
+            WriteEvalRunningState(operationId);
+
             if (!RoslynCompilerHelper.IsSupported)
             {
                 string msg = "The 'eval' command is not supported on this Unity version (" + RoslynCompilerHelper.UnsupportedReason + ")";
-                WriteEvalResult(false, msg, 0, null);
+                FinishEval(operationId, false, msg, 0, null);
                 writer.WriteLine($"FAILURE {msg}");
                 return;
             }
-
-            if (string.IsNullOrEmpty(payload))
-            {
-                string msg = "Missing code snippet or expression to evaluate.";
-                WriteEvalResult(false, msg, 0, null);
-                writer.WriteLine($"FAILURE {msg}");
-                return;
-            }
-
-            string rawCode = payload.Trim();
 
             // Attempt compilation with smart wrapping
             byte[] assemblyBytes;
@@ -40,13 +58,13 @@ namespace UnityCliRunner
             if (!TryCompileSnippet(rawCode, out assemblyBytes, out isVoidStatement, out errors) || assemblyBytes == null)
             {
                 string combinedErrors = string.Join("\n", errors);
-                WriteEvalResult(false, combinedErrors, 0, null);
+                FinishEval(operationId, false, combinedErrors, 0, null);
                 writer.WriteLine($"FAILURE\n{combinedErrors}");
                 return;
             }
 
             // Execute compiled assembly
-            WriteEvalRunningState();
+            UnityCliOperationStore.Update(operationId, "Executing");
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             bool success = false;
@@ -81,14 +99,10 @@ namespace UnityCliRunner
             {
                 errorMsg = ex.ToString();
             }
-            finally
-            {
-                stopwatch.Stop();
-                ClearEvalRunningState();
-            }
+            finally { stopwatch.Stop(); }
 
             double duration = stopwatch.Elapsed.TotalSeconds;
-            WriteEvalResult(success, errorMsg, duration, formattedPayload);
+            FinishEval(operationId, success, errorMsg, duration, formattedPayload);
 
             if (success)
             {
@@ -262,11 +276,11 @@ public static class __UnityCliEvalRunner
             return result.ToString();
         }
 
-        public static void WriteEvalRunningState()
+        public static void WriteEvalRunningState(string operationId)
         {
             try
             {
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
                 if (!Directory.Exists(tempDir))
                 {
                     Directory.CreateDirectory(tempDir);
@@ -278,7 +292,7 @@ public static class __UnityCliEvalRunner
                 {
                     File.Delete(resultsPath);
                 }
-                File.WriteAllText(runningPath, DateTime.UtcNow.ToString("o"));
+                UnityCliOperationStore.WriteAtomic(runningPath, operationId, operationId);
             }
             catch (Exception ex)
             {
@@ -290,7 +304,7 @@ public static class __UnityCliEvalRunner
         {
             try
             {
-                string runningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_eval_running.txt");
+                string runningPath = Path.Combine(CommandHelper.ProjectRoot, "Temp", "unity_eval_running.txt");
                 if (File.Exists(runningPath))
                 {
                     File.Delete(runningPath);
@@ -299,11 +313,11 @@ public static class __UnityCliEvalRunner
             catch { }
         }
 
-        public static void WriteEvalResult(bool success, string message, double duration, string payload)
+        public static void WriteEvalResult(string operationId, bool success, string message, double duration, string payload, bool interrupted = false)
         {
             try
             {
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
                 if (!Directory.Exists(tempDir))
                 {
                     Directory.CreateDirectory(tempDir);
@@ -312,18 +326,44 @@ public static class __UnityCliEvalRunner
 
                 var runResult = new UnityEvalResult
                 {
+                    operationId = operationId,
                     success = success,
+                    interrupted = interrupted,
                     message = message,
                     duration = duration,
                     payload = payload
                 };
                 string json = JsonUtility.ToJson(runResult, true);
-                File.WriteAllText(resultsPath, json);
+                RunTestsHandler.WriteAtomic(resultsPath, json, operationId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to write eval result: {ex}");
             }
+        }
+
+        public static void MarkInterrupted(string message)
+        {
+            var operation = UnityCliOperationStore.Read();
+            if (operation == null || operation.kind != "eval")
+            {
+                return;
+            }
+
+            WriteEvalResult(operation.operationId, false, message, 0, null, true);
+            ClearEvalRunningState();
+            UnityCliOperationStore.Complete(operation.operationId);
+        }
+
+        private static void FinishEval(string operationId, bool success, string message, double duration, string payload)
+        {
+            if (!UnityCliOperationStore.IsOwnedBy(operationId, "eval"))
+            {
+                return;
+            }
+            WriteEvalResult(operationId, success, message, duration, payload);
+            ClearEvalRunningState();
+            UnityCliOperationStore.Complete(operationId);
         }
     }
 }

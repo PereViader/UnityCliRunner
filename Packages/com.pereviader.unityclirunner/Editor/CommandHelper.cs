@@ -2,11 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using System.IO;
+using UnityEngine;
 
 namespace UnityCliRunner
 {
     internal static class CommandHelper
     {
+        // Capture this once on Unity's main thread. User execute/eval code can
+        // change Environment.CurrentDirectory, which must not redirect protocol
+        // files to an arbitrary directory.
+        internal static readonly string ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+
         public static string[] SplitArguments(string commandLine)
         {
             var args = new List<string>();

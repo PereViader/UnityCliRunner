@@ -14,8 +14,20 @@ namespace UnityCliRunner
     }
 
     [Serializable]
+    public class UnityTestRunState
+    {
+        public string runId;
+        public string mode;
+        public string filter;
+        public string category;
+        public string status;
+        public string startedUtc;
+    }
+
+    [Serializable]
     public class UnityTestRunResult
     {
+        public string runId;
         public bool success;
         public int failCount;
         public int passCount;
@@ -26,9 +38,20 @@ namespace UnityCliRunner
     }
 
     [Serializable]
+    public class UnityRefreshResult
+    {
+        public string operationId;
+        public bool success;
+        public bool interrupted;
+        public string message;
+    }
+
+    [Serializable]
     public class UnityExecuteResult
     {
+        public string operationId;
         public bool success;
+        public bool interrupted;
         public string message;
         public double duration;
         public string payload;
@@ -37,7 +60,9 @@ namespace UnityCliRunner
     [Serializable]
     public class UnityEvalResult
     {
+        public string operationId;
         public bool success;
+        public bool interrupted;
         public string message;
         public double duration;
         public string payload;

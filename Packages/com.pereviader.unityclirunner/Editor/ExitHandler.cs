@@ -18,8 +18,8 @@ namespace UnityCliRunner
             writer.Flush();
             Debug.Log("UnityCliRunner: Shutdown requested via socket.");
 
-            string testRunningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_test_running.txt");
-            string executeRunningPath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_running.txt");
+            string testRunningPath = Path.Combine(CommandHelper.ProjectRoot, "Temp", "unity_test_running.txt");
+            string executeRunningPath = Path.Combine(CommandHelper.ProjectRoot, "Temp", "unity_execute_running.txt");
 
             if (File.Exists(testRunningPath) || File.Exists(executeRunningPath))
             {
