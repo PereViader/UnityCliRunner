@@ -36,6 +36,7 @@ namespace UnityCliRunner
         private const string OperationFileName = "unity_cli_operation.json";
         private static readonly object s_CacheLock = new object();
         private static UnityCliOperationState s_CachedState;
+        private static string s_EditorSessionId;
 
         internal static string OperationFilePath => Path.Combine(GetTempDirectory(), OperationFileName);
 
@@ -43,24 +44,37 @@ namespace UnityCliRunner
         {
             get
             {
-                string value = SessionState.GetString(EditorSessionKey, "");
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(s_EditorSessionId))
                 {
-                    value = Guid.NewGuid().ToString("N");
-                    SessionState.SetString(EditorSessionKey, value);
+                    string value = SessionState.GetString(EditorSessionKey, "");
+                    if (string.IsNullOrEmpty(value))
+                    {
+                        value = Guid.NewGuid().ToString("N");
+                        SessionState.SetString(EditorSessionKey, value);
+                    }
+                    s_EditorSessionId = value;
                 }
 
-                return value;
+                return s_EditorSessionId;
             }
         }
 
         static UnityCliOperationStore()
         {
-            // Force creation while initialization is definitely on Unity's main
-            // thread. SessionState survives a domain reload but not an Editor
-            // process restart, which lets recovery distinguish the two cases.
-            _ = EditorSessionId;
-            Read();
+            EnsureInitialized();
+        }
+
+        internal static void EnsureInitialized()
+        {
+            try
+            {
+                _ = EditorSessionId;
+                Read();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to initialize operation store: {ex}");
+            }
         }
 
         internal static BeginOperationResult TryBegin(string operationId, string kind, string status, out UnityCliOperationState existing)
@@ -183,17 +197,32 @@ namespace UnityCliRunner
 
         internal static void WriteAtomic(string path, string content, string operationId)
         {
-            string tempPath = path + "." + operationId + ".tmp";
+            string tempPath = path + "." + (operationId ?? Guid.NewGuid().ToString("N")) + ".tmp";
             try
             {
                 File.WriteAllText(tempPath, content, new UTF8Encoding(false));
-                if (File.Exists(path))
+                for (int i = 0; i < 5; i++)
                 {
-                    File.Replace(tempPath, path, null);
-                }
-                else
-                {
-                    File.Move(tempPath, path);
+                    try
+                    {
+                        if (File.Exists(path))
+                        {
+                            File.Replace(tempPath, path, null);
+                        }
+                        else
+                        {
+                            File.Move(tempPath, path);
+                        }
+                        return;
+                    }
+                    catch (IOException) when (i < 4)
+                    {
+                        System.Threading.Thread.Sleep(10);
+                    }
+                    catch (UnauthorizedAccessException) when (i < 4)
+                    {
+                        System.Threading.Thread.Sleep(10);
+                    }
                 }
             }
             finally

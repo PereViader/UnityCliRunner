@@ -388,8 +388,8 @@ run_integration_case() {
     local test_pid=$!
     (
       while kill -0 "$test_pid" 2>/dev/null; do
-        if [ -f "Temp/unity_test_results.json" ] &&
-           ! perl -MJSON::PP -e 'local $/; decode_json(<>)' "Temp/unity_test_results.json" >/dev/null 2>&1; then
+        if [ -s "Temp/unity_test_results.json" ] &&
+           ! perl -MJSON::PP -e 'local $/; my $c = <>; exit 0 if !defined($c) || $c =~ /^\s*$/; decode_json($c)' "Temp/unity_test_results.json" >/dev/null 2>&1; then
           touch "$atomic_probe_file"
           exit 0
         fi
