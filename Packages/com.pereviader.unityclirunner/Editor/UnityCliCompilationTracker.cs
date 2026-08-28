@@ -12,6 +12,7 @@ namespace UnityCliRunner
     public static class UnityCliCompilationTracker
     {
         private const string CompilationDiagnosticsFileName = "unity_compilation_errors.txt";
+        private const string RefreshResultFileName = "unity_refresh_result.json";
 
         private static readonly Dictionary<string, List<string>> s_AssemblyDiagnostics = new Dictionary<string, List<string>>();
         private static readonly object s_DiagnosticsLock = new object();
@@ -22,6 +23,9 @@ namespace UnityCliRunner
         private static volatile bool s_ScriptCompilationFailed;
         private static volatile bool s_CompilationRequested;
         private static double s_CompilationRequestTime;
+        private static string s_ObservedOperationId;
+        private static int s_SettledUpdateCount;
+        private static volatile UnityRefreshResult s_LastRefreshResult;
 
         public static bool IsCompiling => s_IsCompiling;
         public static bool IsUpdating => s_IsUpdating;
@@ -49,7 +53,15 @@ namespace UnityCliRunner
         static UnityCliCompilationTracker()
         {
             UpdateCompilationState();
-            WriteActiveErrorsToFile();
+            var operation = UnityCliOperationStore.Read();
+            LoadRefreshResultCache();
+            bool resumingCompilation = operation != null &&
+                (operation.kind == "refresh" || operation.kind == "recompile") &&
+                operation.editorSessionId == UnityCliOperationStore.EditorSessionId;
+            if (!resumingCompilation)
+            {
+                WriteActiveErrorsToFile();
+            }
             EditorApplication.update += UpdateCompilationState;
             EditorApplication.quitting += DeleteDiagnosticsFile;
             UnityEditor.Compilation.CompilationPipeline.compilationStarted += OnCompilationStarted;
@@ -67,7 +79,11 @@ namespace UnityCliRunner
         {
             s_IsCompiling = false;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
-            WriteActiveErrorsToFile();
+            string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+            if (!File.Exists(diagnosticsPath))
+            {
+                WriteActiveErrorsToFile();
+            }
         }
 
         private static void OnAssemblyCompilationFinished(string assemblyPath, UnityEditor.Compilation.CompilerMessage[] messages)
@@ -78,31 +94,55 @@ namespace UnityCliRunner
                 if (messages == null || messages.Length == 0)
                 {
                     s_AssemblyDiagnostics.Remove(key);
-                    return;
-                }
-
-                var list = new List<string>();
-                foreach (var msg in messages)
-                {
-                    if (msg.type == UnityEditor.Compilation.CompilerMessageType.Error || msg.type == UnityEditor.Compilation.CompilerMessageType.Warning)
-                    {
-                        bool isError = msg.type == UnityEditor.Compilation.CompilerMessageType.Error;
-                        string formatted = FormatCompilerDiagnostic(msg.message, msg.file, msg.line, msg.column, isError);
-                        if (!string.IsNullOrEmpty(formatted))
-                        {
-                            list.Add(formatted);
-                        }
-                    }
-                }
-
-                if (list.Count > 0)
-                {
-                    s_AssemblyDiagnostics[key] = list;
                 }
                 else
                 {
-                    s_AssemblyDiagnostics.Remove(key);
+                    var list = new List<string>();
+                    foreach (var msg in messages)
+                    {
+                        if (msg.type == UnityEditor.Compilation.CompilerMessageType.Error || msg.type == UnityEditor.Compilation.CompilerMessageType.Warning)
+                        {
+                            bool isError = msg.type == UnityEditor.Compilation.CompilerMessageType.Error;
+                            string formatted = FormatCompilerDiagnostic(msg.message, msg.file, msg.line, msg.column, isError);
+                            if (!string.IsNullOrEmpty(formatted))
+                            {
+                                list.Add(formatted);
+                            }
+                        }
+                    }
+
+                    if (list.Count > 0)
+                    {
+                        s_AssemblyDiagnostics[key] = list;
+                    }
+                    else
+                    {
+                        s_AssemblyDiagnostics.Remove(key);
+                    }
                 }
+            }
+
+            // Persist at the authoritative compiler callback. A domain reload
+            // can begin before compilationFinished or the next Editor update.
+            WriteCapturedDiagnosticsSnapshot();
+        }
+
+        private static void WriteCapturedDiagnosticsSnapshot()
+        {
+            var diagnostics = new List<string>();
+            lock (s_DiagnosticsLock)
+            {
+                foreach (var list in s_AssemblyDiagnostics.Values)
+                {
+                    if (list != null) diagnostics.AddRange(list);
+                }
+            }
+
+            if (diagnostics.Count > 0)
+            {
+                WriteDiagnosticsFileAtomically(
+                    Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName),
+                    diagnostics);
             }
         }
 
@@ -168,6 +208,115 @@ namespace UnityCliRunner
                     WriteActiveErrorsToFile();
                 }
             }
+
+            ObserveOperationUntilSettled();
+        }
+
+        /// <summary>
+        /// Completes refresh/recompile ownership only after Unity has reported a
+        /// settled Editor state on two separate update ticks. This observer is
+        /// reconstructed after a domain reload from the durable journal.
+        /// </summary>
+        internal static void ObserveOperationUntilSettled()
+        {
+            var operation = UnityCliOperationStore.Read();
+            if (operation == null || (operation.kind != "refresh" && operation.kind != "recompile"))
+            {
+                s_ObservedOperationId = null;
+                s_SettledUpdateCount = 0;
+                return;
+            }
+
+            if (operation.editorSessionId != UnityCliOperationStore.EditorSessionId || operation.status == "Interrupted")
+            {
+                return;
+            }
+
+            if (s_ObservedOperationId != operation.operationId)
+            {
+                s_ObservedOperationId = operation.operationId;
+                s_SettledUpdateCount = 0;
+            }
+
+            if (s_RefreshPending || s_CompilationRequested || EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                s_SettledUpdateCount = 0;
+                UnityCliOperationStore.Update(operation.operationId, "WaitingForUnity");
+                return;
+            }
+
+            s_SettledUpdateCount++;
+            if (s_SettledUpdateCount < 2)
+            {
+                return;
+            }
+
+            string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+            if (!File.Exists(diagnosticsPath))
+            {
+                WriteActiveErrorsToFile();
+            }
+            var result = new UnityRefreshResult
+            {
+                operationId = operation.operationId,
+                success = !EditorUtility.scriptCompilationFailed,
+                interrupted = false,
+                message = EditorUtility.scriptCompilationFailed ? "Compilation failed" : ""
+            };
+            UnityCliOperationStore.WriteAtomic(
+                Path.Combine(GetTempDirectory(), RefreshResultFileName),
+                JsonUtility.ToJson(result, true),
+                operation.operationId);
+            s_LastRefreshResult = result;
+            UnityCliOperationStore.Complete(operation.operationId);
+            s_ObservedOperationId = null;
+            s_SettledUpdateCount = 0;
+        }
+
+        internal static bool TryReadRefreshResult(string operationId, out UnityRefreshResult result)
+        {
+            result = s_LastRefreshResult;
+            return result != null && result.operationId == operationId;
+        }
+
+        internal static void DeleteRefreshResult()
+        {
+            s_LastRefreshResult = null;
+            string path = Path.Combine(GetTempDirectory(), RefreshResultFileName);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        internal static void WriteInterruptedRefreshResult(string operationId, string message)
+        {
+            var result = new UnityRefreshResult
+            {
+                operationId = operationId,
+                success = false,
+                interrupted = true,
+                message = message
+            };
+            UnityCliOperationStore.WriteAtomic(
+                Path.Combine(GetTempDirectory(), RefreshResultFileName),
+                JsonUtility.ToJson(result, true),
+                operationId);
+            s_LastRefreshResult = result;
+            UnityCliOperationStore.Complete(operationId);
+        }
+
+        private static void LoadRefreshResultCache()
+        {
+            try
+            {
+                string path = Path.Combine(GetTempDirectory(), RefreshResultFileName);
+                s_LastRefreshResult = File.Exists(path)
+                    ? JsonUtility.FromJson<UnityRefreshResult>(File.ReadAllText(path))
+                    : null;
+            }
+            catch (Exception ex)
+            {
+                s_LastRefreshResult = null;
+                Debug.LogError($"UnityCliRunner: Failed to load refresh result cache: {ex}");
+            }
         }
 
         public static void ClearActiveEntries()
@@ -181,6 +330,14 @@ namespace UnityCliRunner
             catch(Exception e)
             {
                 Debug.LogError($"UnityCliRunner: Failed to clear active compilation diagnostics: {e}");
+            }
+        }
+
+        internal static void ClearCapturedDiagnostics()
+        {
+            lock (s_DiagnosticsLock)
+            {
+                s_AssemblyDiagnostics.Clear();
             }
         }
 
@@ -217,7 +374,7 @@ namespace UnityCliRunner
 
         private static string GetTempDirectory()
         {
-            string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+            string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
             if(!Directory.Exists(tempDir))
             {
                 Directory.CreateDirectory(tempDir);

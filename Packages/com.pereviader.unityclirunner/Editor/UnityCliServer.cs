@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -18,7 +19,11 @@ namespace UnityCliRunner
 
         private static TcpListener _tcpListener;
         private static Thread _serverThread;
-        private static bool _isRunning;
+        private static volatile bool _isRunning;
+        private static volatile bool _shutdownRequested;
+        private static volatile bool _isReloading;
+        private static readonly ManualResetEvent s_ShutdownEvent = new ManualResetEvent(false);
+        private static readonly ConcurrentDictionary<TcpClient, byte> s_ActiveClients = new ConcurrentDictionary<TcpClient, byte>();
 
         public static bool IsRunning => _isRunning;
 
@@ -44,14 +49,49 @@ namespace UnityCliRunner
                 return;
             }
 
+            RecoverOperationAfterEditorRestart();
+
             // Register callbacks for tests
             RunTestsHandler.RegisterCallbacks();
 
             // Start server
             StartServer();
 
-            // Stop the listener and remove its runtime marker on domain reload.
-            AssemblyReloadEvents.beforeAssemblyReload += StopServer;
+            // Stop the listener and all in-flight connections before a domain reload.
+            // The callbacks must be registered on every new domain because the old
+            // server thread and its client threads may still be unwinding.
+            AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+            EditorApplication.quitting += OnEditorQuitting;
+        }
+
+        private static void RecoverOperationAfterEditorRestart()
+        {
+            var operation = UnityCliOperationStore.Read();
+            if (operation == null || operation.editorSessionId == UnityCliOperationStore.EditorSessionId)
+            {
+                return;
+            }
+
+            const string message = "Unity editor restarted before the operation completed.";
+            switch (operation.kind)
+            {
+                case "test":
+                    RunTestsHandler.WriteInterruptedResult(message);
+                    break;
+                case "execute":
+                    ExecuteMethodHandler.MarkInterrupted(message);
+                    break;
+                case "eval":
+                    EvalHandler.MarkInterrupted(message);
+                    break;
+                case "refresh":
+                case "recompile":
+                    UnityCliCompilationTracker.WriteInterruptedRefreshResult(operation.operationId, message);
+                    break;
+                default:
+                    UnityCliOperationStore.Complete(operation.operationId);
+                    break;
+            }
         }
 
         private static void StartServer()
@@ -60,29 +100,64 @@ namespace UnityCliRunner
                 return;
 
             _isRunning = true;
+            _shutdownRequested = false;
+            _isReloading = false;
+            s_ShutdownEvent.Reset();
             _serverThread = new Thread(ServerLoop)
             {
-                IsBackground = false,
+                IsBackground = true,
                 Name = "UnityCliServerThread"
             };
             _serverThread.Start();
         }
 
+        private static void OnBeforeAssemblyReload()
+        {
+            _isReloading = true;
+            var operation = UnityCliOperationStore.Read();
+            if (operation != null)
+            {
+                UnityCliOperationStore.Update(operation.operationId, "Reloading");
+            }
+            UnityCliCompilationTracker.WriteActiveErrorsToFile();
+            RunTestsHandler.MarkTransportInterruption("Reloading");
+            ExecuteMethodHandler.MarkInterrupted("Command interrupted by Unity recompilation outside the Unity CLI workflow.");
+            EvalHandler.MarkInterrupted("Command interrupted by Unity recompilation outside the Unity CLI workflow.");
+            StopServer();
+        }
+
+        private static void OnEditorQuitting()
+        {
+            var operation = UnityCliOperationStore.Read();
+            if (operation != null)
+            {
+                UnityCliOperationStore.Update(operation.operationId, "ShuttingDown");
+            }
+            RunTestsHandler.MarkTransportInterruption("ShuttingDown");
+            ExecuteMethodHandler.MarkInterrupted("Command interrupted by Unity editor shutdown.");
+            EvalHandler.MarkInterrupted("Command interrupted by Unity editor shutdown.");
+            StopServer();
+        }
+
         internal static void StopServer()
         {
-            if(!_isRunning)
-                return;
-
+            _shutdownRequested = true;
             _isRunning = false;
+            s_ShutdownEvent.Set();
             try
             {
                 _tcpListener?.Stop();
             }
             catch(Exception) { }
 
-            if(_serverThread is { IsAlive: true })
+            foreach (var client in s_ActiveClients.Keys)
             {
-                _serverThread.Join(500);
+                try { client.Close(); } catch { }
+            }
+
+            if(_serverThread is { IsAlive: true } && !ReferenceEquals(Thread.CurrentThread, _serverThread))
+            {
+                _serverThread.Join(1000);
             }
 
             DeletePortFile();
@@ -96,6 +171,12 @@ namespace UnityCliRunner
             {
                 int stickyPort = ReadPortFile();
                 _tcpListener = CreateStartedListener(stickyPort);
+                if (!_isRunning)
+                {
+                    _tcpListener.Stop();
+                    _tcpListener = null;
+                    return;
+                }
                 int port = ((IPEndPoint) _tcpListener.LocalEndpoint).Port;
 
                 WritePortFile(port);
@@ -113,15 +194,24 @@ namespace UnityCliRunner
                         // listener stopped
                         break;
                     }
+                    catch(ObjectDisposedException)
+                    {
+                        break;
+                    }
 
                     ThreadPool.QueueUserWorkItem(state => ProcessClient((TcpClient)state), client);
                 }
             }
+            catch(ThreadAbortException) when (IsShuttingDown())
+            {
+                // Unity aborts managed threads while reloading its scripting domain.
+                // This is a transport interruption, not a command failure.
+            }
             catch(Exception e)
             {
-                if(_isRunning)
+                if(!IsShuttingDown())
                 {
-                    Debug.LogError($"UnityCliRunner: Exception in server loop: {e}");
+                    LogUnexpectedException("server loop", e);
                 }
             }
         }
@@ -161,6 +251,13 @@ namespace UnityCliRunner
 
         private static void ProcessClient(TcpClient client)
         {
+            s_ActiveClients.TryAdd(client, 0);
+            if (IsShuttingDown())
+            {
+                try { client.Close(); } catch { }
+                s_ActiveClients.TryRemove(client, out _);
+                return;
+            }
             try
             {
                 client.ReceiveTimeout = 5000;
@@ -192,7 +289,10 @@ namespace UnityCliRunner
                         return;
                     }
 
-                    if (handler is PingHandler || handler is PollTestsHandler || handler is PollExecuteHandler || handler is PollRefreshHandler || handler is PollEvalHandler)
+                    // Only PING is completely independent of Unity APIs and the
+                    // durable JSON journal. Poll handlers also use JsonUtility,
+                    // so they must run on Unity's main thread.
+                    if (handler is PingHandler || handler is PollRefreshHandler)
                     {
                         handler.Handle(payload, writer);
                     }
@@ -200,6 +300,7 @@ namespace UnityCliRunner
                     {
                         using (var finishedEvent = new ManualResetEvent(false))
                         {
+                            WaitHandle[] requestWaitHandles = { finishedEvent, s_ShutdownEvent };
                             Exception dispatchException = null;
                             UnityCliDispatcher.Enqueue(() =>
                             {
@@ -233,7 +334,14 @@ namespace UnityCliRunner
                                     executeAction();
                                 }
                             });
-                            finishedEvent.WaitOne();
+                            while (WaitHandle.WaitAny(requestWaitHandles, 100) == WaitHandle.WaitTimeout)
+                            {
+                                // Keep waiting while Unity is healthy. The
+                                // shutdown event wakes this thread immediately
+                                // when a reload or editor shutdown begins.
+                            }
+                            if (s_ShutdownEvent.WaitOne(0) || IsShuttingDown())
+                                return;
                             if (dispatchException != null)
                             {
                                 throw dispatchException;
@@ -241,24 +349,55 @@ namespace UnityCliRunner
                         }
                     }
                 }
+                catch(ThreadAbortException) when (IsShuttingDown())
+                {
+                    // Do not turn Unity's reload/shutdown thread abort into a
+                    // protocol-level ERROR response.
+                }
                 catch (Exception e)
                 {
-                    writer.WriteLine($"ERROR: {e.Message}");
+                    if (!IsShuttingDown())
+                    {
+                        LogUnexpectedException("client request", e);
+                        try { writer.WriteLine($"ERROR: {e.Message}"); } catch { }
+                    }
                 }
             }
-            catch (Exception)
+            catch(ThreadAbortException) when (IsShuttingDown())
             {
-                // Socket/Stream creation exception, ignore
+                // See the inner handler: reload aborts are expected transport
+                // interruptions and must not be sent to the CLI.
+            }
+            catch (Exception e)
+            {
+                if (!IsShuttingDown())
+                {
+                    LogUnexpectedException("client connection", e);
+                }
             }
             finally
             {
                 try { client.Close(); } catch { }
+                s_ActiveClients.TryRemove(client, out _);
             }
+        }
+
+        private static bool IsShuttingDown()
+        {
+            return _shutdownRequested || _isReloading || !_isRunning;
+        }
+
+        private static void LogUnexpectedException(string context, Exception exception)
+        {
+            Debug.LogError($"UnityCliRunner: Unexpected {context} exception. " +
+                           $"Type={exception.GetType().FullName}, " +
+                           $"Thread={Thread.CurrentThread.Name ?? "unnamed"}, " +
+                           $"Reloading={_isReloading}, StackTrace={exception.StackTrace}");
         }
 
         private static void RunActionAfterStoppingPlaymode(Action action)
         {
-            if (EditorApplication.isPlaying)
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 Debug.Log("UnityCliRunner: Stopping PlayMode before executing command...");
                 EditorApplication.isPlaying = false;
@@ -266,7 +405,7 @@ namespace UnityCliRunner
                 EditorApplication.CallbackFunction checkPlaymode = null;
                 checkPlaymode = () =>
                 {
-                    if (!EditorApplication.isPlaying)
+                    if (!EditorApplication.isPlayingOrWillChangePlaymode)
                     {
                         EditorApplication.update -= checkPlaymode;
                         Debug.Log("UnityCliRunner: PlayMode stopped. Executing command...");
@@ -292,13 +431,13 @@ namespace UnityCliRunner
         {
             try
             {
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
                 if(!Directory.Exists(tempDir))
                 {
                     Directory.CreateDirectory(tempDir);
                 }
                 string portFilePath = Path.Combine(tempDir, PortFileName);
-                File.WriteAllText(portFilePath, port.ToString());
+                UnityCliOperationStore.WriteAtomic(portFilePath, port.ToString(), "port");
             }
             catch(Exception e)
             {
@@ -310,7 +449,7 @@ namespace UnityCliRunner
         {
             try
             {
-                string portFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", PortFileName);
+                string portFilePath = Path.Combine(CommandHelper.ProjectRoot, "Temp", PortFileName);
                 if(File.Exists(portFilePath))
                 {
                     File.Delete(portFilePath);
@@ -326,7 +465,7 @@ namespace UnityCliRunner
         {
             try
             {
-                string portFilePath = Path.Combine(Directory.GetCurrentDirectory(), "Temp", PortFileName);
+                string portFilePath = Path.Combine(CommandHelper.ProjectRoot, "Temp", PortFileName);
                 if(!File.Exists(portFilePath))
                 {
                     return AnyAvailablePort;

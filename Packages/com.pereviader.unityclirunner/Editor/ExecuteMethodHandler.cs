@@ -24,13 +24,14 @@ namespace UnityCliRunner
             }
 
             string[] execArgs = CommandHelper.SplitArguments(payload);
-            if (execArgs.Length == 0)
+            if (execArgs.Length < 2)
             {
-                writer.WriteLine("ERROR: Missing method name");
+                writer.WriteLine("ERROR: Missing operation id or method name");
                 return;
             }
 
-            string targetMethodName = execArgs[0];
+            string operationId = execArgs[0];
+            string targetMethodName = execArgs[1];
             int lastDot = targetMethodName.LastIndexOf('.');
             if (lastDot == -1)
             {
@@ -49,7 +50,7 @@ namespace UnityCliRunner
             }
 
             var methodParamsList = new List<string>();
-            for (int i = 1; i < execArgs.Length; i++)
+            for (int i = 2; i < execArgs.Length; i++)
             {
                 methodParamsList.Add(execArgs[i]);
             }
@@ -71,19 +72,35 @@ namespace UnityCliRunner
                 return;
             }
 
-            WriteExecuteRunningState();
+            var begin = UnityCliOperationStore.TryBegin(operationId, "execute", "Executing", out var existing);
+            if (begin == BeginOperationResult.Invalid)
+            {
+                writer.WriteLine("ERROR: Missing or invalid operation id");
+                return;
+            }
+            if (begin == BeginOperationResult.Busy)
+            {
+                writer.WriteLine($"BUSY {existing.kind} {existing.operationId}");
+                return;
+            }
 
             writer.WriteLine("RUNNING");
             writer.Flush();
 
-            ExecuteMethod(targetMethod, methodParamsList.ToArray());
+            if (begin == BeginOperationResult.AlreadyStarted)
+            {
+                return;
+            }
+
+            WriteExecuteRunningState(operationId);
+            ExecuteMethod(operationId, targetMethod, methodParamsList.ToArray());
         }
 
-        public static void WriteExecuteRunningState()
+        public static void WriteExecuteRunningState(string operationId)
         {
             try
             {
-                string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
                 if (!Directory.Exists(tempDir))
                 {
                     Directory.CreateDirectory(tempDir);
@@ -95,7 +112,7 @@ namespace UnityCliRunner
                 {
                     File.Delete(resultsPath);
                 }
-                File.WriteAllText(runningPath, DateTime.UtcNow.ToString("o"));
+                UnityCliOperationStore.WriteAtomic(runningPath, operationId, operationId);
             }
             catch (Exception ex)
             {
@@ -103,9 +120,9 @@ namespace UnityCliRunner
             }
         }
 
-        public static void ExecuteMethod(MethodInfo method, string[] stringParams)
+        public static void ExecuteMethod(string operationId, MethodInfo method, string[] stringParams)
         {
-            string tempDir = Path.Combine(Directory.GetCurrentDirectory(), "Temp");
+            string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
             string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
             string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
 
@@ -212,29 +229,60 @@ namespace UnityCliRunner
             finally
             {
                 stopwatch.Stop();
-                if (File.Exists(runningPath))
+                if (UnityCliOperationStore.IsOwnedBy(operationId, "execute"))
                 {
                     try
-                    { File.Delete(runningPath); }
-                    catch { }
-                }
-
-                try
-                {
-                    var runResult = new UnityExecuteResult
                     {
-                        success = success,
-                        message = errorMsg,
-                        duration = stopwatch.Elapsed.TotalSeconds,
-                        payload = payload
-                    };
-                    string json = JsonUtility.ToJson(runResult, true);
-                    File.WriteAllText(resultsPath, json);
+                        var runResult = new UnityExecuteResult
+                        {
+                            operationId = operationId,
+                            success = success,
+                            message = errorMsg,
+                            duration = stopwatch.Elapsed.TotalSeconds,
+                            payload = payload
+                        };
+                        string json = JsonUtility.ToJson(runResult, true);
+                        RunTestsHandler.WriteAtomic(resultsPath, json, operationId);
+                        if (File.Exists(runningPath)) File.Delete(runningPath);
+                        UnityCliOperationStore.Complete(operationId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"UnityCliRunner: Failed to write execute result: {ex}");
+                    }
                 }
-                catch (Exception ex)
+            }
+        }
+
+        public static void MarkInterrupted(string message)
+        {
+            string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
+            string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
+            string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
+            var operation = UnityCliOperationStore.Read();
+            if (operation == null || operation.kind != "execute")
+            {
+                return;
+            }
+
+            try
+            {
+                var result = new UnityExecuteResult
                 {
-                    Debug.LogError($"UnityCliRunner: Failed to write execute result: {ex}");
-                }
+                    operationId = operation.operationId,
+                    success = false,
+                    interrupted = true,
+                    message = message,
+                    duration = 0,
+                    payload = null
+                };
+                RunTestsHandler.WriteAtomic(resultsPath, JsonUtility.ToJson(result, true), operation.operationId);
+                if (File.Exists(runningPath)) File.Delete(runningPath);
+                UnityCliOperationStore.Complete(operation.operationId);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to persist interrupted method result: {ex}");
             }
         }
     }
