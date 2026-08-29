@@ -54,7 +54,6 @@ if [ -f "$DUMMY_TEST_META_PATH" ]; then
 fi
 
 restore_backup() {
-  echo "Restoring original DummyTest..."
   if [ -f "$BACKUP_DIR/DummyTest.cs" ]; then
     cp "$BACKUP_DIR/DummyTest.cs" "$DUMMY_TEST_PATH"
   else
@@ -231,28 +230,24 @@ normalize_output() {
 run_setup() {
   local phase="$1"
   if [ -f "IntegrationTests/setup.sh" ]; then
-    echo "Running global setup..."
     chmod +x "IntegrationTests/setup.sh" 2>/dev/null || true
-    ./IntegrationTests/setup.sh
+    ./IntegrationTests/setup.sh >/dev/null 2>&1
   fi
   if [ -f "IntegrationTests/setup.${phase}.sh" ]; then
-    echo "Running ${phase} setup..."
     chmod +x "IntegrationTests/setup.${phase}.sh" 2>/dev/null || true
-    ./IntegrationTests/setup.${phase}.sh
+    ./IntegrationTests/setup.${phase}.sh >/dev/null 2>&1
   fi
 }
 
 run_teardown() {
   local phase="$1"
   if [ -f "IntegrationTests/teardown.${phase}.sh" ]; then
-    echo "Running ${phase} teardown..."
     chmod +x "IntegrationTests/teardown.${phase}.sh" 2>/dev/null || true
-    ./IntegrationTests/teardown.${phase}.sh
+    ./IntegrationTests/teardown.${phase}.sh >/dev/null 2>&1
   fi
   if [ -f "IntegrationTests/teardown.sh" ]; then
-    echo "Running global teardown..."
     chmod +x "IntegrationTests/teardown.sh" 2>/dev/null || true
-    ./IntegrationTests/teardown.sh
+    ./IntegrationTests/teardown.sh >/dev/null 2>&1
   fi
 }
 
@@ -376,7 +371,7 @@ run_integration_case() {
   fi
 
   TOTAL_TESTS_RUN=$((TOTAL_TESTS_RUN + 1))
-  echo "--- Running test case: $tc ($mode) with command: bash ./unitycli.sh $cmd_args ---"
+  echo "[RUN] $tc ($mode)"
   
   if [ -f "IntegrationTests/$tc/DummyTest.cs" ]; then
     cp "IntegrationTests/$tc/DummyTest.cs" "$DUMMY_TEST_PATH"
@@ -419,13 +414,16 @@ run_integration_case() {
     local exit_code=$?
   fi
 
+  local case_failed=false
+  local failure_messages=()
+
   if grep -q 'Unity Response: ERROR: Thread was being aborted' "$raw_out"; then
-    echo "FAILURE: CLI exposed a Unity reload ThreadAbortException"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
+    failure_messages+=("CLI exposed a Unity reload ThreadAbortException")
+    case_failed=true
   fi
   if [ -f "$atomic_probe_file" ]; then
-    echo "FAILURE: Test result JSON was observed before its atomic write completed"
-    FAILED_TESTS=$((FAILED_TESTS + 1))
+    failure_messages+=("Test result JSON was observed before its atomic write completed")
+    case_failed=true
   fi
   
   echo "EXIT_CODE: $exit_code" >> "$raw_out"
@@ -434,38 +432,47 @@ run_integration_case() {
   
   local expected_file="IntegrationTests/$tc/output.${mode}.verified.txt"
   local received_file="IntegrationTests/$tc/output.${mode}.received.txt"
+  local diff_output=""
   
   if [ "${BOOTSTRAP:-false}" = "true" ]; then
     cp "$norm_out" "$expected_file"
     rm -f "$received_file"
-    echo "Bootstrapped $expected_file"
   else
     if [ ! -f "$expected_file" ]; then
-      echo "Error: Expected file $expected_file does not exist. Run with BOOTSTRAP=true to generate."
+      failure_messages+=("Expected file $expected_file does not exist. Run with BOOTSTRAP=true to generate.")
       cp "$norm_out" "$received_file"
-      FAILED_TESTS=$((FAILED_TESTS + 1))
+      case_failed=true
     else
-      if diff -u --strip-trailing-cr "$expected_file" "$norm_out"; then
-        echo "SUCCESS: Output matches $expected_file"
+      diff_output=$(diff -u --strip-trailing-cr "$expected_file" "$norm_out" 2>&1)
+      local diff_exit=$?
+      if [ $diff_exit -eq 0 ]; then
         rm -f "$received_file"
       else
-        echo "FAILURE: Output does not match $expected_file"
-        echo "Raw output was:"
-        cat "$raw_out"
-        echo "Normalized output was:"
-        cat "$norm_out"
+        case_failed=true
         cp "$norm_out" "$received_file"
-        FAILED_TESTS=$((FAILED_TESTS + 1))
       fi
+    fi
+  fi
+
+  if [ "$case_failed" = true ]; then
+    FAILED_TESTS=$((FAILED_TESTS + 1))
+    echo "[FAILURE] $tc ($mode)"
+    for msg in "${failure_messages[@]}"; do
+      echo "  $msg"
+    done
+    if [ -n "$diff_output" ]; then
+      echo "$diff_output"
+    fi
+  else
+    if [ "${BOOTSTRAP:-false}" = "true" ]; then
+      echo "[BOOTSTRAP] $tc ($mode)"
+    else
+      echo "[SUCCESS] $tc ($mode)"
     fi
   fi
 }
 
 if has_matching_cases "${ONLINE_CASES[@]}"; then
-  echo "============================================="
-  echo "PHASE 1: Running integration tests in ONLINE mode"
-  echo "============================================="
-
   # Check if Unity is running
   IS_RUNNING=false
   if bash ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
@@ -474,15 +481,13 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
 
   UNITY_EXE=$(find_unity_path)
   if [ -z "$UNITY_EXE" ]; then
-    echo "Error: Unity executable not found for Unity version $(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')."
+    echo "Error: Unity executable not found for Unity version $(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')." >&2
     exit 1
   fi
 
   run_setup "online"
   if [ "$IS_RUNNING" = false ]; then
-    bash ./unitycli.sh start batchmode
-  else
-    echo "Unity is already running."
+    bash ./unitycli.sh start batchmode >/dev/null 2>&1
   fi
 
   for tc in "${TEST_CASES[@]}"; do
@@ -534,14 +539,10 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
 
   # Close Unity
   run_teardown "online"
-  bash ./unitycli.sh stop
+  bash ./unitycli.sh stop >/dev/null 2>&1
 fi
 
 if has_matching_cases "${AUTOSTART_CASES[@]}"; then
-  echo "============================================="
-  echo "PHASE 2: Running integration tests for AUTO-START"
-  echo "============================================="
-
   # 1. Start with stopped Unity. Run status (should be Not Running).
   run_integration_case "TestBackgroundStatusOffline" "status" "autostart"
 
@@ -552,13 +553,13 @@ if has_matching_cases "${AUTOSTART_CASES[@]}"; then
   run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
 
   # 4. Stop Unity before testing auto-start eval from stopped state.
-  bash ./unitycli.sh stop
+  bash ./unitycli.sh stop >/dev/null 2>&1
 
   # 5. Run eval when stopped (should auto-start Unity and evaluate).
   run_integration_case "TestEvalAutostart" "eval 2 + 2" "autostart"
 
   # 6. Stop Unity.
-  bash ./unitycli.sh stop
+  bash ./unitycli.sh stop >/dev/null 2>&1
 
   # 7. CLI validation tests (fail-fast without starting Unity)
   run_integration_case "TestCliValidationInvalidSubcommand" "invalid_subcommand" "autostart"
@@ -568,14 +569,15 @@ if has_matching_cases "${AUTOSTART_CASES[@]}"; then
   run_integration_case "TestCliValidationMissingEval" "eval" "autostart"
 fi
 
-echo "============================================="
 if [ $TOTAL_TESTS_RUN -eq 0 ]; then
   echo "WARNING: No tests matched filter pattern(s): ${FILTER_PATTERNS[*]}"
 fi
 if [ $FAILED_TESTS -eq 0 ]; then
-  echo "ALL INTEGRATION TESTS PASSED SUCCESSFULLY! ($TOTAL_TESTS_RUN test(s) run)"
+  echo "--------------------------------------------------"
+  echo "Summary: All $TOTAL_TESTS_RUN tests passed."
   exit 0
 else
-  echo "INTEGRATION TESTS FAILED: $FAILED_TESTS failure(s) out of $TOTAL_TESTS_RUN test(s) run"
+  echo "--------------------------------------------------"
+  echo "Summary: $FAILED_TESTS failed out of $TOTAL_TESTS_RUN test(s) run."
   exit 1
 fi
