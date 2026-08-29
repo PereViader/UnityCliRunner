@@ -21,7 +21,7 @@ namespace UnityCliRunner
                     {
                         if (!string.IsNullOrEmpty(res.payload))
                         {
-                            w.WriteLine($"SUCCESS\n{res.payload}");
+                            w.WriteLine($"SUCCESS {res.payload}");
                         }
                         else
                         {
@@ -30,11 +30,11 @@ namespace UnityCliRunner
                     }
                     else if (res.interrupted)
                     {
-                        w.WriteLine($"INTERRUPTION\n{res.message}");
+                        w.WriteLine($"INTERRUPTION {res.message}");
                     }
                     else
                     {
-                        w.WriteLine($"FAILURE\n{res.message}");
+                        w.WriteLine($"FAILURE {res.message}");
                     }
                 });
         }

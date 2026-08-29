@@ -1218,6 +1218,9 @@ run_online_method() {
     for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
       local escaped="${param//\\/\\\\}"
       escaped="${escaped//\"/\\\"}"
+      escaped="${escaped//$'\r'/\\r}"
+      escaped="${escaped//$'\n'/\\n}"
+      escaped="${escaped//$'\t'/\\t}"
       cmd="$cmd \"$escaped\""
     done
   fi
@@ -1309,7 +1312,11 @@ run_online_method() {
 run_online_eval() {
   local operation_id
   operation_id=$(new_operation_id)
-  local cmd="EVAL $operation_id $EVAL_CODE"
+  local escaped_eval="${EVAL_CODE//\\/\\\\}"
+  escaped_eval="${escaped_eval//$'\r'/\\r}"
+  escaped_eval="${escaped_eval//$'\n'/\\n}"
+  escaped_eval="${escaped_eval//$'\t'/\\t}"
+  local cmd="EVAL $operation_id $escaped_eval"
   local response=""
 
   response=$(send_socket_cmd "$cmd" 30)
