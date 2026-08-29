@@ -1,205 +1,260 @@
 [![Test and publish](https://github.com/PereViader/UnityCliRunner/actions/workflows/TestAndPublish.yml/badge.svg)](https://github.com/PereViader/UnityCliRunner/actions/workflows/TestAndPublish.yml) ![Unity version 2021.3](https://img.shields.io/badge/Unity-2021.3-57b9d3.svg?style=flat&logo=unity) [![GitHub Release](https://img.shields.io/github/v/release/PereViader/UnityCliRunner?include_prereleases)](https://github.com/PereViader/UnityCliRunner/releases) [![openupm](https://img.shields.io/npm/v/com.pereviader.unityclirunner?label=openupm&registry_uri=https://package.openupm.com)](https://openupm.com/packages/com.pereviader.unityclirunner/)
 
-
 # UnityCliRunner
 
-A lightweight command-line runner that bridges your shell and AI coding agents with the Unity Editor.
+A lightweight, high-performance command-line runner that bridges your shell and AI coding agents with the Unity Editor.
 
-### Key Capabilities
+By communicating with a running Unity Editor (or a headless background instance) via loopback TCP sockets, UnityCliRunner enables sub-second compilation feedback, instant test execution, dynamic C# evaluation, and static method invocations without slow batchmode restarts.
 
-* **Trigger Asset Database Refresh**: Instantly recompile your C# code and feed any compilation errors or warnings directly back to your terminal or AI coding agent.
-* **Run Editor & PlayMode Tests**: Execute unit and integration tests seamlessly as part of your feature implementation workflow.
-* **Run Project Commands (`executemethod`)**: Execute reusable C# static methods with structured parameters, compilation checks, and predictable return values.
-* **Evaluate Dynamic C# Code (`eval`)**: Execute one-off C# expressions or code snippets against the live Unity Editor state without creating files or triggering a domain reload.
+---
+
+## Overview & Key Capabilities
+
+UnityCliRunner provides 5 core pillars of functionality:
+
+1. **Compilation & Diagnostics (`refresh`, `recompile`)**: Trigger an Asset Database refresh or force a full clean C# rebuild, streaming compiler errors and warnings directly back to your terminal formatted in standard compiler diagnostics.
+2. **Test Execution (`test`)**: Run EditMode and PlayMode tests with granular name (`--filter`) and category (`--category`) filtering, outputting clear test summaries and failed-test stack traces.
+3. **Project Commands (`executemethod`)**: Execute reusable static C# methods with typed arguments (primitives, strings, or JSON-deserialized objects) and structured return values.
+4. **Dynamic C# Evaluation (`eval`)**: Dynamically compile and evaluate expressions or multi-statement snippets in-memory against the live Unity Editor or Play Mode state without domain reload.
+5. **Background Process Management (`start`, `stop`, `status`, `wait-ready`)**: Keep a warm headless or interactive Unity Editor running in the background for instant repeated executions.
+
+---
+
+## CLI Commands at a Glance
+
+Run `bash unitycli.sh <command> [options]` from your Unity project root:
+
+| Command | Syntax | Description |
+| :--- | :--- | :--- |
+| **`refresh`** | `bash unitycli.sh refresh` | Triggers `AssetDatabase.Refresh()` and prints compilation errors and warnings. |
+| **`recompile`** | `bash unitycli.sh recompile` | Forces a full C# recompilation (clears build cache) and prints compiler diagnostics. |
+| **`test`** | `bash unitycli.sh test [options]` | Runs EditMode and/or PlayMode unit and integration tests (both by default). |
+| **`executemethod`** | `bash unitycli.sh executemethod <Method> [args...]` | Executes a C# static method with optional typed parameters (refreshes first, stops Play Mode). |
+| **`eval`** | `bash unitycli.sh eval "<code>"` | Evaluates a live C# expression or script dynamically in-memory (preserves Play Mode). |
+| **`start`** | `bash unitycli.sh start <mode>` | Starts a background Unity instance (`batchmode` or `interactive`) and waits until ready. |
+| **`stop`** | `bash unitycli.sh stop` | Safely stops the background Unity instance. |
+| **`status`** | `bash unitycli.sh status` | Checks the status of the background Unity instance (`Ready`, `Not Running`, etc.). |
+| **`wait-ready`** | `bash unitycli.sh wait-ready` | Blocks and waits until a running Unity instance is reachable and ready to receive commands. |
+
+> **Note on Auto-Start**: If Unity is not already running when you run `refresh`, `recompile`, `test`, `executemethod`, or `eval`, UnityCliRunner will automatically launch a background instance in batchmode first before executing the command.
 
 ---
 
 ## Installation & Setup
 
 ### 1. Requirements
-- **macOS / Linux**: A terminal with Bash (pre-installed on almost all distributions).
+- **macOS / Linux**: Terminal with Bash.
 - **Windows**: Git Bash (included with Git for Windows).
 - **Unity**: Version 2021.3 or higher.
 
 ### 2. Install the Package
 
-[Install from on OpenUPM](https://openupm.com/packages/com.pereviader.unityclirunner/#modal-manualinstallation).
+[Install from OpenUPM](https://openupm.com/packages/com.pereviader.unityclirunner/#modal-manualinstallation):
+```bash
+openupm add com.pereviader.unityclirunner
+```
+Or add the git URL / package via Unity's Package Manager.
 
 ### 3. Install unitycli.sh and Agent Skill
 
 In the Unity Editor, run the installers from the top menu dropdown:
-- **Tools > UnityCliRunner > InstallBashScript** to copy the runner script (`unitycli.sh`) to the root of your Unity project.
-- **Tools > UnityCliRunner > InstallSkill** to copy the `.agents/skills/unity-cli` folder to the root of your project (required if you use agentic AI tools like **Antigravity**, **Codex**, **Claude**...).
+- **Tools > UnityCliRunner > InstallBashScript**: Copies the runner script (`unitycli.sh`) to the root of your Unity project.
+- **Tools > UnityCliRunner > InstallSkill**: Copies the `.agents/skills/unity-cli` skill folder to the root of your project (for agentic AI tools like **Antigravity**, **Claude**, **Codex**, **Gemini**).
 
-Note: If the root of the unity project is not the root of your repository you may want to move the `.agents` folder to the root of the repository.
-
-
+*Note: If your Unity project is in a subdirectory of your git repository, you can move the `.agents` folder to the root of the repository.*
 
 ---
 
 ## AI Agent Integration & Agent Skills
 
-If you use agentic AI tools (like **Antigravity**, **Gemini**, **Claude**, ...), UnityCliRunner includes a pre-packaged **Agent Skill** under `.agents/skills/unity-cli`
-### Benefits of the Agent Skill:
-- **Sub-Second Feedback**: Agents compile code and run tests instantly, avoiding slow batchmode restarts (~30s delay).
-- **Background Unity Process**: Keeps a headless Unity process open in the background so it can be reused for quick iterations.
-- **Diagnostics Formatting**: Compilation errors and test failures are formatted in standard compiler patterns, making it easy for agents to parse and resolve them autonomously.
+If you use agentic AI tools, UnityCliRunner includes a pre-packaged **Agent Skill** under `.agents/skills/unity-cli`.
 
-To install, select **Tools > UnityCliRunner > InstallSkill** in the Unity Editor to copy the `.agents/` folder to your project root.
+### Benefits for AI Agents:
+- **Sub-Second Feedback Loops**: Agents compile code and run tests in milliseconds instead of waiting ~30s for Unity batchmode restarts.
+- **Persistent Background Editor**: Keeps a background headless Unity instance open across tool turns.
+- **Standardized Compiler Diagnostics**: Compilation errors and test failures are formatted in standard `file(line,col): error CSxxxx: ...` syntax, enabling agents to parse, locate, and fix issues autonomously.
 
 ---
 
-## How to Use It
+## Command Reference & Usage
 
-Run `unitycli.sh` from the root directory of your Unity project:
+### 1. Compilation & Diagnostics
 
-### Background Instance Management
-Keep a background Unity instance warm to execute tests and methods in sub-second Online Mode without launching the Unity GUI:
+#### `refresh`
+Triggers `AssetDatabase.Refresh()`, waits for compilation and domain reloads to settle, and prints all compilation warnings and errors.
+```bash
+bash unitycli.sh refresh
+```
+
+#### `recompile`
+Forces a clean recompilation by clearing the compiler cache and rebuilding all script assemblies from scratch.
+```bash
+bash unitycli.sh recompile
+```
+
+---
+
+### 2. Running Tests
+
+#### `test`
+Runs Unity EditMode and/or PlayMode tests and prints failed-test stack traces:
+
+```bash
+# Run all tests (both EditMode and PlayMode)
+bash unitycli.sh test
+
+# Run only EditMode tests
+bash unitycli.sh test --editmode
+
+# Run only PlayMode tests
+bash unitycli.sh test --playmode
+
+# Filter tests by name (substring or regex match)
+bash unitycli.sh test --editmode --filter "MyNamespace.MyTestClass"
+
+# Filter tests by NUnit category (supports category negation like '!LongRunning')
+bash unitycli.sh test --playmode --category "Smoke"
+```
+
+---
+
+### 3. Executing Static Methods (`executemethod`)
+
+Executes any static method (`FullyQualifiedType.Method`) available in the Unity Editor AppDomain:
+
+```bash
+bash unitycli.sh executemethod Namespace.Class.Method [args...]
+```
+
+#### Examples:
+```bash
+# Method with no arguments
+bash unitycli.sh executemethod MyProject.Editor.BuildPipeline.BuildAddressables
+
+# Method with primitive parameters (int, float, string)
+bash unitycli.sh executemethod MyProject.Editor.AssetGenerator.CreateGrid 10 20 "forest"
+
+# Method with JSON object parameter (deserialized via JsonUtility.FromJson)
+bash unitycli.sh executemethod MyProject.Editor.ConfigLoader.ApplyConfig '{"difficulty":2,"enableCheats":false}'
+```
+
+#### Parameter & Return Value Handling:
+- **Input Primitives**: `int`, `float`, `double`, `bool`, `long`, `decimal`, and `string`.
+- **Complex Types**: Deserialized from JSON strings using Unity's `JsonUtility.FromJson`.
+- **Overload Resolution**: Automatically resolved by matching the argument count.
+- **Return Values**: Primitives and strings are printed directly; complex objects are serialized to JSON via `JsonUtility.ToJson`; `void` methods print `Unity Response: SUCCESS`.
+
+---
+
+### 4. Dynamic C# Evaluation (`eval`)
+
+Dynamically compiles and executes arbitrary C# expressions or statements in-memory via Roslyn compiler assemblies loaded by UnityCliRunner:
+
+```bash
+# Evaluate a simple expression
+bash unitycli.sh eval "1 + 1"
+bash unitycli.sh eval "Application.unityVersion"
+bash unitycli.sh eval "Mathf.Sqrt(64f)"
+
+# Evaluate multi-statement blocks with return
+bash unitycli.sh eval "var count = GameObject.FindObjectsOfType<Camera>().Length; return count;"
+
+# Execute void statements or method calls
+bash unitycli.sh eval "Debug.Log('Hello from CLI');"
+bash unitycli.sh eval "System.GC.Collect()"
+
+# Inspect GameObjects, Components, and Collections
+bash unitycli.sh eval "new int[] { 10, 20, 30 }"
+bash unitycli.sh eval "GameObject.Find('Main Camera')"
+```
+
+#### Features:
+- **In-Memory Compilation**: Executes immediately without domain reloads or disk file generation.
+- **Smart Formatting**: Primitives, Booleans, Strings, GameObjects, Components, and Collections are automatically formatted for the terminal.
+- **Standard Diagnostics**: Syntax errors and compile errors are reported with line/column coordinates in standard compiler error format (`eval(line, col): error CSxxxx: ...`).
+
+---
+
+### 5. Choosing Between `executemethod` and `eval`
+
+Both commands execute Unity-side C# code, but they serve distinct purposes:
+
+| Feature | `executemethod` | `eval` |
+| :--- | :--- | :--- |
+| **Primary Use Case** | Reusable project commands, automation, CI | One-off queries, debugging, live scene inspection |
+| **Target Code** | Existing static method (`Namespace.Class.Method`) | Arbitrary C# expression or code snippet |
+| **Asset Refresh** | Refreshes and recompiles before running | No refresh (runs immediately against current loaded state) |
+| **Play Mode** | Stops Play Mode before execution | Preserves Play Mode (inspects live runtime state) |
+| **Arguments** | Positional typed primitives / JSON objects | Inline C# code |
+| **Output** | Stable machine-readable output / JSON | Richly formatted console diagnostics |
+
+#### Example: Running a Build Utility
+```bash
+# Using executemethod for a repeatable, stable command:
+bash unitycli.sh executemethod MyProject.Editor.BuildTools.GenerateAssets '{"outputPath":"Assets/Generated"}'
+```
+
+#### Example: Inspecting Active Scene
+```bash
+# Using eval to query live state:
+bash unitycli.sh eval 'SceneManager.GetActiveScene().name'
+```
+
+---
+
+### 6. Background Instance Management
+
+Manage a background Unity Editor process to keep the TCP socket connection warm for instant sub-second commands:
 
 ```bash
 # Start a background Unity instance in headless batchmode
-# (If already starting or running, it blocks and waits until it is ready)
+# (If already starting or running, blocks and waits until it is ready)
 bash unitycli.sh start batchmode
 
-# Start a background Unity instance in interactive mode (opens Unity Editor GUI)
+# Start a background Unity instance with the Editor GUI visible
 bash unitycli.sh start interactive
 
 # Check if the background Unity instance is running and reachable
 bash unitycli.sh status
 
-# Safely stop the background Unity instance (falls back to process kill if needed)
+# Block and wait until a running Unity instance is reachable
+bash unitycli.sh wait-ready
+
+# Safely stop the background Unity instance (via socket EXIT, fallback to PID kill)
 bash unitycli.sh stop
 ```
 
-### Core Operations
-If Unity is not running, these commands will automatically start a background Unity instance in batchmode first before proceeding with the execution:
-
-```bash
-# Trigger AssetDatabase.Refresh() and print compilation diagnostics
-bash unitycli.sh refresh
-
-# Force a full C# recompilation (clean build cache) and print compilation diagnostics
-bash unitycli.sh recompile
-
-# Run all EditMode and PlayMode tests
-bash unitycli.sh test
-
-# Run all EditMode tests
-bash unitycli.sh test --editmode
-
-# Run all PlayMode tests
-bash unitycli.sh test --playmode
-
-# Run editmode tests matching a specific name filter (regex or substring)
-bash unitycli.sh test --editmode --filter "MyNamespace.MyTestClass"
-
-# Run playmode tests matching a specific category filter
-bash unitycli.sh test --playmode --category "Smoke"
-```
-
-### Exit Codes
-- `0`: Success (all tests passed, compilation succeeded, method executed successfully, or connection succeeded).
-- `1`: Failure (compilation errors, failed tests, method execution exception, or connection check failed).
+#### Status Outputs:
+- `Status: Ready`: Unity is running and the TCP socket is responsive.
+- `Status: Not Running`: No Unity instance is running for this project.
+- `Status: Running Unreachable`: Unity is open but busy (e.g. compiling, domain reloading, or starting up).
 
 ---
 
-## Choosing Between `executemethod` and `eval`
+## Exit Codes
 
-The two commands can both execute Unity-side C# code, but they serve different workflows:
-
-* Use **`eval`** for one-off inspection, debugging, or small mutations of the currently loaded Editor state. It supports expressions, local variables, multi-statement snippets, and Unity object formatting. It runs without refreshing the Asset Database and does not stop Play Mode, so it is the right choice when you need to inspect the live scene or runtime state.
-* Use **`executemethod`** for a reusable project-defined operation that should be callable from scripts, CI, or an AI agent with a stable interface. It refreshes and recompiles before invocation, stops Play Mode before running, accepts positional primitive/JSON arguments, and returns machine-friendly primitive or JSON results.
-
-For example, use `eval` to inspect the active scene:
-
-```bash
-bash unitycli.sh eval 'SceneManager.GetActiveScene().name'
-```
-
-Use `executemethod` to invoke a project utility that is intended to be repeated:
-
-```bash
-bash unitycli.sh executemethod MyProject.Editor.BuildTools.GenerateAssets '{"outputPath":"Assets/Generated"}'
-```
-
-Although a method call can often be written as an `eval` snippet, `eval` is not a replacement for the refresh, lifecycle, argument, and result contract provided by `executemethod`.
+- `0`: Success (compilation succeeded, all tests passed, method executed successfully, or connection succeeded).
+- `1`: Failure (compilation errors, failed tests, runtime exception, invalid command/arguments, or connection failed).
 
 ---
 
-## Method Execution with Parameters
+## Integration Tests & Development
 
-The `executemethod` subcommand executes a reusable static method already available in the Unity Editor AppDomain:
+The repository includes a comprehensive automated integration test suite (`test.sh`) to verify socket communication, autostart behavior, test execution, method invocation, and eval across platforms.
 
-```bash
-bash unitycli.sh executemethod Namespace.Class.Method 4 3.5 "hello" "{\"Value\":42}"
-```
-
-### Supported Input Parameter Types
-- **Primitives**: `int`, `float`, `double`, `bool`, `long`, `decimal` (parsed using invariant culture).
-- **Strings**: Standard C# strings.
-- **Complex Types (JSON)**: Any other C# class/struct type will be automatically deserialized from its raw string parameter using Unity's `JsonUtility.FromJson`.
-
-### Overload Resolution
-Overloaded static methods are resolved automatically by matching the number of arguments provided.
-
-### Return Value Serialization
-- **Primitives & Strings**: Printed directly to the console.
-- **Complex Types**: Automatically serialized and printed as a JSON payload using `JsonUtility.ToJson`.
-- **Void/Null**: Prints `Unity Response: SUCCESS` (via socket) or no extra payload.
-
-`executemethod` refreshes the Asset Database and waits for compilation before invoking the method. It is intended for project-owned commands and automation where current source, explicit arguments, and predictable output matter. It is not the live-state path for inspecting a running Play Mode session.
-
----
-
-## Dynamic C# Evaluation (`eval`)
-
-The `eval` subcommand dynamically compiles and executes arbitrary C# expressions or code snippets in the currently loaded Unity Editor state without creating files or triggering a domain reload:
-
-```bash
-# Evaluate a single expression
-bash unitycli.sh eval "Application.unityVersion"
-bash unitycli.sh eval "1 + 1"
-bash unitycli.sh eval "SceneManager.GetActiveScene().name"
-
-# Evaluate multi-statement blocks with return
-bash unitycli.sh eval "var list = new List<int> { 1, 2, 3 }; return list.Sum();"
-
-# Inspect and format GameObjects and components
-bash unitycli.sh eval "GameObject.FindObjectsOfType<Camera>().Length"
-```
-
-### Key Features:
-- **Instant Execution**: In-memory compilation via Roslyn compiler assemblies loaded dynamically by UnityCliRunner.
-- **Rich Formatting**: Primitives, Booleans, Strings, GameObjects, Components, and Collections are automatically formatted and printed to standard output.
-- **Standard Diagnostics**: Syntax and compiler errors are reported with accurate line/column locations in standard compiler format (`eval(line, col): error CSxxxx: ...`).
-- **Safe Execution**: Runtime exceptions report the exact exception message and stack trace, exiting with code `1`.
-
-`eval` does not refresh the Asset Database or stop Play Mode. It is therefore best for quick, interactive queries and changes to live Editor or runtime state. If scripts or assets have changed and Unity has not reloaded them yet, run `refresh` first. Its formatting is intended for readable diagnostics; use `executemethod` when a stable machine-readable method contract is more important.
-
----
-
-## Integration Tests
-
-The repository includes a robust automated integration test suite `test.sh` to verify the CLI runner's correctness
-
-### Running the tests
-Simply execute:
+### Running Integration Tests:
 ```bash
 bash test.sh
 ```
 
-### Test Suite Execution Flow:
-1. Detects if Unity is running for the project. If not, it launches Unity in the background and waits for the TCP server to start.
-2. Runs a suite of test scenarios (such as compiling errors/warnings, skipped tests, executing successful/failing/missing methods) in **Online Mode** via TCP sockets.
-3. Compares the normalized console output against verified outputs located under [IntegrationTests](file:///c:/Users/perev/Code/UnityCliRunner/IntegrationTests)/<TestCase>/output.online.verified.txt.
-4. Gracefully terminates the running Unity Editor process.
-5. Re-runs scenarios in **Auto-Start Mode** (starting with Unity stopped) to verify that commands automatically trigger the background Unity startup sequence and execute correctly.
-6. Compares the console output against verified outputs under [IntegrationTests](file:///c:/Users/perev/Code/UnityCliRunner/IntegrationTests)/<TestCase>/output.autostart.verified.txt.
-7. Restores any modified test files to their original state upon completion.
+### Filtering Specific Test Cases:
+```bash
+bash test.sh --filter TestEvalSuccess
+bash test.sh --filter TestExecuteParams
+```
 
-### Bootstrapping Verified Outputs
-If you modify the output format of `unitycli.sh` and need to update the expected baselines, run the integration tests with the `BOOTSTRAP=true` environment variable:
+### Updating Verified Baselines:
+If output normalization or formatting changes, update the golden test baselines using `BOOTSTRAP=true`:
 ```bash
 BOOTSTRAP=true bash test.sh
 ```
-This automatically overwrites all `output.online.verified.txt` and `output.autostart.verified.txt` files with the actual output generated during the test run.
