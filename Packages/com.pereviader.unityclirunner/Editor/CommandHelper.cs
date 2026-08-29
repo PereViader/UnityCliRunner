@@ -21,7 +21,7 @@ namespace UnityCliRunner
             {
                 if (string.IsNullOrEmpty(s_ProjectRoot))
                 {
-                    s_ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+                    EnsureInitialized();
                 }
                 return s_ProjectRoot;
             }
@@ -29,7 +29,21 @@ namespace UnityCliRunner
 
         static CommandHelper()
         {
-            s_ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        }
+
+        internal static void EnsureInitialized()
+        {
+            if (string.IsNullOrEmpty(s_ProjectRoot))
+            {
+                try
+                {
+                    s_ProjectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"UnityCliRunner: Failed to initialize ProjectRoot: {ex}");
+                }
+            }
         }
 
         public static string[] SplitArguments(string commandLine)

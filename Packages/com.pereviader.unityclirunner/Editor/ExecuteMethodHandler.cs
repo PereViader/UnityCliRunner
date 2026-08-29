@@ -106,12 +106,6 @@ namespace UnityCliRunner
                     Directory.CreateDirectory(tempDir);
                 }
                 string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
-                string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
-
-                if (File.Exists(resultsPath))
-                {
-                    File.Delete(resultsPath);
-                }
                 UnityCliOperationStore.WriteAtomic(runningPath, operationId, operationId);
             }
             catch (Exception ex)

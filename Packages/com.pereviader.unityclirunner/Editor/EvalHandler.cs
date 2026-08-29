@@ -286,12 +286,6 @@ public static class __UnityCliEvalRunner
                     Directory.CreateDirectory(tempDir);
                 }
                 string runningPath = Path.Combine(tempDir, "unity_eval_running.txt");
-                string resultsPath = Path.Combine(tempDir, "unity_eval_result.json");
-
-                if (File.Exists(resultsPath))
-                {
-                    File.Delete(resultsPath);
-                }
                 UnityCliOperationStore.WriteAtomic(runningPath, operationId, operationId);
             }
             catch (Exception ex)
