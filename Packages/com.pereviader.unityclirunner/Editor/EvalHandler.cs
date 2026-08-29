@@ -12,6 +12,8 @@ namespace UnityCliRunner
 {
     internal class EvalHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.MainThread;
+
         public void Handle(string payload, StreamWriter writer)
         {
             string[] requestParts = (payload ?? "").Split(new[] { ' ' }, 2);
@@ -280,13 +282,11 @@ public static class __UnityCliEvalRunner
         {
             try
             {
-                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-                if (!Directory.Exists(tempDir))
+                if (!Directory.Exists(UnityCliPaths.TempDir))
                 {
-                    Directory.CreateDirectory(tempDir);
+                    Directory.CreateDirectory(UnityCliPaths.TempDir);
                 }
-                string runningPath = Path.Combine(tempDir, "unity_eval_running.txt");
-                UnityCliOperationStore.WriteAtomic(runningPath, operationId, operationId);
+                UnityCliOperationStore.WriteAtomic(UnityCliPaths.EvalRunningFile, operationId, operationId);
             }
             catch (Exception ex)
             {
@@ -298,10 +298,9 @@ public static class __UnityCliEvalRunner
         {
             try
             {
-                string runningPath = Path.Combine(CommandHelper.ProjectRoot, "Temp", "unity_eval_running.txt");
-                if (File.Exists(runningPath))
+                if (File.Exists(UnityCliPaths.EvalRunningFile))
                 {
-                    File.Delete(runningPath);
+                    File.Delete(UnityCliPaths.EvalRunningFile);
                 }
             }
             catch { }
@@ -311,12 +310,11 @@ public static class __UnityCliEvalRunner
         {
             try
             {
-                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-                if (!Directory.Exists(tempDir))
+                if (!Directory.Exists(UnityCliPaths.TempDir))
                 {
-                    Directory.CreateDirectory(tempDir);
+                    Directory.CreateDirectory(UnityCliPaths.TempDir);
                 }
-                string resultsPath = Path.Combine(tempDir, "unity_eval_result.json");
+                string resultsPath = UnityCliPaths.EvalResultFile;
 
                 var runResult = new UnityEvalResult
                 {
@@ -328,7 +326,7 @@ public static class __UnityCliEvalRunner
                     payload = payload
                 };
                 string json = JsonUtility.ToJson(runResult, true);
-                RunTestsHandler.WriteAtomic(resultsPath, json, operationId);
+                UnityCliOperationStore.WriteAtomic(resultsPath, json, operationId);
             }
             catch (Exception ex)
             {

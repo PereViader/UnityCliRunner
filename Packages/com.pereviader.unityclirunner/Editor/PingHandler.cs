@@ -4,6 +4,8 @@ namespace UnityCliRunner
 {
     internal class PingHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.WorkerThread;
+
         public void Handle(string payload, StreamWriter writer)
         {
             writer.WriteLine("PONG");

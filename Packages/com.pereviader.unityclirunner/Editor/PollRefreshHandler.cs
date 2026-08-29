@@ -6,6 +6,8 @@ namespace UnityCliRunner
 {
     internal class PollRefreshHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.WorkerThread;
+
         public void Handle(string payload, StreamWriter writer)
         {
             string response = GetRefreshPollResponse(payload);
@@ -55,7 +57,7 @@ namespace UnityCliRunner
 
             if (UnityCliCompilationTracker.ScriptCompilationFailed)
             {
-                string diagnosticsPath = Path.Combine(CommandHelper.ProjectRoot, "Temp", "unity_compilation_errors.txt");
+                string diagnosticsPath = UnityCliPaths.DiagnosticsFile;
                 if (File.Exists(diagnosticsPath) && new FileInfo(diagnosticsPath).Length > 0)
                 {
                     return "COMPILATION_ERROR";

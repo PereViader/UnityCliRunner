@@ -11,6 +11,8 @@ namespace UnityCliRunner
 {
     internal class RunTestsHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
+
         private const string ActiveTestFilterSessionKey = "UnityCliRunner.HasActiveTestFilter";
         private const string CallbackOwnerName = "UnityCliRunner.CallbackOwner";
         private static MyTestCallbacks s_Callbacks;
@@ -23,10 +25,10 @@ namespace UnityCliRunner
             set => SessionState.SetBool(ActiveTestFilterSessionKey, value);
         }
 
-        internal static string TempDirectory => Path.Combine(CommandHelper.ProjectRoot, "Temp");
-        internal static string RunningFilePath => Path.Combine(TempDirectory, "unity_test_running.txt");
-        internal static string ResultsFilePath => Path.Combine(TempDirectory, "unity_test_results.json");
-        internal static string FailuresFilePath => Path.Combine(TempDirectory, "unity_test_failures.txt");
+        internal static string TempDirectory => UnityCliPaths.TempDir;
+        internal static string RunningFilePath => UnityCliPaths.TestRunningFile;
+        internal static string ResultsFilePath => UnityCliPaths.TestResultsFile;
+        internal static string FailuresFilePath => UnityCliPaths.TestFailuresFile;
 
         internal static void MarkTransportInterruption(string status)
         {

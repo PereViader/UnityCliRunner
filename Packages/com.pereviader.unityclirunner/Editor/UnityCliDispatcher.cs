@@ -9,9 +9,13 @@ namespace UnityCliRunner
     internal static class UnityCliDispatcher
     {
         private static readonly ConcurrentQueue<Action> s_Queue = new ConcurrentQueue<Action>();
+        private static bool s_Initialized;
 
-        static UnityCliDispatcher()
+        public static void EnsureInitialized()
         {
+            if (s_Initialized) return;
+            s_Initialized = true;
+            EditorApplication.update -= Update;
             EditorApplication.update += Update;
         }
 
