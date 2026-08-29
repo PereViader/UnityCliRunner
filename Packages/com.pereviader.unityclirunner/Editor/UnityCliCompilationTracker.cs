@@ -11,9 +11,6 @@ namespace UnityCliRunner
     [InitializeOnLoad]
     public static class UnityCliCompilationTracker
     {
-        private const string CompilationDiagnosticsFileName = "unity_compilation_errors.txt";
-        private const string RefreshResultFileName = "unity_refresh_result.json";
-
         private static readonly Dictionary<string, List<string>> s_AssemblyDiagnostics = new Dictionary<string, List<string>>();
         private static readonly object s_DiagnosticsLock = new object();
 
@@ -64,14 +61,10 @@ namespace UnityCliRunner
             }
         }
 
-        static UnityCliCompilationTracker()
-        {
-            EnsureInitialized();
-        }
-
         private static void InitializeMainThread()
         {
             CommandHelper.EnsureInitialized();
+            UnityCliPaths.EnsureInitialized();
             UnityCliOperationStore.EnsureInitialized();
             UpdateCompilationState();
             var operation = UnityCliOperationStore.Read();
@@ -105,8 +98,7 @@ namespace UnityCliRunner
         {
             s_IsCompiling = false;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
-            string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
-            if (!File.Exists(diagnosticsPath))
+            if (!File.Exists(UnityCliPaths.DiagnosticsFile))
             {
                 WriteActiveErrorsToFile();
             }
@@ -166,9 +158,7 @@ namespace UnityCliRunner
 
             if (diagnostics.Count > 0)
             {
-                WriteDiagnosticsFileAtomically(
-                    Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName),
-                    diagnostics);
+                WriteDiagnosticsFileAtomically(UnityCliPaths.DiagnosticsFile, diagnostics);
             }
         }
 
@@ -277,8 +267,7 @@ namespace UnityCliRunner
                 return;
             }
 
-            string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
-            if (!File.Exists(diagnosticsPath))
+            if (!File.Exists(UnityCliPaths.DiagnosticsFile))
             {
                 WriteActiveErrorsToFile();
             }
@@ -290,7 +279,7 @@ namespace UnityCliRunner
                 message = EditorUtility.scriptCompilationFailed ? "Compilation failed" : ""
             };
             UnityCliOperationStore.WriteAtomic(
-                Path.Combine(GetTempDirectory(), RefreshResultFileName),
+                UnityCliPaths.RefreshResultFile,
                 JsonUtility.ToJson(result, true),
                 operation.operationId);
             s_LastRefreshResult = result;
@@ -320,7 +309,7 @@ namespace UnityCliRunner
                 message = message
             };
             UnityCliOperationStore.WriteAtomic(
-                Path.Combine(GetTempDirectory(), RefreshResultFileName),
+                UnityCliPaths.RefreshResultFile,
                 JsonUtility.ToJson(result, true),
                 operationId);
             s_LastRefreshResult = result;
@@ -331,7 +320,7 @@ namespace UnityCliRunner
         {
             try
             {
-                string path = Path.Combine(GetTempDirectory(), RefreshResultFileName);
+                string path = UnityCliPaths.RefreshResultFile;
                 s_LastRefreshResult = File.Exists(path)
                     ? JsonUtility.FromJson<UnityRefreshResult>(File.ReadAllText(path))
                     : null;
@@ -347,7 +336,7 @@ namespace UnityCliRunner
         {
             try
             {
-                var logEntriesType = FindType("UnityEditor.LogEntries") ?? FindType("UnityEditorInternal.LogEntries");
+                var logEntriesType = CommandHelper.FindType("UnityEditor.LogEntries") ?? CommandHelper.FindType("UnityEditorInternal.LogEntries");
                 var clearMethod = logEntriesType?.GetMethod("Clear", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
                 clearMethod?.Invoke(null, null);
             }
@@ -369,7 +358,7 @@ namespace UnityCliRunner
         {
             try
             {
-                string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+                string diagnosticsPath = UnityCliPaths.DiagnosticsFile;
                 if(File.Exists(diagnosticsPath))
                 {
                     File.Delete(diagnosticsPath);
@@ -381,36 +370,11 @@ namespace UnityCliRunner
             }
         }
 
-        private static Type FindType(string fullName)
-        {
-            foreach(var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    var type = assembly.GetType(fullName);
-                    if(type != null)
-                        return type;
-                }
-                catch { }
-            }
-            return null;
-        }
-
-        private static string GetTempDirectory()
-        {
-            string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-            if(!Directory.Exists(tempDir))
-            {
-                Directory.CreateDirectory(tempDir);
-            }
-            return tempDir;
-        }
-
         public static void WriteActiveErrorsToFile()
         {
             try
             {
-                string errorsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+                string errorsPath = UnityCliPaths.DiagnosticsFile;
                 var diagnostics = new List<string>();
 
                 lock (s_DiagnosticsLock)
@@ -426,8 +390,8 @@ namespace UnityCliRunner
 
                 if (diagnostics.Count == 0)
                 {
-                    var logEntriesType = FindType("UnityEditor.LogEntries") ?? FindType("UnityEditorInternal.LogEntries");
-                    var logEntryType = FindType("UnityEditor.LogEntry") ?? FindType("UnityEditorInternal.LogEntry");
+                    var logEntriesType = CommandHelper.FindType("UnityEditor.LogEntries") ?? CommandHelper.FindType("UnityEditorInternal.LogEntries");
+                    var logEntryType = CommandHelper.FindType("UnityEditor.LogEntry") ?? CommandHelper.FindType("UnityEditorInternal.LogEntry");
 
                     var getCountMethod = logEntriesType?.GetMethod("GetCount", BindingFlags.Static | BindingFlags.Public);
                     var getEntryMethod = logEntriesType?.GetMethod("GetEntryInternal", BindingFlags.Static | BindingFlags.Public);
@@ -525,7 +489,7 @@ namespace UnityCliRunner
                     return;
                 }
 
-                string diagnosticsPath = Path.Combine(GetTempDirectory(), CompilationDiagnosticsFileName);
+                string diagnosticsPath = UnityCliPaths.DiagnosticsFile;
                 string diagnostic = $"UnityCliRunner(1,1): error UC0001: {message}";
                 WriteDiagnosticsFileAtomically(diagnosticsPath, new[] { diagnostic });
             }

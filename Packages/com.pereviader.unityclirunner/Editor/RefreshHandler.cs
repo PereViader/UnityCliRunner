@@ -6,6 +6,8 @@ namespace UnityCliRunner
 {
     internal class RefreshHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
+
         public void Handle(string payload, StreamWriter writer)
         {
             string operationId = payload?.Trim();

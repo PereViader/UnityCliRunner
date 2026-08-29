@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
 using System.IO;
+using UnityEditor;
 using UnityEngine;
 
 namespace UnityCliRunner
 {
-    [UnityEditor.InitializeOnLoad]
+    [InitializeOnLoad]
     internal static class CommandHelper
     {
         // Capture this once on Unity's main thread. User execute/eval code can
@@ -27,10 +28,6 @@ namespace UnityCliRunner
             }
         }
 
-        static CommandHelper()
-        {
-        }
-
         internal static void EnsureInitialized()
         {
             if (string.IsNullOrEmpty(s_ProjectRoot))
@@ -43,6 +40,38 @@ namespace UnityCliRunner
                 {
                     Debug.LogError($"UnityCliRunner: Failed to initialize ProjectRoot: {ex}");
                 }
+            }
+        }
+
+        public static void RunActionAfterStoppingPlaymode(Action action)
+        {
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                Debug.Log("UnityCliRunner: Stopping PlayMode before executing command...");
+                EditorApplication.isPlaying = false;
+
+                EditorApplication.CallbackFunction checkPlaymode = null;
+                checkPlaymode = () =>
+                {
+                    if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                    {
+                        EditorApplication.update -= checkPlaymode;
+                        Debug.Log("UnityCliRunner: PlayMode stopped. Executing command...");
+                        try
+                        {
+                            action();
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogException(e);
+                        }
+                    }
+                };
+                EditorApplication.update += checkPlaymode;
+            }
+            else
+            {
+                action();
             }
         }
 

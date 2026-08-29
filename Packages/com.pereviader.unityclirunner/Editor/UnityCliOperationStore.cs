@@ -33,12 +33,11 @@ namespace UnityCliRunner
     internal static class UnityCliOperationStore
     {
         private const string EditorSessionKey = "UnityCliRunner.EditorSessionId";
-        private const string OperationFileName = "unity_cli_operation.json";
         private static readonly object s_CacheLock = new object();
         private static UnityCliOperationState s_CachedState;
         private static string s_EditorSessionId;
 
-        internal static string OperationFilePath => Path.Combine(GetTempDirectory(), OperationFileName);
+        internal static string OperationFilePath => UnityCliPaths.OperationFile;
 
         internal static string EditorSessionId
         {
@@ -57,10 +56,6 @@ namespace UnityCliRunner
 
                 return s_EditorSessionId;
             }
-        }
-
-        static UnityCliOperationStore()
-        {
         }
 
         internal static void EnsureInitialized()
@@ -189,7 +184,7 @@ namespace UnityCliRunner
 
         internal static void Write(UnityCliOperationState state)
         {
-            Directory.CreateDirectory(GetTempDirectory());
+            Directory.CreateDirectory(UnityCliPaths.TempDir);
             WriteAtomic(OperationFilePath, JsonUtility.ToJson(state, true), state.operationId);
             SetCachedState(state);
         }
@@ -284,11 +279,6 @@ namespace UnityCliRunner
             {
                 Debug.LogError($"UnityCliRunner: Failed to quarantine malformed operation journal: {ex}");
             }
-        }
-
-        private static string GetTempDirectory()
-        {
-            return Path.Combine(CommandHelper.ProjectRoot, "Temp");
         }
     }
 }

@@ -50,7 +50,7 @@ namespace UnityCliRunner
             }
         }
 
-        private static void EnsureInitialized()
+        internal static void EnsureInitialized()
         {
             if (s_Initialized) return;
 

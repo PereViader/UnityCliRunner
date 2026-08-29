@@ -6,6 +6,8 @@ namespace UnityCliRunner
 {
     internal class ExitHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.MainThread;
+
         private static void ExitUnity()
         {
             UnityCliServer.StopServer();

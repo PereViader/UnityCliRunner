@@ -9,6 +9,8 @@ namespace UnityCliRunner
 {
     internal class ExecuteMethodHandler : ICommandHandler
     {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
+
         public void Handle(string payload, StreamWriter writer)
         {
             if (UnityCliCompilationTracker.ScriptCompilationFailed)
@@ -100,13 +102,11 @@ namespace UnityCliRunner
         {
             try
             {
-                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-                if (!Directory.Exists(tempDir))
+                if (!Directory.Exists(UnityCliPaths.TempDir))
                 {
-                    Directory.CreateDirectory(tempDir);
+                    Directory.CreateDirectory(UnityCliPaths.TempDir);
                 }
-                string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
-                UnityCliOperationStore.WriteAtomic(runningPath, operationId, operationId);
+                UnityCliOperationStore.WriteAtomic(UnityCliPaths.ExecuteRunningFile, operationId, operationId);
             }
             catch (Exception ex)
             {
@@ -116,9 +116,8 @@ namespace UnityCliRunner
 
         public static void ExecuteMethod(string operationId, MethodInfo method, string[] stringParams)
         {
-            string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-            string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
-            string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
+            string runningPath = UnityCliPaths.ExecuteRunningFile;
+            string resultsPath = UnityCliPaths.ExecuteResultFile;
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             bool success = false;
@@ -236,7 +235,7 @@ namespace UnityCliRunner
                             payload = payload
                         };
                         string json = JsonUtility.ToJson(runResult, true);
-                        RunTestsHandler.WriteAtomic(resultsPath, json, operationId);
+                        UnityCliOperationStore.WriteAtomic(resultsPath, json, operationId);
                         if (File.Exists(runningPath)) File.Delete(runningPath);
                         UnityCliOperationStore.Complete(operationId);
                     }
@@ -250,9 +249,8 @@ namespace UnityCliRunner
 
         public static void MarkInterrupted(string message)
         {
-            string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-            string runningPath = Path.Combine(tempDir, "unity_execute_running.txt");
-            string resultsPath = Path.Combine(tempDir, "unity_execute_result.json");
+            string runningPath = UnityCliPaths.ExecuteRunningFile;
+            string resultsPath = UnityCliPaths.ExecuteResultFile;
             var operation = UnityCliOperationStore.Read();
             if (operation == null || operation.kind != "execute")
             {
@@ -270,7 +268,7 @@ namespace UnityCliRunner
                     duration = 0,
                     payload = null
                 };
-                RunTestsHandler.WriteAtomic(resultsPath, JsonUtility.ToJson(result, true), operation.operationId);
+                UnityCliOperationStore.WriteAtomic(resultsPath, JsonUtility.ToJson(result, true), operation.operationId);
                 if (File.Exists(runningPath)) File.Delete(runningPath);
                 UnityCliOperationStore.Complete(operation.operationId);
             }

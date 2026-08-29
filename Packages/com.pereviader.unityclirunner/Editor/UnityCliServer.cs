@@ -15,7 +15,6 @@ namespace UnityCliRunner
     public static class UnityCliServer
     {
         private const int AnyAvailablePort = 0;
-        private const string PortFileName = "unity_cli_port.txt";
 
         private static TcpListener _tcpListener;
         private static Thread _serverThread;
@@ -50,8 +49,11 @@ namespace UnityCliRunner
             }
 
             CommandHelper.EnsureInitialized();
+            UnityCliPaths.EnsureInitialized();
             UnityCliOperationStore.EnsureInitialized();
             UnityCliCompilationTracker.EnsureInitialized();
+            UnityCliDispatcher.EnsureInitialized();
+            RoslynCompilerHelper.EnsureInitialized();
 
             RecoverOperationAfterEditorRestart();
 
@@ -293,10 +295,8 @@ namespace UnityCliRunner
                         return;
                     }
 
-                    // Only PING is completely independent of Unity APIs and the
-                    // durable JSON journal. Poll handlers also use JsonUtility,
-                    // so they must run on Unity's main thread.
-                    if (handler is PingHandler || handler is PollRefreshHandler)
+                    // Worker thread execution target (e.g. PING, POLL_REFRESH)
+                    if (handler.ExecutionTarget == CommandExecutionTarget.WorkerThread)
                     {
                         handler.Handle(payload, writer);
                     }
@@ -324,14 +324,9 @@ namespace UnityCliRunner
                                     }
                                 };
 
-                                bool shouldStopPlaymode = handler is RefreshHandler ||
-                                                          handler is RecompileHandler ||
-                                                          handler is RunTestsHandler ||
-                                                          handler is ExecuteMethodHandler;
-
-                                if (shouldStopPlaymode)
+                                if (handler.ExecutionTarget == CommandExecutionTarget.EditModeOnly)
                                 {
-                                    RunActionAfterStoppingPlaymode(executeAction);
+                                    CommandHelper.RunActionAfterStoppingPlaymode(executeAction);
                                 }
                                 else
                                 {
@@ -399,49 +394,15 @@ namespace UnityCliRunner
                            $"Reloading={_isReloading}, StackTrace={exception.StackTrace}");
         }
 
-        private static void RunActionAfterStoppingPlaymode(Action action)
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode)
-            {
-                Debug.Log("UnityCliRunner: Stopping PlayMode before executing command...");
-                EditorApplication.isPlaying = false;
-
-                EditorApplication.CallbackFunction checkPlaymode = null;
-                checkPlaymode = () =>
-                {
-                    if (!EditorApplication.isPlayingOrWillChangePlaymode)
-                    {
-                        EditorApplication.update -= checkPlaymode;
-                        Debug.Log("UnityCliRunner: PlayMode stopped. Executing command...");
-                        try
-                        {
-                            action();
-                        }
-                        catch (Exception e)
-                        {
-                            Debug.LogException(e);
-                        }
-                    }
-                };
-                EditorApplication.update += checkPlaymode;
-            }
-            else
-            {
-                action();
-            }
-        }
-
         private static void WritePortFile(int port)
         {
             try
             {
-                string tempDir = Path.Combine(CommandHelper.ProjectRoot, "Temp");
-                if(!Directory.Exists(tempDir))
+                if(!Directory.Exists(UnityCliPaths.TempDir))
                 {
-                    Directory.CreateDirectory(tempDir);
+                    Directory.CreateDirectory(UnityCliPaths.TempDir);
                 }
-                string portFilePath = Path.Combine(tempDir, PortFileName);
-                UnityCliOperationStore.WriteAtomic(portFilePath, port.ToString(), "port");
+                UnityCliOperationStore.WriteAtomic(UnityCliPaths.PortFile, port.ToString(), "port");
             }
             catch(Exception e)
             {
@@ -453,10 +414,9 @@ namespace UnityCliRunner
         {
             try
             {
-                string portFilePath = Path.Combine(CommandHelper.ProjectRoot, "Temp", PortFileName);
-                if(File.Exists(portFilePath))
+                if(File.Exists(UnityCliPaths.PortFile))
                 {
-                    File.Delete(portFilePath);
+                    File.Delete(UnityCliPaths.PortFile);
                 }
             }
             catch(Exception e)
@@ -469,13 +429,12 @@ namespace UnityCliRunner
         {
             try
             {
-                string portFilePath = Path.Combine(CommandHelper.ProjectRoot, "Temp", PortFileName);
-                if(!File.Exists(portFilePath))
+                if(!File.Exists(UnityCliPaths.PortFile))
                 {
                     return AnyAvailablePort;
                 }
 
-                string portText = File.ReadAllText(portFilePath);
+                string portText = File.ReadAllText(UnityCliPaths.PortFile);
                 return int.TryParse(portText, out int port)
                     ? port
                     : AnyAvailablePort;
