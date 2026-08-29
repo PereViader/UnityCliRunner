@@ -30,9 +30,9 @@ namespace UnityCliRunner
                     return $"BUSY {operation.kind} {operation.operationId}";
                 }
 
-                if (operation.kind == "refresh" || operation.kind == "recompile")
+                if (operation.kind == OperationKinds.Refresh || operation.kind == OperationKinds.Recompile)
                 {
-                    if (operation.status == "Interrupted")
+                    if (operation.status == OperationStatus.Interrupted)
                     {
                         return "INTERRUPTION Unity editor restarted before the operation completed.";
                     }

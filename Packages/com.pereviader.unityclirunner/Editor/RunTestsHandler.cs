@@ -142,7 +142,7 @@ namespace UnityCliRunner
                 }
             }
 
-            var begin = UnityCliOperationStore.TryBegin(operationId, "test", "Queued", out var existing);
+            var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Test, OperationStatus.Queued, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
                 writer.WriteLine("ERROR: Missing or invalid operation id");
