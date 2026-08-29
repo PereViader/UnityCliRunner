@@ -49,7 +49,7 @@ namespace UnityCliRunner
                 return;
             }
 
-            _ = CommandHelper.ProjectRoot;
+            CommandHelper.EnsureInitialized();
             UnityCliOperationStore.EnsureInitialized();
             UnityCliCompilationTracker.EnsureInitialized();
 

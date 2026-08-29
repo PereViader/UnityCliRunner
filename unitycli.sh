@@ -164,7 +164,7 @@ if [ -z "$SCRIPT_PATH" ] || [ ! -f "$SCRIPT_PATH" ]; then
     "$UNITY_EXE" -batchmode -nographics -projectPath "$PROJECT_NATIVE_ROOT" -logFile "$PROJECT_NATIVE_RESOLVE_LOG" -quit >/dev/null 2>&1 || true
     find_script_path
   else
-    local version=""
+    version=""
     if [ -f "$PROJECT_ROOT/ProjectSettings/ProjectVersion.txt" ]; then
       version=$(grep "m_EditorVersion:" "$PROJECT_ROOT/ProjectSettings/ProjectVersion.txt" | awk '{print $2}' | tr -d '\r')
     fi

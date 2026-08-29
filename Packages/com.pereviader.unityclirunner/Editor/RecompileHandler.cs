@@ -33,7 +33,7 @@ namespace UnityCliRunner
                 return;
             }
 
-            UnityCliCompilationTracker.DeleteRefreshResult();
+            UnityCliCompilationTracker.ResetRefreshResultCache();
             UnityCliCompilationTracker.ClearCapturedDiagnostics();
 
             UnityCliCompilationTracker.RefreshPending = true;

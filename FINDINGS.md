@@ -10,6 +10,7 @@ This document records observed Unity Editor and Test Framework behavior, togethe
 - `AssemblyReloadEvents.beforeAssemblyReload` runs before the old domain is unloaded, but very little managed lifetime remains. Use it only for small, idempotent durable transitions and transport shutdown; never depend on a later old-domain callback.
 - Register lifecycle callbacks again in every new domain. Registration and recovery must both be idempotent because initialization order and partially completed prior cleanup cannot be assumed.
 - A reload and an Editor shutdown are interruption events, not ordinary command failures. Record an explicit interrupted outcome when possible, and do not silently convert either event into success.
+- Socket-initiated Editor shutdown (`EXIT`) should stop listener services and invoke process exit (`EditorApplication.Exit(0)`) immediately rather than deferring exit across update ticks to wait for active operations. Unity's standard quitting lifecycle (`EditorApplication.quitting`) invokes interruption recovery handlers to mark any in-flight operations as interrupted in durable state cleanly and quickly.
 - Unity may lock assembly reloads while tests are running. Script changes made during a test can be queued until the Test Framework releases that lock, so a test that edits a script does not necessarily exercise mid-test domain reload recovery.
 - Stop Play Mode asynchronously and wait until both `EditorApplication.isPlaying` and `isPlayingOrWillChangePlaymode` are false before starting an operation that requires Edit Mode.
 
@@ -22,6 +23,7 @@ This document records observed Unity Editor and Test Framework behavior, togethe
 - Never delete or overwrite a marker/result unless its operation ID matches the caller. A stale callback, retry, or cleanup path must not mutate a newer operation's state.
 - Recovery must use operation identities or generations. A callback from an older test run or domain must never overwrite state created by a newer request.
 - Avoid deleting existing terminal result files (e.g., test/execute/eval result JSON) in-place at the beginning of an operation. Because clients match results by client-generated `operationId` and writers atomically replace results upon completion, in-place deletion is redundant and exposes transient 0-byte or `DELETE_PENDING` states to concurrent background readers on Windows NTFS.
+- Polling handlers must evaluate operation state in strict hierarchical precedence: check the terminal result file for a matching client-generated operation ID first; if the result is absent or belongs to an older run, check the active running marker next; only if neither matches, query the durable operation journal for foreign ownership (yielding `BUSY`) or idle state. A poll handler must never return `IDLE` solely because an older terminal result file on disk failed to match the current operation ID, as this prematurely declares idle state while the newer operation is actively running.
 - Reload and shutdown handling must be idempotent. Repeated lifecycle callbacks, duplicate Test Framework callbacks, or recovery after a partial cleanup must converge on one terminal outcome.
 - A missing, unreadable, or malformed recovery record is not successful completion. Clear any in-memory snapshot, quarantine malformed data where practical, and report a recoverable error rather than guessing.
 - Persist only simple, version-tolerant data such as operation ID, kind, status, Editor-session ID, and timestamps. Reconstruct observers and Unity objects in the new domain instead of serializing runtime objects.
@@ -69,6 +71,7 @@ This document records observed Unity Editor and Test Framework behavior, togethe
 - Process-image scans are unreliable when multiple projects or Unity versions are open. Prefer a project-scoped handshake and verified endpoint.
 - Pin both the Unity version and revision in `ProjectVersion.txt`, and run compatibility tests against installed versions deliberately. Opening a project in a different version can rewrite project settings and change compiler/test output independently of UnityCLI.
 - Test Windows, Linux, and macOS behavior explicitly. File replacement, lockfiles, process discovery, socket teardown, line endings, executable lookup, and shell quoting all have platform-specific failure modes.
+- Shell scripts across Linux, macOS, and Windows Git Bash must never declare function-only keywords such as `local` in top-level script scope. POSIX shell interpreters produce runtime syntax failures when encountering `local` outside function definitions during fallback execution paths.
 
 ## Test and maintenance discipline
 

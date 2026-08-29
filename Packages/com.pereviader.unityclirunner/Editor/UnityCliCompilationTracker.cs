@@ -71,7 +71,7 @@ namespace UnityCliRunner
 
         private static void InitializeMainThread()
         {
-            _ = CommandHelper.ProjectRoot;
+            CommandHelper.EnsureInitialized();
             UnityCliOperationStore.EnsureInitialized();
             UpdateCompilationState();
             var operation = UnityCliOperationStore.Read();
@@ -305,11 +305,9 @@ namespace UnityCliRunner
             return result != null && result.operationId == operationId;
         }
 
-        internal static void DeleteRefreshResult()
+        internal static void ResetRefreshResultCache()
         {
             s_LastRefreshResult = null;
-            string path = Path.Combine(GetTempDirectory(), RefreshResultFileName);
-            if (File.Exists(path)) File.Delete(path);
         }
 
         internal static void WriteInterruptedRefreshResult(string operationId, string message)

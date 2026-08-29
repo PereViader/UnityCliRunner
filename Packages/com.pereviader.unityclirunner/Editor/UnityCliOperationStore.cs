@@ -61,7 +61,6 @@ namespace UnityCliRunner
 
         static UnityCliOperationStore()
         {
-            EnsureInitialized();
         }
 
         internal static void EnsureInitialized()

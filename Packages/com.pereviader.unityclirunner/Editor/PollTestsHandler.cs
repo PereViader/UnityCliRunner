@@ -9,58 +9,62 @@ namespace UnityCliRunner
         public void Handle(string payload, StreamWriter writer)
         {
             string operationId = payload?.Trim();
-            // Final results are authoritative even during the short interval
-            // before the running marker is removed.
+            // 1. Matching terminal results are authoritative.
             if (File.Exists(RunTestsHandler.ResultsFilePath))
             {
                 try
                 {
                     string content = File.ReadAllText(RunTestsHandler.ResultsFilePath);
                     var res = JsonUtility.FromJson<UnityTestRunResult>(content);
-                    if (!string.IsNullOrEmpty(operationId) && res.runId != operationId)
+                    if (res != null && (string.IsNullOrEmpty(operationId) || res.runId == operationId))
                     {
-                        writer.WriteLine("IDLE");
+                        string skipStr = res.skipCount > 0 ? $", {res.skipCount} skipped" : "";
+                        if (res.success)
+                        {
+                            writer.WriteLine($"SUCCESS {res.passCount} passed{skipStr}");
+                        }
+                        else if (res.resultState == "Interrupted")
+                        {
+                            writer.WriteLine($"INTERRUPTION {res.message}");
+                        }
+                        else if (!string.IsNullOrEmpty(res.message))
+                        {
+                            writer.WriteLine($"FAILURE {res.message}");
+                        }
+                        else
+                        {
+                            writer.WriteLine($"FAILURE {res.failCount} failed, {res.passCount} passed{skipStr}");
+                        }
                         return;
-                    }
-                    string skipStr = res.skipCount > 0 ? $", {res.skipCount} skipped" : "";
-                    if (res.success)
-                    {
-                        writer.WriteLine($"SUCCESS {res.passCount} passed{skipStr}");
-                    }
-                    else if (res.resultState == "Interrupted")
-                    {
-                        writer.WriteLine($"INTERRUPTION {res.message}");
-                    }
-                    else if (!string.IsNullOrEmpty(res.message))
-                    {
-                        writer.WriteLine($"FAILURE {res.message}");
-                    }
-                    else
-                    {
-                        writer.WriteLine($"FAILURE {res.failCount} failed, {res.passCount} passed{skipStr}");
                     }
                 }
                 catch (Exception ex)
                 {
                     writer.WriteLine($"ERROR: {ex.Message}");
+                    return;
                 }
             }
-            else if (File.Exists(RunTestsHandler.RunningFilePath))
+
+            // 2. Active running state for this operation
+            if (File.Exists(RunTestsHandler.RunningFilePath))
             {
                 var running = RunTestsHandler.ReadRunningState();
-                writer.WriteLine(running != null && (string.IsNullOrEmpty(operationId) || running.runId == operationId) ? "RUNNING" : "IDLE");
+                if (running != null && (string.IsNullOrEmpty(operationId) || running.runId == operationId))
+                {
+                    writer.WriteLine("RUNNING");
+                    return;
+                }
+            }
+
+            // 3. Fallback to operation store for busy vs idle state
+            var operation = UnityCliOperationStore.Read();
+            if (operation != null && operation.operationId != operationId)
+            {
+                writer.WriteLine($"BUSY {operation.kind} {operation.operationId}");
             }
             else
             {
-                var operation = UnityCliOperationStore.Read();
-                if (operation != null && operation.operationId != operationId)
-                {
-                    writer.WriteLine($"BUSY {operation.kind} {operation.operationId}");
-                }
-                else
-                {
-                    writer.WriteLine("IDLE");
-                }
+                writer.WriteLine("IDLE");
             }
         }
     }
