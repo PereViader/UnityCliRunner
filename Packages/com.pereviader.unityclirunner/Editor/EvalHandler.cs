@@ -1,10 +1,7 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Text;
 using UnityEditor;
 using UnityEngine;
 
@@ -25,7 +22,7 @@ namespace UnityCliRunner
 
             string operationId = requestParts[0];
             string rawCode = requestParts[1].Trim();
-            var begin = UnityCliOperationStore.TryBegin(operationId, "eval", "Compiling", out var existing);
+            var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Eval, OperationStatus.Compiling, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
                 writer.WriteLine("ERROR: Missing or invalid operation id");
@@ -66,7 +63,7 @@ namespace UnityCliRunner
             }
 
             // Execute compiled assembly
-            UnityCliOperationStore.Update(operationId, "Executing");
+            UnityCliOperationStore.Update(operationId, OperationStatus.Executing);
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             bool success = false;
@@ -90,7 +87,7 @@ namespace UnityCliRunner
 
                 object result = execMethod.Invoke(null, null);
                 success = true;
-                formattedPayload = FormatResult(result, isVoidStatement);
+                formattedPayload = CommandHelper.FormatResult(result, isVoidStatement);
             }
             catch (TargetInvocationException tie)
             {
@@ -196,88 +193,6 @@ public static class __UnityCliEvalRunner
 }";
         }
 
-        public static string FormatResult(object result, bool isVoidStatement = false)
-        {
-            if (result == null)
-            {
-                return isVoidStatement ? null : "null";
-            }
-
-            if (result is bool b)
-            {
-                return b ? "true" : "false";
-            }
-
-            var type = result.GetType();
-
-            if (type.IsPrimitive || result is string || result is decimal)
-            {
-                return result.ToString();
-            }
-
-            if (type.IsEnum)
-            {
-                return result.ToString();
-            }
-
-            if (result is UnityEngine.Object unityObj && unityObj == null)
-            {
-                if (result is GameObject) return "null (GameObject)";
-                if (result is Component) return "null (Component)";
-                return $"null ({result.GetType().Name})";
-            }
-
-            // GameObject formatting
-            if (result is GameObject go)
-            {
-                if (go == null) return "null (GameObject)";
-                var compNames = go.GetComponents<Component>()
-                    .Where(c => c != null)
-                    .Select(c => c.GetType().Name);
-
-                return $"{go.name} (GameObject) [active: {go.activeSelf}, tag: \"{go.tag}\", layer: {go.layer}, components: {string.Join(", ", compNames)}]";
-            }
-
-            // Component formatting
-            if (result is Component comp)
-            {
-                if (comp == null) return "null (Component)";
-                string goName = comp.gameObject != null ? comp.gameObject.name : "null";
-                return $"{comp.GetType().Name} (Component on \"{goName}\")";
-            }
-
-            // Collections / IEnumerable
-            if (result is IEnumerable enumerable && !(result is string))
-            {
-                var items = new List<string>();
-                int count = 0;
-                foreach (var item in enumerable)
-                {
-                    count++;
-                    if (count > 100)
-                    {
-                        items.Add("... (truncated)");
-                        break;
-                    }
-                    items.Add(FormatResult(item));
-                }
-                return "[" + string.Join(", ", items) + "]";
-            }
-
-            // JsonUtility serialization fallback
-            try
-            {
-                string json = JsonUtility.ToJson(result, true);
-                if (!string.IsNullOrEmpty(json) && json.Trim() != "{}")
-                {
-                    return json;
-                }
-            }
-            catch { }
-
-            return result.ToString();
-        }
-
         public static void WriteEvalRunningState(string operationId)
         {
             try
@@ -337,7 +252,7 @@ public static class __UnityCliEvalRunner
         public static void MarkInterrupted(string message)
         {
             var operation = UnityCliOperationStore.Read();
-            if (operation == null || operation.kind != "eval")
+            if (operation == null || operation.kind != OperationKinds.Eval)
             {
                 return;
             }
@@ -349,7 +264,7 @@ public static class __UnityCliEvalRunner
 
         private static void FinishEval(string operationId, bool success, string message, double duration, string payload)
         {
-            if (!UnityCliOperationStore.IsOwnedBy(operationId, "eval"))
+            if (!UnityCliOperationStore.IsOwnedBy(operationId, OperationKinds.Eval))
             {
                 return;
             }

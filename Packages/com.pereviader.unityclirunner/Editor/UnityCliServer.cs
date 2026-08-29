@@ -81,17 +81,17 @@ namespace UnityCliRunner
             const string message = "Unity editor restarted before the operation completed.";
             switch (operation.kind)
             {
-                case "test":
+                case OperationKinds.Test:
                     RunTestsHandler.WriteInterruptedResult(message);
                     break;
-                case "execute":
+                case OperationKinds.Execute:
                     ExecuteMethodHandler.MarkInterrupted(message);
                     break;
-                case "eval":
+                case OperationKinds.Eval:
                     EvalHandler.MarkInterrupted(message);
                     break;
-                case "refresh":
-                case "recompile":
+                case OperationKinds.Refresh:
+                case OperationKinds.Recompile:
                     UnityCliCompilationTracker.WriteInterruptedRefreshResult(operation.operationId, message);
                     break;
                 default:
@@ -123,10 +123,10 @@ namespace UnityCliRunner
             var operation = UnityCliOperationStore.Read();
             if (operation != null)
             {
-                UnityCliOperationStore.Update(operation.operationId, "Reloading");
+                UnityCliOperationStore.Update(operation.operationId, OperationStatus.Reloading);
             }
             UnityCliCompilationTracker.WriteActiveErrorsToFile();
-            RunTestsHandler.MarkTransportInterruption("Reloading");
+            RunTestsHandler.MarkTransportInterruption(OperationStatus.Reloading);
             ExecuteMethodHandler.MarkInterrupted("Command interrupted by Unity recompilation outside the Unity CLI workflow.");
             EvalHandler.MarkInterrupted("Command interrupted by Unity recompilation outside the Unity CLI workflow.");
             StopServer();
@@ -137,9 +137,9 @@ namespace UnityCliRunner
             var operation = UnityCliOperationStore.Read();
             if (operation != null)
             {
-                UnityCliOperationStore.Update(operation.operationId, "ShuttingDown");
+                UnityCliOperationStore.Update(operation.operationId, OperationStatus.ShuttingDown);
             }
-            RunTestsHandler.MarkTransportInterruption("ShuttingDown");
+            RunTestsHandler.MarkTransportInterruption(OperationStatus.ShuttingDown);
             ExecuteMethodHandler.MarkInterrupted("Command interrupted by Unity editor shutdown.");
             EvalHandler.MarkInterrupted("Command interrupted by Unity editor shutdown.");
             StopServer();

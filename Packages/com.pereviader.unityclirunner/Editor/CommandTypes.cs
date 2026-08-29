@@ -3,6 +3,30 @@ using System.Collections.Generic;
 
 namespace UnityCliRunner
 {
+    internal static class OperationKinds
+    {
+        public const string Refresh = "refresh";
+        public const string Recompile = "recompile";
+        public const string Test = "test";
+        public const string Execute = "execute";
+        public const string Eval = "eval";
+    }
+
+    internal static class OperationStatus
+    {
+        public const string Queued = "Queued";
+        public const string Executing = "Executing";
+        public const string Compiling = "Compiling";
+        public const string Refreshing = "Refreshing";
+        public const string Recompiling = "Recompiling";
+        public const string Requested = "Requested";
+        public const string WaitingForUnity = "WaitingForUnity";
+        public const string Reloading = "Reloading";
+        public const string ShuttingDown = "ShuttingDown";
+        public const string Interrupted = "Interrupted";
+        public const string Cancelled = "Cancelled";
+    }
+
     [Serializable]
     public class FailedTestInfo
     {

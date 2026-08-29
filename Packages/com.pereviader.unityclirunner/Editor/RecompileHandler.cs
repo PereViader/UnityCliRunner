@@ -16,7 +16,7 @@ namespace UnityCliRunner
                 writer.WriteLine("RECOMPILING");
                 return;
             }
-            var begin = UnityCliOperationStore.TryBegin(operationId, "recompile", "Requested", out var existing);
+            var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Recompile, OperationStatus.Requested, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
                 writer.WriteLine("ERROR: Missing or invalid operation id");
@@ -40,7 +40,7 @@ namespace UnityCliRunner
 
             UnityCliCompilationTracker.RefreshPending = true;
             UnityCliCompilationTracker.CompilationRequested = true;
-            UnityCliOperationStore.Update(operationId, "Recompiling");
+            UnityCliOperationStore.Update(operationId, OperationStatus.Recompiling);
             try
             {
                 Debug.Log("UnityCliRunner: Triggering force recompilation via CompilationPipeline.RequestScriptCompilation()");

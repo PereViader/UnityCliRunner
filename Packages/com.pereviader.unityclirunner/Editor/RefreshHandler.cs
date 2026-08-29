@@ -16,7 +16,7 @@ namespace UnityCliRunner
                 writer.WriteLine("REFRESHING");
                 return;
             }
-            var begin = UnityCliOperationStore.TryBegin(operationId, "refresh", "Requested", out var existing);
+            var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Refresh, OperationStatus.Requested, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
                 writer.WriteLine("ERROR: Missing or invalid operation id");
@@ -44,7 +44,7 @@ namespace UnityCliRunner
 
             UnityCliCompilationTracker.RefreshPending = true;
             UnityCliCompilationTracker.CompilationRequested = true;
-            UnityCliOperationStore.Update(operationId, "Refreshing");
+            UnityCliOperationStore.Update(operationId, OperationStatus.Refreshing);
             try
             {
                 Debug.Log("UnityCliRunner: Triggering AssetDatabase.Refresh()");

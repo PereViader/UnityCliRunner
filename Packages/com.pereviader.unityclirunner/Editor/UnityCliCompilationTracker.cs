@@ -70,7 +70,7 @@ namespace UnityCliRunner
             var operation = UnityCliOperationStore.Read();
             LoadRefreshResultCache();
             bool resumingCompilation = operation != null &&
-                (operation.kind == "refresh" || operation.kind == "recompile") &&
+                (operation.kind == OperationKinds.Refresh || operation.kind == OperationKinds.Recompile) &&
                 operation.editorSessionId == UnityCliOperationStore.EditorSessionId;
             if (!resumingCompilation)
             {
@@ -236,14 +236,14 @@ namespace UnityCliRunner
         internal static void ObserveOperationUntilSettled()
         {
             var operation = UnityCliOperationStore.Read();
-            if (operation == null || (operation.kind != "refresh" && operation.kind != "recompile"))
+            if (operation == null || (operation.kind != OperationKinds.Refresh && operation.kind != OperationKinds.Recompile))
             {
                 s_ObservedOperationId = null;
                 s_SettledUpdateCount = 0;
                 return;
             }
 
-            if (operation.editorSessionId != UnityCliOperationStore.EditorSessionId || operation.status == "Interrupted")
+            if (operation.editorSessionId != UnityCliOperationStore.EditorSessionId || operation.status == OperationStatus.Interrupted)
             {
                 return;
             }
@@ -257,7 +257,7 @@ namespace UnityCliRunner
             if (s_RefreshPending || s_CompilationRequested || EditorApplication.isCompiling || EditorApplication.isUpdating)
             {
                 s_SettledUpdateCount = 0;
-                UnityCliOperationStore.Update(operation.operationId, "WaitingForUnity");
+                UnityCliOperationStore.Update(operation.operationId, OperationStatus.WaitingForUnity);
                 return;
             }
 

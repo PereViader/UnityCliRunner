@@ -1,8 +1,11 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
-using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -135,6 +138,137 @@ namespace UnityCliRunner
                 args.Add(current.ToString());
             }
             return args.ToArray();
+        }
+
+        public static object ConvertParameter(string rawArg, Type targetType)
+        {
+            if (targetType == typeof(string))
+            {
+                return rawArg;
+            }
+
+            if (rawArg == null)
+            {
+                return targetType.IsValueType ? Activator.CreateInstance(targetType) : null;
+            }
+
+            // Support Nullable<T>
+            Type underlying = Nullable.GetUnderlyingType(targetType);
+            if (underlying != null)
+            {
+                if (rawArg.Equals("null", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(rawArg))
+                {
+                    return null;
+                }
+                return ConvertParameter(rawArg, underlying);
+            }
+
+            // Support Enums (by name or integral value)
+            if (targetType.IsEnum)
+            {
+                return Enum.Parse(targetType, rawArg, true);
+            }
+
+            // Support Guid
+            if (targetType == typeof(Guid))
+            {
+                return Guid.Parse(rawArg);
+            }
+
+            // Support Primitive & Value Types
+            if (targetType == typeof(int)) return int.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(float)) return float.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(double)) return double.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(bool)) return bool.Parse(rawArg);
+            if (targetType == typeof(long)) return long.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(uint)) return uint.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(ulong)) return ulong.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(byte)) return byte.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(sbyte)) return sbyte.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(short)) return short.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(ushort)) return ushort.Parse(rawArg, CultureInfo.InvariantCulture);
+            if (targetType == typeof(char)) return rawArg.Length > 0 ? rawArg[0] : '\0';
+            if (targetType == typeof(decimal)) return decimal.Parse(rawArg, CultureInfo.InvariantCulture);
+
+            // Fallback for complex structs/objects via JsonUtility
+            return JsonUtility.FromJson(rawArg, targetType);
+        }
+
+        public static string FormatResult(object result, bool isVoidStatement = false, bool prettyPrint = true)
+        {
+            if (result == null)
+            {
+                return isVoidStatement ? null : "null";
+            }
+
+            if (result is bool b)
+            {
+                return b ? "true" : "false";
+            }
+
+            var type = result.GetType();
+
+            if (type.IsPrimitive || result is string || result is decimal || type.IsEnum)
+            {
+                return result.ToString();
+            }
+
+            if (result is UnityEngine.Object unityObj && unityObj == null)
+            {
+                if (result is GameObject) return "null (GameObject)";
+                if (result is Component) return "null (Component)";
+                return $"null ({result.GetType().Name})";
+            }
+
+            // GameObject formatting
+            if (result is GameObject go)
+            {
+                if (go == null) return "null (GameObject)";
+                var compNames = go.GetComponents<Component>()
+                    .Where(c => c != null)
+                    .Select(c => c.GetType().Name);
+
+                return $"{go.name} (GameObject) [active: {go.activeSelf}, tag: \"{go.tag}\", layer: {go.layer}, components: {string.Join(", ", compNames)}]";
+            }
+
+            // Component formatting
+            if (result is Component comp)
+            {
+                if (comp == null) return "null (Component)";
+                string goName = comp.gameObject != null ? comp.gameObject.name : "null";
+                return $"{comp.GetType().Name} (Component on \"{goName}\")";
+            }
+
+            // Collections / IEnumerable
+            if (result is IEnumerable enumerable && !(result is string))
+            {
+                var items = new List<string>();
+                int count = 0;
+                foreach (var item in enumerable)
+                {
+                    count++;
+                    if (count > 100)
+                    {
+                        items.Add("... (truncated)");
+                        break;
+                    }
+                    items.Add(FormatResult(item, false, prettyPrint));
+                }
+                return "[" + string.Join(", ", items) + "]";
+            }
+
+            // JsonUtility serialization fallback
+            try
+            {
+                string json = JsonUtility.ToJson(result, prettyPrint);
+                if (!string.IsNullOrEmpty(json) && json.Trim() != "{}")
+                {
+                    return json;
+                }
+            }
+            catch { }
+
+            return result.ToString();
         }
 
         public static Type FindType(string fullName)

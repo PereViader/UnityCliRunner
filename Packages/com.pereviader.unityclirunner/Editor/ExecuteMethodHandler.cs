@@ -74,7 +74,7 @@ namespace UnityCliRunner
                 return;
             }
 
-            var begin = UnityCliOperationStore.TryBegin(operationId, "execute", "Executing", out var existing);
+            var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Execute, OperationStatus.Executing, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
                 writer.WriteLine("ERROR: Missing or invalid operation id");
@@ -146,38 +146,7 @@ namespace UnityCliRunner
                         Type paramType = paramInfos[i].ParameterType;
                         try
                         {
-                            if (paramType == typeof(string))
-                            {
-                                convertedParams[i] = rawArg;
-                            }
-                            else if (paramType == typeof(int))
-                            {
-                                convertedParams[i] = int.Parse(rawArg);
-                            }
-                            else if (paramType == typeof(float))
-                            {
-                                convertedParams[i] = float.Parse(rawArg, System.Globalization.CultureInfo.InvariantCulture);
-                            }
-                            else if (paramType == typeof(double))
-                            {
-                                convertedParams[i] = double.Parse(rawArg, System.Globalization.CultureInfo.InvariantCulture);
-                            }
-                            else if (paramType == typeof(bool))
-                            {
-                                convertedParams[i] = bool.Parse(rawArg);
-                            }
-                            else if (paramType == typeof(long))
-                            {
-                                convertedParams[i] = long.Parse(rawArg);
-                            }
-                            else if (paramType == typeof(decimal))
-                            {
-                                convertedParams[i] = decimal.Parse(rawArg, System.Globalization.CultureInfo.InvariantCulture);
-                            }
-                            else
-                            {
-                                convertedParams[i] = JsonUtility.FromJson(rawArg, paramType);
-                            }
+                            convertedParams[i] = CommandHelper.ConvertParameter(rawArg, paramType);
                         }
                         catch (Exception ex)
                         {
@@ -191,22 +160,7 @@ namespace UnityCliRunner
 
                 if (method.ReturnType != typeof(void))
                 {
-                    if (result == null)
-                    {
-                        payload = "null";
-                    }
-                    else if (result is bool boolVal)
-                    {
-                        payload = boolVal ? "true" : "false";
-                    }
-                    else if (result.GetType().IsPrimitive || result is string || result is decimal)
-                    {
-                        payload = result.ToString();
-                    }
-                    else
-                    {
-                        payload = JsonUtility.ToJson(result);
-                    }
+                    payload = CommandHelper.FormatResult(result, false, false);
                 }
             }
             catch (TargetInvocationException tie)
@@ -222,7 +176,7 @@ namespace UnityCliRunner
             finally
             {
                 stopwatch.Stop();
-                if (UnityCliOperationStore.IsOwnedBy(operationId, "execute"))
+                if (UnityCliOperationStore.IsOwnedBy(operationId, OperationKinds.Execute))
                 {
                     try
                     {
@@ -252,7 +206,7 @@ namespace UnityCliRunner
             string runningPath = UnityCliPaths.ExecuteRunningFile;
             string resultsPath = UnityCliPaths.ExecuteResultFile;
             var operation = UnityCliOperationStore.Read();
-            if (operation == null || operation.kind != "execute")
+            if (operation == null || operation.kind != OperationKinds.Execute)
             {
                 return;
             }
