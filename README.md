@@ -159,14 +159,16 @@ bash unitycli.sh eval "Mathf.Sqrt(64f)"
 # Evaluate multi-statement blocks with return
 bash unitycli.sh eval "var count = GameObject.FindObjectsOfType<Camera>().Length; return count;"
 
-# Execute void statements or method calls
-bash unitycli.sh eval "Debug.Log('Hello from CLI');"
+# Execute void statements or method calls (wrap in single quotes so C# double quotes are preserved)
+bash unitycli.sh eval 'Debug.Log("Hello from CLI");'
 bash unitycli.sh eval "System.GC.Collect()"
 
 # Inspect GameObjects, Components, and Collections
 bash unitycli.sh eval "new int[] { 10, 20, 30 }"
-bash unitycli.sh eval "GameObject.Find('Main Camera')"
+bash unitycli.sh eval 'GameObject.Find("Main Camera")'
 ```
+
+> **Shell Quoting Note**: In C#, string literals require double quotes (`"..."`). When invoking from Bash, wrap the snippet in single quotes (`'...'`) so C# double quotes are preserved. When invoking from **PowerShell**, use triple quotes inside single quotes (e.g. `bash unitycli.sh eval 'Debug.Log("""Hello""");'`) or the stop-parsing token `bash --% unitycli.sh eval 'Debug.Log("Hello");'` to prevent PowerShell from stripping quotes.
 
 #### Features:
 - **In-Memory Compilation**: Executes immediately without domain reloads or disk file generation.
