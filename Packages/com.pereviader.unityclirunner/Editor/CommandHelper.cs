@@ -96,15 +96,35 @@ namespace UnityCliRunner
                 char c = commandLine[i];
                 if (isEscaped)
                 {
-                    current.Append(c);
+                    switch (c)
+                    {
+                        case 'n': current.Append('\n'); break;
+                        case 'r': current.Append('\r'); break;
+                        case 't': current.Append('\t'); break;
+                        case '"': current.Append('"'); break;
+                        case '\\': current.Append('\\'); break;
+                        default:
+                            current.Append('\\');
+                            current.Append(c);
+                            break;
+                    }
                     isEscaped = false;
                 }
                 else if (c == '\\')
                 {
-                    if (i + 1 < commandLine.Length && (commandLine[i + 1] == '"' || commandLine[i + 1] == '\\'))
+                    if (i + 1 < commandLine.Length)
                     {
-                        isEscaped = true;
-                        inArg = true;
+                        char next = commandLine[i + 1];
+                        if (next == '"' || next == '\\' || next == 'n' || next == 'r' || next == 't')
+                        {
+                            isEscaped = true;
+                            inArg = true;
+                        }
+                        else
+                        {
+                            current.Append(c);
+                            inArg = true;
+                        }
                     }
                     else
                     {
@@ -309,13 +329,6 @@ namespace UnityCliRunner
             if (matchCount > 1)
             {
                 throw new AmbiguousMatchException($"Ambiguous match: multiple static methods named '{methodName}' with {paramCount} parameters found in type '{type.FullName}'.");
-            }
-            foreach (var m in methods)
-            {
-                if (m.Name == methodName)
-                {
-                    return m;
-                }
             }
             return null;
         }

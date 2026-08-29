@@ -314,10 +314,17 @@ ONLINE_CASES=(
   "TestExecuteReturnsInt"
   "TestExecuteReturnsObject"
   "TestExecuteParams"
+  "TestExecuteOverloads"
+  "TestExecuteParamCountMismatch"
+  "TestExecuteAmbiguous"
+  "TestExecuteParamConversionFailure"
+  "TestExecuteReturnsNull"
+  "TestExecuteMultiLineParam"
   "TestEvalSuccess"
   "TestEvalExpression"
   "TestEvalSyntaxError"
   "TestEvalMultiStatement"
+  "TestEvalLiteralNewlines"
   "TestEvalVoidStatement"
   "TestEvalVoidMethod"
   "TestEvalNull"
@@ -326,6 +333,7 @@ ONLINE_CASES=(
   "TestEvalCollection"
   "TestEvalException"
   "TestFilterCategory"
+  "TestFilterByName"
   "TestBackgroundStatusOnline"
   "TestBackgroundStartAlreadyRunning"
   "TestRecompile"
@@ -338,6 +346,11 @@ AUTOSTART_CASES=(
   "TestBackgroundStart"
   "TestBackgroundStartAlreadyRunning"
   "TestEvalAutostart"
+  "TestCliValidationInvalidSubcommand"
+  "TestCliValidationExtraArgs"
+  "TestCliValidationMissingFilter"
+  "TestCliValidationMissingMethod"
+  "TestCliValidationMissingEval"
 )
 
 has_matching_cases() {
@@ -485,12 +498,19 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
   run_integration_case "TestExecuteReturnsInt" "executemethod Tests.DummyExecuteClass.Something" "online"
   run_integration_case "TestExecuteReturnsObject" "executemethod Tests.DummyExecuteClass.Something" "online"
   run_integration_case "TestExecuteParams" "executemethod Tests.DummyExecuteClass.ParamsMethod 4 3.5 hello {\"Value\":42}" "online"
+  run_integration_case "TestExecuteOverloads" "executemethod Tests.DummyExecuteClass.OverloadMethod 42 hello true" "online"
+  run_integration_case "TestExecuteParamCountMismatch" "executemethod Tests.DummyExecuteClass.ExactTwo 42" "online"
+  run_integration_case "TestExecuteAmbiguous" "executemethod Tests.DummyExecuteClass.Ambiguous 42" "online"
+  run_integration_case "TestExecuteParamConversionFailure" "executemethod Tests.DummyExecuteClass.NumberMethod not_a_number" "online"
+  run_integration_case "TestExecuteReturnsNull" "executemethod Tests.DummyExecuteClass.NullMethod" "online"
+  run_integration_case "TestExecuteMultiLineParam" "executemethod Tests.DummyExecuteClass.EchoMultiLine \"line1\nline2\nline3\"" "online"
 
   # eval tests (online)
   run_integration_case "TestEvalSuccess" "eval 1 + 1" "online"
   run_integration_case "TestEvalExpression" "eval Mathf.Sqrt(16f)" "online"
   run_integration_case "TestEvalSyntaxError" "eval this is invalid syntax @@" "online"
   run_integration_case "TestEvalMultiStatement" "eval int a = 10; int b = 20; return a + b;" "online"
+  run_integration_case "TestEvalLiteralNewlines" "eval \"int x = 10;\nint y = 20;\nreturn x + y;\"" "online"
   run_integration_case "TestEvalVoidStatement" "eval UnityEngine.Debug.Log(42);" "online"
   run_integration_case "TestEvalVoidMethod" "eval System.GC.Collect()" "online"
   run_integration_case "TestEvalNull" "eval (object)null" "online"
@@ -501,6 +521,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
 
   # filter test (online)
   run_integration_case "TestFilterCategory" "test --editmode --category !LongRunning" "online"
+  run_integration_case "TestFilterByName" "test --editmode --filter SpecificTargetTest" "online"
 
   # status/start tests (online)
   run_integration_case "TestBackgroundStatusOnline" "status" "online"
@@ -538,6 +559,13 @@ if has_matching_cases "${AUTOSTART_CASES[@]}"; then
 
   # 6. Stop Unity.
   bash ./unitycli.sh stop
+
+  # 7. CLI validation tests (fail-fast without starting Unity)
+  run_integration_case "TestCliValidationInvalidSubcommand" "invalid_subcommand" "autostart"
+  run_integration_case "TestCliValidationExtraArgs" "refresh unexpected_arg" "autostart"
+  run_integration_case "TestCliValidationMissingFilter" "test --filter" "autostart"
+  run_integration_case "TestCliValidationMissingMethod" "executemethod" "autostart"
+  run_integration_case "TestCliValidationMissingEval" "eval" "autostart"
 fi
 
 echo "============================================="

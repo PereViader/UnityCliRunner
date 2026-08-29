@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 
@@ -21,7 +22,7 @@ namespace UnityCliRunner
             }
 
             string operationId = requestParts[0];
-            string rawCode = requestParts[1].Trim();
+            string rawCode = UnescapeCode(requestParts[1].Trim());
             var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Eval, OperationStatus.Compiling, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
@@ -58,7 +59,8 @@ namespace UnityCliRunner
             {
                 string combinedErrors = string.Join("\n", errors);
                 FinishEval(operationId, false, combinedErrors, 0, null);
-                writer.WriteLine($"FAILURE\n{combinedErrors}");
+                string singleLineErrors = string.Join(" | ", errors);
+                writer.WriteLine($"FAILURE {singleLineErrors}");
                 return;
             }
 
@@ -105,9 +107,9 @@ namespace UnityCliRunner
 
             if (success)
             {
-                if (formattedPayload != null)
+                if (!string.IsNullOrEmpty(formattedPayload))
                 {
-                    writer.WriteLine($"SUCCESS\n{formattedPayload}");
+                    writer.WriteLine($"SUCCESS {formattedPayload}");
                 }
                 else
                 {
@@ -116,8 +118,59 @@ namespace UnityCliRunner
             }
             else
             {
-                writer.WriteLine($"FAILURE\n{errorMsg}");
+                writer.WriteLine($"FAILURE {errorMsg}");
             }
+        }
+
+        private static string UnescapeCode(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+            var sb = new StringBuilder(input.Length);
+            bool isEscaped = false;
+            for (int i = 0; i < input.Length; i++)
+            {
+                char c = input[i];
+                if (isEscaped)
+                {
+                    switch (c)
+                    {
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        case '\\': sb.Append('\\'); break;
+                        case '"': sb.Append('"'); break;
+                        default:
+                            sb.Append('\\');
+                            sb.Append(c);
+                            break;
+                    }
+                    isEscaped = false;
+                }
+                else if (c == '\\')
+                {
+                    if (i + 1 < input.Length)
+                    {
+                        char next = input[i + 1];
+                        if (next == 'n' || next == 'r' || next == 't' || next == '\\' || next == '"')
+                        {
+                            isEscaped = true;
+                        }
+                        else
+                        {
+                            sb.Append(c);
+                        }
+                    }
+                    else
+                    {
+                        sb.Append(c);
+                    }
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
 
         private static bool TryCompileSnippet(string rawCode, out byte[] assemblyBytes, out bool isVoidStatement, out List<string> errors)

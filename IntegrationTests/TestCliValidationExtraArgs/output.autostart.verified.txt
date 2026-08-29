@@ -1,0 +1,19 @@
+Error: refresh does not accept extra arguments
+Usage: PROJECT_PATH/Packages/com.pereviader.unityclirunner/CLI~/unitycli.sh <command> [options]
+Commands:
+  start <mode>            Start a background Unity instance (mode: batchmode | interactive)
+  stop                    Stop the background Unity instance
+  status                  Check status of the background Unity instance
+  refresh                 Trigger AssetDatabase refresh and print compiler diagnostics
+  recompile               Force a full C# recompilation and print compiler diagnostics
+  test [options]          Run tests (defaults to running both EditMode and PlayMode)
+    --playmode            Run PlayMode tests
+    --editmode            Run EditMode tests
+    --filter <filter>     Filter tests by name (regex/substring)
+    --category <category> Filter tests by category
+  executemethod <method> [args...] Execute a custom static method (optionally with parameters)
+                          (e.g., Namespace.Class.Method 4 3 "{/"Value/":4}")
+  eval <code>             Evaluate a live C# expression or script dynamically
+                          (e.g., "Application.unityVersion" or "1 + 1")
+  -h, --help              Show this help message
+EXIT_CODE: 1
