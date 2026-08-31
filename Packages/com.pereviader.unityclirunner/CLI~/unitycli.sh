@@ -1116,7 +1116,11 @@ run_online_tests() {
     fi
 
     if [ "$reload_related" = false ]; then
-      echo "Unity Response: $response"
+      if [[ "$response" == BUSY* ]]; then
+        echo "Error: Unity is busy: $response" >&2
+      else
+        echo "Unity Response: $response"
+      fi
       return 1
     fi
 
@@ -1240,7 +1244,11 @@ run_online_method() {
       return 1
     fi
   fi
-  if [[ "$response" == ERROR* ]] || [[ "$response" == BUSY* ]] || [[ "$response" == FAILURE* ]]; then
+  if [[ "$response" == BUSY* ]]; then
+    echo "Error: Unity is busy: $response" >&2
+    return 1
+  fi
+  if [[ "$response" == ERROR* ]] || [[ "$response" == FAILURE* ]]; then
     echo "Error starting method execution: $response"
     return 1
   fi
@@ -1370,11 +1378,15 @@ run_online_eval() {
     fi
     return 0
   else
-    local err="${response#FAILURE}"
-    err="${err#ERROR:}"
-    err="${err#"${err%%[![:space:]]*}"}"
-    err="${err%"${err##*[![:space:]]}"}"
-    echo "$err" >&2
+    if [[ "$response" == BUSY* ]]; then
+      echo "Error: Unity is busy: $response" >&2
+    else
+      local err="${response#FAILURE}"
+      err="${err#ERROR:}"
+      err="${err#"${err%%[![:space:]]*}"}"
+      err="${err%"${err##*[![:space:]]}"}"
+      echo "$err" >&2
+    fi
     return 1
   fi
 }
@@ -1587,6 +1599,16 @@ if [ "$IS_RUNNING" = true ]; then
     echo "Detected running Unity instance (via UnityLockfile)."
   fi
   
+  # Check if Unity is busy with another operation before triggering refresh/recompile
+  busy_check_id=$(new_operation_id)
+  busy_response=""
+  if busy_response=$(send_socket_cmd "POLL_REFRESH $busy_check_id" 2 2>/dev/null); then
+    if [[ "$busy_response" == BUSY* ]]; then
+      echo "Error: Unity is busy: $busy_response" >&2
+      exit 1
+    fi
+  fi
+
   # Step 1: Trigger AssetDatabase refresh or recompile
   refresh_operation_id=$(new_operation_id)
   if [ "$SUBCOMMAND" = "recompile" ]; then
@@ -1600,7 +1622,11 @@ if [ "$IS_RUNNING" = true ]; then
           break
         fi
         echo ""
-        echo "Error: Unity rejected recompilation: $trigger_response" >&2
+        if [[ "$trigger_response" == BUSY* ]]; then
+          echo "Error: Unity is busy: $trigger_response" >&2
+        else
+          echo "Error: Unity rejected recompilation: $trigger_response" >&2
+        fi
         exit 1
       fi
 
@@ -1631,7 +1657,11 @@ if [ "$IS_RUNNING" = true ]; then
           break
         fi
         echo ""
-        echo "Error: Unity rejected refresh: $trigger_response" >&2
+        if [[ "$trigger_response" == BUSY* ]]; then
+          echo "Error: Unity is busy: $trigger_response" >&2
+        else
+          echo "Error: Unity rejected refresh: $trigger_response" >&2
+        fi
         exit 1
       fi
 

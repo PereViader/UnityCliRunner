@@ -334,6 +334,7 @@ ONLINE_CASES=(
   "TestRecompile"
   "TestRefresh"
   "TestPollRefreshNonBlocking"
+  "TestBusyDetectionBeforeRefresh"
 )
 
 AUTOSTART_CASES=(
@@ -535,6 +536,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
   # refresh/recompile tests (online)
   run_integration_case "TestRefresh" "refresh" "online"
   run_integration_case "TestPollRefreshNonBlocking" "executemethod Tests.DummyExecuteClass.PollRefreshWhileBusy" "online"
+  run_integration_case "TestBusyDetectionBeforeRefresh" "executemethod Tests.DummyExecuteClass.TestBusyDetection" "online"
   run_integration_case "TestRecompile" "recompile" "online"
 
   # Close Unity
