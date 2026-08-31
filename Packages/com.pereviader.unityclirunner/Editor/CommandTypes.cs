@@ -62,6 +62,13 @@ namespace UnityCliRunner
     }
 
     [Serializable]
+    public class ConsoleLogEntry
+    {
+        public string message;
+        public string logType;
+    }
+
+    [Serializable]
     public class UnityRefreshResult
     {
         public string operationId;
@@ -79,6 +86,7 @@ namespace UnityCliRunner
         public string message;
         public double duration;
         public string payload;
+        public List<ConsoleLogEntry> logs;
     }
 
     [Serializable]
@@ -90,5 +98,6 @@ namespace UnityCliRunner
         public string message;
         public double duration;
         public string payload;
+        public List<ConsoleLogEntry> logs;
     }
 }

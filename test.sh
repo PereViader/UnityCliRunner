@@ -318,6 +318,7 @@ ONLINE_CASES=(
   "TestExecuteParamConversionFailure"
   "TestExecuteReturnsNull"
   "TestExecuteMultiLineParam"
+  "TestExecuteConsoleLogs"
   "TestEvalSuccess"
   "TestEvalExpression"
   "TestEvalSyntaxError"
@@ -325,6 +326,7 @@ ONLINE_CASES=(
   "TestEvalLiteralNewlines"
   "TestEvalVoidStatement"
   "TestEvalVoidMethod"
+  "TestEvalConsoleLogs"
   "TestEvalNull"
   "TestEvalDestroyedObject"
   "TestEvalGameObject"
@@ -532,6 +534,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
   run_integration_case "TestExecuteParamConversionFailure" "executemethod Tests.DummyExecuteClass.NumberMethod not_a_number" "online"
   run_integration_case "TestExecuteReturnsNull" "executemethod Tests.DummyExecuteClass.NullMethod" "online"
   run_integration_case "TestExecuteMultiLineParam" "executemethod Tests.DummyExecuteClass.EchoMultiLine \"line1\nline2\nline3\"" "online"
+  run_integration_case "TestExecuteConsoleLogs" "executemethod Tests.DummyExecuteClass.LogAndReturn" "online"
 
   # eval tests (online)
   run_integration_case "TestEvalSuccess" "eval 1 + 1" "online"
@@ -541,6 +544,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
   run_integration_case "TestEvalLiteralNewlines" "eval \"int x = 10;\nint y = 20;\nreturn x + y;\"" "online"
   run_integration_case "TestEvalVoidStatement" "eval UnityEngine.Debug.Log(42);" "online"
   run_integration_case "TestEvalVoidMethod" "eval System.GC.Collect()" "online"
+  run_integration_case "TestEvalConsoleLogs" "eval UnityEngine.Debug.Log(\"info log\"); UnityEngine.Debug.LogWarning(\"warn log\"); return 100;" "online"
   run_integration_case "TestEvalNull" "eval (object)null" "online"
   run_integration_case "TestEvalDestroyedObject" "eval GameObject go = new GameObject(\"TempObj\"); GameObject.DestroyImmediate(go); return go;" "online"
   run_integration_case "TestEvalGameObject" "eval new GameObject(\"SampleEntity\")" "online"

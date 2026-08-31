@@ -123,55 +123,66 @@ namespace UnityCliRunner
             bool success = false;
             string errorMsg = "";
             string payload = null;
+            List<ConsoleLogEntry> logs = null;
 
             try
             {
-                Debug.Log($"UnityCliRunner: Executing method '{method.DeclaringType.FullName}.{method.Name}'...");
-
-                var paramInfos = method.GetParameters();
-                int expectedCount = paramInfos.Length;
-                int providedCount = stringParams != null ? stringParams.Length : 0;
-                if (expectedCount != providedCount)
+                using (var logCapture = new ConsoleLogCapture())
                 {
-                    throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects {expectedCount} parameters, but {providedCount} were provided.");
-                }
-
-                object[] convertedParams = null;
-                if (expectedCount > 0)
-                {
-                    convertedParams = new object[expectedCount];
-                    for (int i = 0; i < expectedCount; i++)
+                    try
                     {
-                        string rawArg = stringParams[i];
-                        Type paramType = paramInfos[i].ParameterType;
-                        try
+                        Debug.Log($"UnityCliRunner: Executing method '{method.DeclaringType.FullName}.{method.Name}'...");
+
+                        var paramInfos = method.GetParameters();
+                        int expectedCount = paramInfos.Length;
+                        int providedCount = stringParams != null ? stringParams.Length : 0;
+                        if (expectedCount != providedCount)
                         {
-                            convertedParams[i] = CommandHelper.ConvertParameter(rawArg, paramType);
+                            throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects {expectedCount} parameters, but {providedCount} were provided.");
                         }
-                        catch (Exception ex)
+
+                        object[] convertedParams = null;
+                        if (expectedCount > 0)
                         {
-                            throw new ArgumentException($"Failed to convert parameter {i} ('{rawArg}') to type '{paramType.FullName}': {ex.Message}", ex);
+                            convertedParams = new object[expectedCount];
+                            for (int i = 0; i < expectedCount; i++)
+                            {
+                                string rawArg = stringParams[i];
+                                Type paramType = paramInfos[i].ParameterType;
+                                try
+                                {
+                                    convertedParams[i] = CommandHelper.ConvertParameter(rawArg, paramType);
+                                }
+                                catch (Exception ex)
+                                {
+                                    throw new ArgumentException($"Failed to convert parameter {i} ('{rawArg}') to type '{paramType.FullName}': {ex.Message}", ex);
+                                }
+                            }
+                        }
+
+                        object result = method.Invoke(null, convertedParams);
+                        success = true;
+
+                        if (method.ReturnType != typeof(void))
+                        {
+                            payload = CommandHelper.FormatResult(result, false, false);
                         }
                     }
+                    catch (TargetInvocationException tie)
+                    {
+                        errorMsg = tie.InnerException != null ? tie.InnerException.ToString() : tie.ToString();
+                        Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
+                    }
+                    catch (Exception ex)
+                    {
+                        errorMsg = ex.ToString();
+                        Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
+                    }
+                    finally
+                    {
+                        logs = logCapture.GetLogs();
+                    }
                 }
-
-                object result = method.Invoke(null, convertedParams);
-                success = true;
-
-                if (method.ReturnType != typeof(void))
-                {
-                    payload = CommandHelper.FormatResult(result, false, false);
-                }
-            }
-            catch (TargetInvocationException tie)
-            {
-                errorMsg = tie.InnerException != null ? tie.InnerException.ToString() : tie.ToString();
-                Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
-            }
-            catch (Exception ex)
-            {
-                errorMsg = ex.ToString();
-                Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
             }
             finally
             {
@@ -186,7 +197,8 @@ namespace UnityCliRunner
                             success = success,
                             message = errorMsg,
                             duration = stopwatch.Elapsed.TotalSeconds,
-                            payload = payload
+                            payload = payload,
+                            logs = logs
                         };
                         string json = JsonUtility.ToJson(runResult, true);
                         UnityCliOperationStore.WriteAtomic(resultsPath, json, operationId);

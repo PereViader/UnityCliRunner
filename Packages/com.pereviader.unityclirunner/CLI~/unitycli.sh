@@ -1071,6 +1071,19 @@ parse_and_handle_execute_results_file() {
     open(my $f, "<:utf8", $ARGV[0]) or exit 2;
     my $data = decode_json(<$f>);
     print "\nDone!\n";
+    if (defined $data->{logs} && ref($data->{logs}) eq "ARRAY") {
+      for my $log (@{$data->{logs}}) {
+        my $type = $log->{logType} || "Log";
+        my $msg = $log->{message} // "";
+        if ($type eq "Warning") {
+          print "\e[33m[Warning]\e[0m " . $msg . "\n";
+        } elsif ($type eq "Error" || $type eq "Assert" || $type eq "Exception") {
+          print STDERR "\e[31m[" . $type . "]\e[0m " . $msg . "\n";
+        } else {
+          print $msg . "\n";
+        }
+      }
+    }
     if ($data->{success}) {
       if (defined $data->{payload} && $data->{payload} ne "") {
         print $data->{payload} . "\n";
@@ -1083,7 +1096,9 @@ parse_and_handle_execute_results_file() {
       exit 1;
     } else {
       print "Unity Response: FAILURE\n";
-      print ($data->{message} || "") . "\n";
+      my $msg = $data->{message} || "";
+      my ($first_line) = split(/\r?\n/, $msg);
+      print "$first_line\n";
       exit 1;
     }
   ' "$results_file"
@@ -1110,6 +1125,19 @@ parse_and_handle_eval_results_file() {
     local $/;
     open(my $f, "<:utf8", $ARGV[0]) or exit 2;
     my $data = decode_json(<$f>);
+    if (defined $data->{logs} && ref($data->{logs}) eq "ARRAY") {
+      for my $log (@{$data->{logs}}) {
+        my $type = $log->{logType} || "Log";
+        my $msg = $log->{message} // "";
+        if ($type eq "Warning") {
+          print "\e[33m[Warning]\e[0m " . $msg . "\n";
+        } elsif ($type eq "Error" || $type eq "Assert" || $type eq "Exception") {
+          print STDERR "\e[31m[" . $type . "]\e[0m " . $msg . "\n";
+        } else {
+          print $msg . "\n";
+        }
+      }
+    }
     if ($data->{success}) {
       print $data->{payload} . "\n" if defined $data->{payload} && $data->{payload} ne "";
       exit 0;
@@ -1359,30 +1387,36 @@ _run_online_method_internal() {
 
     if [ "$response" = "RUNNING" ]; then
       echo -n "."
-    elif [[ "$response" == SUCCESS* ]]; then
-      echo ""
-      echo "Done!"
-      local payload="${response#SUCCESS}"
-      # Trim leading/trailing whitespace
-      payload="${payload#"${payload%%[![:space:]]*}"}"
-      payload="${payload%"${payload##*[![:space:]]}"}"
-      if [ -n "$payload" ]; then
-        echo "$payload"
-      else
-        echo "Unity Response: SUCCESS"
+    elif [[ "$response" == SUCCESS* ]] || [[ "$response" == INTERRUPTION* ]] || [[ "$response" == FAILURE* ]]; then
+      if json_result_matches "Temp/unity_execute_result.json" "operationId" "$operation_id"; then
+        parse_and_handle_execute_results_file "$operation_id"
+        return $?
       fi
-      return 0
-    elif [[ "$response" == INTERRUPTION* ]]; then
-      echo ""
-      echo "Done!"
-      echo "Unity Response: $response"
-      return 1
-    elif [[ "$response" == FAILURE* ]]; then
-      echo ""
-      echo "Done!"
-      echo "Unity Response: FAILURE"
-      echo "${response#FAILURE }"
-      return 1
+      if [[ "$response" == SUCCESS* ]]; then
+        echo ""
+        echo "Done!"
+        local payload="${response#SUCCESS}"
+        # Trim leading/trailing whitespace
+        payload="${payload#"${payload%%[![:space:]]*}"}"
+        payload="${payload%"${payload##*[![:space:]]}"}"
+        if [ -n "$payload" ]; then
+          echo "$payload"
+        else
+          echo "Unity Response: SUCCESS"
+        fi
+        return 0
+      elif [[ "$response" == INTERRUPTION* ]]; then
+        echo ""
+        echo "Done!"
+        echo "Unity Response: $response"
+        return 1
+      else
+        echo ""
+        echo "Done!"
+        echo "Unity Response: FAILURE"
+        echo "${response#FAILURE }"
+        return 1
+      fi
     else
       echo ""
       echo "Done!"

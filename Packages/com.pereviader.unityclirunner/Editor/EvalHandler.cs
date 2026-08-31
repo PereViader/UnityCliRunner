@@ -71,39 +71,53 @@ namespace UnityCliRunner
             bool success = false;
             string errorMsg = "";
             string formattedPayload = null;
+            List<ConsoleLogEntry> logs = null;
 
             try
             {
-                var asm = Assembly.Load(assemblyBytes);
-                var runnerType = asm.GetType("__UnityCliEvalRunner");
-                if (runnerType == null)
+                using (var logCapture = new ConsoleLogCapture())
                 {
-                    throw new Exception("Evaluation runner type could not be loaded from dynamic assembly.");
-                }
+                    try
+                    {
+                        var asm = Assembly.Load(assemblyBytes);
+                        var runnerType = asm.GetType("__UnityCliEvalRunner");
+                        if (runnerType == null)
+                        {
+                            throw new Exception("Evaluation runner type could not be loaded from dynamic assembly.");
+                        }
 
-                var execMethod = runnerType.GetMethod("Execute", BindingFlags.Public | BindingFlags.Static);
-                if (execMethod == null)
-                {
-                    throw new Exception("Evaluation runner execute method not found.");
-                }
+                        var execMethod = runnerType.GetMethod("Execute", BindingFlags.Public | BindingFlags.Static);
+                        if (execMethod == null)
+                        {
+                            throw new Exception("Evaluation runner execute method not found.");
+                        }
 
-                object result = execMethod.Invoke(null, null);
-                success = true;
-                formattedPayload = CommandHelper.FormatResult(result, isVoidStatement);
+                        object result = execMethod.Invoke(null, null);
+                        success = true;
+                        formattedPayload = CommandHelper.FormatResult(result, isVoidStatement);
+                    }
+                    catch (TargetInvocationException tie)
+                    {
+                        var inner = tie.InnerException ?? tie;
+                        errorMsg = inner.ToString();
+                    }
+                    catch (Exception ex)
+                    {
+                        errorMsg = ex.ToString();
+                    }
+                    finally
+                    {
+                        logs = logCapture.GetLogs();
+                    }
+                }
             }
-            catch (TargetInvocationException tie)
+            finally
             {
-                var inner = tie.InnerException ?? tie;
-                errorMsg = inner.ToString();
+                stopwatch.Stop();
             }
-            catch (Exception ex)
-            {
-                errorMsg = ex.ToString();
-            }
-            finally { stopwatch.Stop(); }
 
             double duration = stopwatch.Elapsed.TotalSeconds;
-            FinishEval(operationId, success, errorMsg, duration, formattedPayload);
+            FinishEval(operationId, success, errorMsg, duration, formattedPayload, logs);
 
             if (success)
             {
@@ -274,7 +288,7 @@ public static class __UnityCliEvalRunner
             catch { }
         }
 
-        public static void WriteEvalResult(string operationId, bool success, string message, double duration, string payload, bool interrupted = false)
+        public static void WriteEvalResult(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs = null, bool interrupted = false)
         {
             try
             {
@@ -291,7 +305,8 @@ public static class __UnityCliEvalRunner
                     interrupted = interrupted,
                     message = message,
                     duration = duration,
-                    payload = payload
+                    payload = payload,
+                    logs = logs
                 };
                 string json = JsonUtility.ToJson(runResult, true);
                 UnityCliOperationStore.WriteAtomic(resultsPath, json, operationId);
@@ -310,18 +325,18 @@ public static class __UnityCliEvalRunner
                 return;
             }
 
-            WriteEvalResult(operation.operationId, false, message, 0, null, true);
+            WriteEvalResult(operation.operationId, false, message, 0, null, null, true);
             ClearEvalRunningState();
             UnityCliOperationStore.Complete(operation.operationId);
         }
 
-        private static void FinishEval(string operationId, bool success, string message, double duration, string payload)
+        private static void FinishEval(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs = null)
         {
             if (!UnityCliOperationStore.IsOwnedBy(operationId, OperationKinds.Eval))
             {
                 return;
             }
-            WriteEvalResult(operationId, success, message, duration, payload);
+            WriteEvalResult(operationId, success, message, duration, payload, logs);
             ClearEvalRunningState();
             UnityCliOperationStore.Complete(operationId);
         }

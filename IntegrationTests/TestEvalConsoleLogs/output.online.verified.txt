@@ -1,0 +1,4 @@
+info log
+[Warning] warn log
+100
+EXIT_CODE: 0

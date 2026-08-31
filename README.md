@@ -143,6 +143,7 @@ bash unitycli.sh executemethod MyProject.Editor.ConfigLoader.ApplyConfig '{"diff
 - **Complex Types**: Deserialized from JSON strings using Unity's `JsonUtility.FromJson`.
 - **Overload Resolution**: Automatically resolved by matching the argument count.
 - **Return Values**: Primitives and strings are printed directly; complex objects are serialized to JSON via `JsonUtility.ToJson`; `void` methods print `Unity Response: SUCCESS`.
+- **Console Logs**: All console logs (`Debug.Log`, `Debug.LogWarning`, `Debug.LogError`, `Console.WriteLine`) emitted during execution are redirected to standard output.
 
 ---
 
@@ -172,6 +173,7 @@ bash unitycli.sh eval 'GameObject.Find("Main Camera")'
 
 #### Features:
 - **In-Memory Compilation**: Executes immediately without domain reloads or disk file generation.
+- **Console Logs**: Console messages (`Debug.Log`, `Debug.LogWarning`, `Debug.LogError`, `Console.WriteLine`) emitted during evaluation are captured and printed to standard output.
 - **Smart Formatting**: Primitives, Booleans, Strings, GameObjects, Components, and Collections are automatically formatted for the terminal.
 - **Standard Diagnostics**: Syntax errors and compile errors are reported with line/column coordinates in standard compiler error format (`eval(line, col): error CSxxxx: ...`).
 

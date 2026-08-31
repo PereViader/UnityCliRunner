@@ -69,6 +69,7 @@ bash ./unitycli.sh executemethod MyEditor.Config.Apply '{"difficulty":2,"enableC
   - Types: `Guid`, Enums (by name or int), `Nullable<T>`.
   - Complex Objects/Structs: Deserialized via `JsonUtility.FromJson`.
 - **Return Values**: Primitives and strings are printed directly; complex objects are serialized as JSON (`JsonUtility.ToJson`); `void` methods print `Unity Response: SUCCESS`.
+- **Console Logs**: Console messages (`Debug.Log`, `Debug.LogWarning`, `Debug.LogError`, `Console.WriteLine`) emitted during execution are redirected to standard output.
 
 ### 4. Dynamic C# Evaluation (`eval`)
 ```bash
@@ -90,6 +91,7 @@ bash ./unitycli.sh eval 'GameObject.Find("Main Camera")'
 - **Auto-Imports**: `System`, `System.Collections.Generic`, `System.Linq`, `System.Reflection`, `System.Text`, `UnityEngine`, `UnityEngine.SceneManagement`, `UnityEditor`, `UnityEditor.SceneManagement`.
 - **Auto-Wrapping**: Automatically wraps expressions (`return (...)`), void statements (`...; return null;`), or explicit `return` blocks.
 - **Formatted Output**: Primitives, Booleans, Strings, GameObjects (name, active, tag, layer, components), Components, and Collections/IEnumerables (up to 100 items) are formatted automatically.
+- **Console Logs**: Console messages (`Debug.Log`, `Debug.LogWarning`, `Debug.LogError`, `Console.WriteLine`) emitted during evaluation are captured and printed to standard output.
 
 ### 5. Background Unity Management (`start`, `stop`, `status`)
 ```bash
