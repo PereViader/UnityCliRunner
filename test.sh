@@ -172,6 +172,9 @@ normalize_output() {
     -e 's|\[< 1 ms\]|[DURATION]|g' \
     -e '/DummyTest\.cs:/ s|\[0x[0-9a-fA-F]+\]|[0x00000]|g' \
     -e 's|Waiting for tests to complete\.*$|Waiting for tests to complete...|g' \
+    -e 's|Cancelling test run \(cli-[^)]+\)\.\.\.*$|Cancelling test run (OPERATION_ID)...|g' \
+    -e 's|Detaching from in-flight ([a-z]+) operation \(cli-[^)]+\)\.\.\.*$|Detaching from in-flight \1 operation (OPERATION_ID)...|g' \
+    -e 's|Cancelling test run\.*$|Cancelling test run...|g' \
     -e 's|Waiting for AssetDatabase refresh/compilation to finish\.*$|Waiting for AssetDatabase refresh/compilation to finish...|g' \
     -e 's|Triggering AssetDatabase refresh\.*$|Triggering AssetDatabase refresh...|g' \
     -e 's|Waiting for recompilation to finish\.*$|Waiting for recompilation to finish...|g' \
@@ -335,6 +338,7 @@ ONLINE_CASES=(
   "TestRefresh"
   "TestPollRefreshNonBlocking"
   "TestBusyDetectionBeforeRefresh"
+  "TestCancelTestsOnSigint"
 )
 
 AUTOSTART_CASES=(
@@ -391,7 +395,25 @@ run_integration_case() {
   # Poll the result file while test commands run. A malformed JSON observation
   # indicates that a writer exposed a partially-written result instead of an
   # atomic replacement.
-  if [[ "$cmd_args" == test* ]]; then
+  if [ "$cmd_args" = "cancel_sigint_test" ]; then
+    bash ./unitycli.sh test --editmode --filter LongRunningTest > "$raw_out" 2>&1 &
+    local test_pid=$!
+    for wait_i in {1..50}; do
+      if grep -q "Waiting for tests to complete" "$raw_out" 2>/dev/null; then
+        break
+      fi
+      sleep 0.2
+    done
+    sleep 0.5
+    kill -TERM "$test_pid" 2>/dev/null || kill -INT "$test_pid" 2>/dev/null || true
+    wait "$test_pid" 2>/dev/null
+    local exit_code=$?
+    echo "EXIT_CODE: $exit_code" >> "$raw_out"
+    echo "--- Follow-up refresh command ---" >> "$raw_out"
+    bash ./unitycli.sh refresh >> "$raw_out" 2>&1
+    local follow_exit=$?
+    exit_code=$follow_exit
+  elif [[ "$cmd_args" == test* ]]; then
     rm -f "$atomic_probe_file"
     bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1 &
     local test_pid=$!
@@ -537,6 +559,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
   run_integration_case "TestRefresh" "refresh" "online"
   run_integration_case "TestPollRefreshNonBlocking" "executemethod Tests.DummyExecuteClass.PollRefreshWhileBusy" "online"
   run_integration_case "TestBusyDetectionBeforeRefresh" "executemethod Tests.DummyExecuteClass.TestBusyDetection" "online"
+  run_integration_case "TestCancelTestsOnSigint" "cancel_sigint_test" "online"
   run_integration_case "TestRecompile" "recompile" "online"
 
   # Close Unity

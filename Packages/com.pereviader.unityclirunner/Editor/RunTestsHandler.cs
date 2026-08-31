@@ -18,6 +18,7 @@ namespace UnityCliRunner
         private static MyTestCallbacks s_Callbacks;
         private static TestRunnerApi s_RunnerApi;
         private static MethodInfo s_IsRunActiveMethod;
+        internal static string s_CurrentTestJobGuid;
 
         internal static bool HasActiveTestFilter
         {
@@ -229,7 +230,7 @@ namespace UnityCliRunner
 
                 var settings = new ExecutionSettings(filter);
                 Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}' and category '{categoryText}'...");
-                s_RunnerApi.Execute(settings);
+                s_CurrentTestJobGuid = s_RunnerApi.Execute(settings);
             }
             catch (Exception ex)
             {
@@ -308,10 +309,113 @@ namespace UnityCliRunner
             }
         }
 
-        internal static void WriteCancelledResult()
+        public static void CancelActiveTestRun(string operationId, StreamWriter writer)
+        {
+            var operation = UnityCliOperationStore.Read();
+            var runningState = ReadRunningState();
+
+            // 1. If neither operation store nor running state is active
+            if (operation == null && runningState == null)
+            {
+                if (!string.IsNullOrEmpty(operationId) && File.Exists(ResultsFilePath))
+                {
+                    try
+                    {
+                        var existing = JsonUtility.FromJson<UnityTestRunResult>(File.ReadAllText(ResultsFilePath));
+                        if (existing != null && existing.runId == operationId)
+                        {
+                            writer.WriteLine("CANCELLED");
+                            return;
+                        }
+                    }
+                    catch { }
+                }
+
+                writer.WriteLine("IDLE");
+                return;
+            }
+
+            // 2. If the operation belongs to another operation ID
+            if (operation != null && !string.IsNullOrEmpty(operationId) && operation.operationId != operationId)
+            {
+                writer.WriteLine($"BUSY {operation.kind} {operation.operationId}");
+                return;
+            }
+
+            if (runningState != null && !string.IsNullOrEmpty(operationId) && runningState.runId != operationId)
+            {
+                writer.WriteLine($"BUSY test {runningState.runId}");
+                return;
+            }
+
+            string activeRunId = operationId;
+            if (string.IsNullOrEmpty(activeRunId))
+            {
+                activeRunId = runningState?.runId ?? operation?.operationId;
+            }
+
+            if (!string.IsNullOrEmpty(s_CurrentTestJobGuid))
+            {
+                try
+                {
+                    TestRunnerApi.CancelTestRun(s_CurrentTestJobGuid);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"UnityCliRunner: Exception while calling TestRunnerApi.CancelTestRun: {ex.Message}");
+                }
+            }
+
+            TryCancelAnyActiveRunner();
+
+            WriteCancelledResult(activeRunId);
+            writer.WriteLine("CANCELLED");
+        }
+
+        private static bool TryCancelAnyActiveRunner()
+        {
+            try
+            {
+                var holderProp = typeof(TestRunnerApi).GetProperty("m_testJobDataHolder", BindingFlags.NonPublic | BindingFlags.Static);
+                var holder = holderProp?.GetValue(null);
+                var getAllRunnersMethod = holder?.GetType().GetMethod("GetAllRunners", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                var runners = (System.Collections.IEnumerable)getAllRunnersMethod?.Invoke(holder, null);
+                bool anyCancelled = false;
+                if (runners != null)
+                {
+                    foreach (var r in runners)
+                    {
+                        var isRunningMethod = r.GetType().GetMethod("IsRunningJob", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        bool isRunning = isRunningMethod != null && (bool)isRunningMethod.Invoke(r, null);
+                        if (isRunning)
+                        {
+                            var cancelMethod = r.GetType().GetMethod("CancelRun", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                            if (cancelMethod != null)
+                            {
+                                var res = cancelMethod.Invoke(r, null);
+                                if (res is bool b && b) anyCancelled = true;
+                            }
+                        }
+                    }
+                }
+                return anyCancelled;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"UnityCliRunner: Failed to cancel runners via reflection: {ex.Message}");
+                return false;
+            }
+        }
+
+        internal static void WriteCancelledResult(string targetRunId = null)
         {
             var state = ReadRunningState();
-            string runId = state?.runId ?? Guid.NewGuid().ToString("N");
+            string runId = targetRunId;
+            if (string.IsNullOrEmpty(runId))
+            {
+                runId = state?.runId ?? Guid.NewGuid().ToString("N");
+            }
+
             var result = new UnityTestRunResult
             {
                 runId = runId,
@@ -326,6 +430,12 @@ namespace UnityCliRunner
                 WriteAtomic(ResultsFilePath, JsonUtility.ToJson(result, true), runId);
                 DeleteIfExists(RunningFilePath);
                 UnityCliOperationStore.Complete(runId);
+                HasActiveTestFilter = false;
+                s_CurrentTestJobGuid = null;
+                if (s_Callbacks != null)
+                {
+                    s_Callbacks.Reset();
+                }
             }
             catch (Exception ex)
             {
@@ -355,6 +465,13 @@ namespace UnityCliRunner
 
         public bool IsRunning => m_IsRunning || File.Exists(RunTestsHandler.RunningFilePath);
 
+        internal void Reset()
+        {
+            m_IsRunning = false;
+            m_RunId = null;
+            m_FailedTests.Clear();
+        }
+
         internal void BindRun(string runId)
         {
             m_RunId = runId;
@@ -362,6 +479,12 @@ namespace UnityCliRunner
 
         public void RunStarted(ITestAdaptor testsToRun)
         {
+            if (string.IsNullOrEmpty(m_RunId) || !UnityCliOperationStore.IsOwnedBy(m_RunId, "test"))
+            {
+                m_IsRunning = false;
+                return;
+            }
+
             m_FailedTests.Clear();
             m_IsRunning = true;
             var state = RunTestsHandler.ReadRunningState();
@@ -501,6 +624,7 @@ namespace UnityCliRunner
                 }
                 UnityCliOperationStore.Complete(runResult.runId);
                 m_RunId = null;
+                RunTestsHandler.s_CurrentTestJobGuid = null;
                 Debug.Log($"UnityCliRunner: Playmode/Editmode tests completed. Success: {runResult.success}, Failed: {runResult.failCount}, Passed: {runResult.passCount}, Skipped: {runResult.skipCount}");
             }
             catch (Exception ex)

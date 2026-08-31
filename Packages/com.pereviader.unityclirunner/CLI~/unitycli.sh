@@ -98,7 +98,72 @@ cleanup() {
     kill "$tail_pid" 2>/dev/null
   fi
 }
-trap cleanup EXIT INT TERM
+
+ACTIVE_OPERATION_ID=""
+ACTIVE_OPERATION_KIND=""
+IS_CANCELLING=false
+
+handle_signal() {
+  local sig="${1:-INT}"
+
+  # 1. Bounded force-exit fallback on second interrupt
+  if [ "$IS_CANCELLING" = true ]; then
+    echo "" >&2
+    echo "Warning: Force-exiting immediately due to second interrupt signal." >&2
+    cleanup
+    exit 130
+  fi
+
+  IS_CANCELLING=true
+
+  # 2. If tests are in flight, request graceful cancellation from Unity
+  if [ "$ACTIVE_OPERATION_KIND" = "test" ] && [ -n "$ACTIVE_OPERATION_ID" ]; then
+    echo "" >&2
+    echo "Cancelling test run ($ACTIVE_OPERATION_ID)..." >&2
+    local cancel_resp=""
+    cancel_resp=$(send_socket_cmd "CANCEL_TESTS $ACTIVE_OPERATION_ID" 3 2>/dev/null) || true
+
+    local cancelled=false
+    if [ "$cancel_resp" = "CANCELLED" ] || [ "$cancel_resp" = "IDLE" ]; then
+      cancelled=true
+    else
+      for i in {1..25}; do
+        if json_result_matches "Temp/unity_test_results.json" "runId" "$ACTIVE_OPERATION_ID"; then
+          cancelled=true
+          break
+        fi
+        if ! [ -f "Temp/unity_test_running.txt" ]; then
+          cancelled=true
+          break
+        fi
+        sleep 0.2
+      done
+    fi
+
+    if [ "$cancelled" = true ]; then
+      echo "Test run cancelled." >&2
+    else
+      echo "Warning: Timed out waiting for Unity to complete cancellation. Operation may remain running." >&2
+    fi
+    cleanup
+    exit 130
+  elif [ -n "$ACTIVE_OPERATION_ID" ] && [ -n "$ACTIVE_OPERATION_KIND" ]; then
+    # Operations that cannot be cancelled via TestRunner API (refresh, recompile, executemethod, eval)
+    echo "" >&2
+    echo "Detaching from in-flight $ACTIVE_OPERATION_KIND operation ($ACTIVE_OPERATION_ID)..." >&2
+    echo "The operation continues running in Unity background instance. Use 'unitycli.sh status' to inspect." >&2
+    cleanup
+    exit 130
+  fi
+
+  echo "" >&2
+  cleanup
+  exit 130
+}
+
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
+trap cleanup EXIT
 
 new_operation_id() {
   # Token-safe on Bash 3.2 (macOS), Linux, and Windows Git Bash. It only needs
@@ -1060,10 +1125,9 @@ parse_and_handle_eval_results_file() {
 }
 
 # Function to run tests via socket (Online)
-run_online_tests() {
+_run_online_tests_internal() {
   local mode="$1"
-  local operation_id
-  operation_id=$(new_operation_id)
+  local operation_id="$2"
   echo "Sending command to run $mode tests..."
 
   local cmd="RUN_TESTS $operation_id $mode"
@@ -1211,12 +1275,24 @@ run_online_tests() {
   return 1
 }
 
-# Function to run a method via socket (Online)
-run_online_method() {
-  echo "Sending command to run method $EXECUTE_METHOD..."
-
+run_online_tests() {
+  local mode="$1"
   local operation_id
   operation_id=$(new_operation_id)
+  ACTIVE_OPERATION_ID="$operation_id"
+  ACTIVE_OPERATION_KIND="test"
+  _run_online_tests_internal "$mode" "$operation_id"
+  local status=$?
+  ACTIVE_OPERATION_ID=""
+  ACTIVE_OPERATION_KIND=""
+  return $status
+}
+
+# Function to run a method via socket (Online)
+_run_online_method_internal() {
+  local operation_id="$1"
+  echo "Sending command to run method $EXECUTE_METHOD..."
+
   local cmd="EXECUTE_METHOD $operation_id $EXECUTE_METHOD"
   if [ ${#EXECUTE_METHOD_PARAMS[@]} -gt 0 ]; then
     for param in "${EXECUTE_METHOD_PARAMS[@]}"; do
@@ -1316,10 +1392,21 @@ run_online_method() {
   done
 }
 
-# Function to evaluate C# snippet via socket (Online)
-run_online_eval() {
+run_online_method() {
   local operation_id
   operation_id=$(new_operation_id)
+  ACTIVE_OPERATION_ID="$operation_id"
+  ACTIVE_OPERATION_KIND="execute"
+  _run_online_method_internal "$operation_id"
+  local status=$?
+  ACTIVE_OPERATION_ID=""
+  ACTIVE_OPERATION_KIND=""
+  return $status
+}
+
+# Function to evaluate C# snippet via socket (Online)
+_run_online_eval_internal() {
+  local operation_id="$1"
   local escaped_eval="${EVAL_CODE//\\/\\\\}"
   escaped_eval="${escaped_eval//$'\r'/\\r}"
   escaped_eval="${escaped_eval//$'\n'/\\n}"
@@ -1389,6 +1476,18 @@ run_online_eval() {
     fi
     return 1
   fi
+}
+
+run_online_eval() {
+  local operation_id
+  operation_id=$(new_operation_id)
+  ACTIVE_OPERATION_ID="$operation_id"
+  ACTIVE_OPERATION_KIND="eval"
+  _run_online_eval_internal "$operation_id"
+  local status=$?
+  ACTIVE_OPERATION_ID=""
+  ACTIVE_OPERATION_KIND=""
+  return $status
 }
 
 # Function to parse compilation errors and warnings from a log file
@@ -1611,7 +1710,9 @@ if [ "$IS_RUNNING" = true ]; then
 
   # Step 1: Trigger AssetDatabase refresh or recompile
   refresh_operation_id=$(new_operation_id)
+  ACTIVE_OPERATION_ID="$refresh_operation_id"
   if [ "$SUBCOMMAND" = "recompile" ]; then
+    ACTIVE_OPERATION_KIND="recompile"
     echo -n "Triggering force recompilation..."
     while true; do
       trigger_response=""
@@ -1647,6 +1748,7 @@ if [ "$IS_RUNNING" = true ]; then
       sleep 1
     done
   else
+    ACTIVE_OPERATION_KIND="refresh"
     echo -n "Triggering AssetDatabase refresh..."
     while true; do
       trigger_response=""
@@ -1768,6 +1870,9 @@ if [ "$IS_RUNNING" = true ]; then
       echo -n "."
     fi
   done
+
+  ACTIVE_OPERATION_ID=""
+  ACTIVE_OPERATION_KIND=""
 
   # Step 3: Action Execution
   if [ "$SUBCOMMAND" = "refresh" ] || [ "$SUBCOMMAND" = "recompile" ]; then

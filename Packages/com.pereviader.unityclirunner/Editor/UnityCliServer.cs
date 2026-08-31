@@ -35,6 +35,7 @@ namespace UnityCliRunner
             { "RECOMPILE", new RecompileHandler() },
             { "RUN_TESTS", new RunTestsHandler() },
             { "POLL_TESTS", new PollTestsHandler() },
+            { "CANCEL_TESTS", new CancelTestsHandler() },
             { "EXECUTE_METHOD", new ExecuteMethodHandler() },
             { "POLL_EXECUTE", new PollExecuteHandler() },
             { "EVAL", new EvalHandler() },

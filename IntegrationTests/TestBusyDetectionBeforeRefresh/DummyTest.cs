@@ -14,6 +14,21 @@ namespace Tests
     {
         private static string FindBashExecutable()
         {
+            if (Application.platform == RuntimePlatform.WindowsEditor)
+            {
+                string[] candidates = new[]
+                {
+                    @"C:\Program Files\Git\bin\bash.exe",
+                    @"C:\Program Files\Git\usr\bin\bash.exe",
+                    @"C:\Program Files (x86)\Git\bin\bash.exe",
+                    @"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Git\bin\bash.exe")
+                };
+                foreach (var c in candidates)
+                {
+                    if (File.Exists(c)) return c;
+                }
+            }
             return "bash";
         }
 
