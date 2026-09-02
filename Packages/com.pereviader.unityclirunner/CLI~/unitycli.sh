@@ -210,6 +210,12 @@ if [ $# -eq 0 ]; then
   show_usage
 fi
 
+case "$1" in
+  --filter|--filter=*|--category|--category=*|--playmode|--editmode)
+    set -- "test" "$@"
+    ;;
+esac
+
 SUBCOMMAND="$1"
 shift
 
@@ -349,7 +355,7 @@ send_socket_cmd() {
   # Read dynamic port
   local port=""
   if [ -f "Temp/unity_cli_port.txt" ]; then
-    port=$(cat "Temp/unity_cli_port.txt" | tr -d '[:space:]')
+    port=$(cat "Temp/unity_cli_port.txt" 2>/dev/null | tr -d '[:space:]')
   fi
 
   if [ -z "$port" ] || ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
@@ -1050,6 +1056,36 @@ parse_and_handle_test_results_file() {
   return $status
 }
 
+get_test_run_counts() {
+  local results_file="Temp/unity_test_results.json"
+  local expected_operation_id="${1:-}"
+  if [ ! -f "$results_file" ]; then
+    echo "0 0 0 0 MissingResult"
+    return 1
+  fi
+  if [ -n "$expected_operation_id" ] && ! json_result_matches "$results_file" "runId" "$expected_operation_id"; then
+    echo "0 0 0 0 OperationMismatch"
+    return 1
+  fi
+
+  if ! command -v perl >/dev/null 2>&1 || ! perl -MJSON::PP -e 'exit 0' 2>/dev/null; then
+    echo "0 0 0 0 NoPerl"
+    return 1
+  fi
+
+  perl -MJSON::PP -e '
+    local $/;
+    open(my $f, "<:utf8", $ARGV[0]) or exit 1;
+    my $data = decode_json(<$f>);
+    my $pass = $data->{passCount} || 0;
+    my $fail = $data->{failCount} || 0;
+    my $skip = $data->{skipCount} || 0;
+    my $success = $data->{success} ? 1 : 0;
+    my $state = $data->{resultState} || "";
+    print "$pass $fail $skip $success $state\n";
+  ' "$results_file" 2>/dev/null || echo "0 0 0 0 ParseError"
+}
+
 # Function to parse execute results from Temp/unity_execute_result.json if process exited/recycled
 parse_and_handle_execute_results_file() {
   local results_file="Temp/unity_execute_result.json"
@@ -1303,10 +1339,13 @@ _run_online_tests_internal() {
   return 1
 }
 
+LAST_TEST_OPERATION_ID=""
+
 run_online_tests() {
   local mode="$1"
   local operation_id
   operation_id=$(new_operation_id)
+  LAST_TEST_OPERATION_ID="$operation_id"
   ACTIVE_OPERATION_ID="$operation_id"
   ACTIVE_OPERATION_KIND="test"
   _run_online_tests_internal "$mode" "$operation_id"
@@ -1929,21 +1968,69 @@ if [ "$IS_RUNNING" = true ]; then
   else
     # SUBCOMMAND is test
     TESTS_FAILED=false
+    INFRA_FAILED=false
+    TOTAL_PASSED=0
+    TOTAL_FAILED=0
+    TOTAL_SKIPPED=0
+
     if [ "$MODE_EDITMODE" = true ]; then
       run_online_tests "editmode"
-      if [ $? -ne 0 ]; then
-        TESTS_FAILED=true
+      mode_status=$?
+      counts=$(get_test_run_counts "$LAST_TEST_OPERATION_ID")
+      e_pass=0
+      e_fail=0
+      e_skip=0
+      e_succ=0
+      e_state=""
+      read -r e_pass e_fail e_skip e_succ e_state <<< "$counts"
+      TOTAL_PASSED=$((TOTAL_PASSED + ${e_pass:-0}))
+      TOTAL_FAILED=$((TOTAL_FAILED + ${e_fail:-0}))
+      TOTAL_SKIPPED=$((TOTAL_SKIPPED + ${e_skip:-0}))
+      if [ "$mode_status" -ne 0 ]; then
+        if [ "${e_fail:-0}" -gt 0 ]; then
+          TESTS_FAILED=true
+        else
+          INFRA_FAILED=true
+        fi
       fi
     fi
 
     if [ "$MODE_PLAYMODE" = true ]; then
       run_online_tests "playmode"
-      if [ $? -ne 0 ]; then
-        TESTS_FAILED=true
+      mode_status=$?
+      counts=$(get_test_run_counts "$LAST_TEST_OPERATION_ID")
+      p_pass=0
+      p_fail=0
+      p_skip=0
+      p_succ=0
+      p_state=""
+      read -r p_pass p_fail p_skip p_succ p_state <<< "$counts"
+      TOTAL_PASSED=$((TOTAL_PASSED + ${p_pass:-0}))
+      TOTAL_FAILED=$((TOTAL_FAILED + ${p_fail:-0}))
+      TOTAL_SKIPPED=$((TOTAL_SKIPPED + ${p_skip:-0}))
+      if [ "$mode_status" -ne 0 ]; then
+        if [ "${p_fail:-0}" -gt 0 ]; then
+          TESTS_FAILED=true
+        else
+          INFRA_FAILED=true
+        fi
       fi
     fi
 
-    if [ "$TESTS_FAILED" = true ]; then
+    total_matched=$((TOTAL_PASSED + TOTAL_FAILED + TOTAL_SKIPPED))
+    filter_active=false
+    if [ -n "$FILTER" ] || [ -n "$CATEGORY" ]; then
+      filter_active=true
+    fi
+
+    if [ "$INFRA_FAILED" = true ]; then
+      echo "Some tests failed."
+      exit 1
+    elif [ "$filter_active" = true ] && [ "$total_matched" -eq 0 ]; then
+      echo "Unity Response: FAILURE No tests matched the supplied filter."
+      echo "Some tests failed."
+      exit 1
+    elif [ "$TESTS_FAILED" = true ] || [ "$TOTAL_FAILED" -gt 0 ]; then
       echo "Some tests failed."
       exit 1
     else

@@ -48,11 +48,15 @@ bash ./unitycli.sh recompile   # Clear compiler cache, force full assembly rebui
 bash ./unitycli.sh test                                # Run both EditMode & PlayMode tests
 bash ./unitycli.sh test --editmode                     # EditMode only
 bash ./unitycli.sh test --playmode                     # PlayMode only
-bash ./unitycli.sh test --editmode --filter "MyTest"   # Filter by name (substring/regex)
+bash ./unitycli.sh test --filter "MyTest"              # Search both EditMode & PlayMode
+bash ./unitycli.sh test --editmode --filter "MyTest"   # Filter by name in EditMode (substring/regex)
 bash ./unitycli.sh test --playmode --category "Smoke"  # Filter by NUnit category (supports '!Category')
+bash ./unitycli.sh --filter "MyTest"                   # Shortcut for test --filter
 ```
 - Automatically triggers AssetDatabase refresh and compilation before execution.
-- Exits 0 on success; exits 1 on test failures, compile errors, or if 0 tests match the filter.
+- **Cross-Mode Filtering**: `--filter` and `--category` without mode flags search across both EditMode and PlayMode suites, succeeding as long as matching tests in either suite pass.
+- **Subcommand Inference**: Passing `--filter`, `--category`, `--playmode`, or `--editmode` directly automatically infers the `test` command.
+- Exits 0 on success; exits 1 on test failures, compile errors, or if 0 tests match the filter across all executed suites.
 - Prints summary counts and failed-test stack traces for each failed leaf test.
 
 ### 3. Static Method Invocation (`executemethod`)

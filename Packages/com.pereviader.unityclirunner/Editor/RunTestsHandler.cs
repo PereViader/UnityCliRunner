@@ -13,18 +13,11 @@ namespace UnityCliRunner
     {
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
 
-        private const string ActiveTestFilterSessionKey = "UnityCliRunner.HasActiveTestFilter";
         private const string CallbackOwnerName = "UnityCliRunner.CallbackOwner";
         private static MyTestCallbacks s_Callbacks;
         private static TestRunnerApi s_RunnerApi;
         private static MethodInfo s_IsRunActiveMethod;
         internal static string s_CurrentTestJobGuid;
-
-        internal static bool HasActiveTestFilter
-        {
-            get => SessionState.GetBool(ActiveTestFilterSessionKey, false);
-            set => SessionState.SetBool(ActiveTestFilterSessionKey, value);
-        }
 
         internal static string TempDirectory => UnityCliPaths.TempDir;
         internal static string RunningFilePath => UnityCliPaths.TestRunningFile;
@@ -224,7 +217,6 @@ namespace UnityCliRunner
                     categoryNames = !string.IsNullOrEmpty(categoryText) ? new[] { categoryText } : null
                 };
 
-                HasActiveTestFilter = !string.IsNullOrEmpty(filterText) || !string.IsNullOrEmpty(categoryText);
                 UpdateTestRunStatus(runId, "Executing");
                 s_Callbacks.BindRun(runId);
 
@@ -235,7 +227,6 @@ namespace UnityCliRunner
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to start tests: {ex}");
-                HasActiveTestFilter = false;
                 if (s_Callbacks != null)
                 {
                     s_Callbacks.OnInfrastructureFailure("Failed to start test run: " + ex.Message);
@@ -430,7 +421,6 @@ namespace UnityCliRunner
                 WriteAtomic(ResultsFilePath, JsonUtility.ToJson(result, true), runId);
                 DeleteIfExists(RunningFilePath);
                 UnityCliOperationStore.Complete(runId);
-                HasActiveTestFilter = false;
                 s_CurrentTestJobGuid = null;
                 if (s_Callbacks != null)
                 {
@@ -530,12 +520,10 @@ namespace UnityCliRunner
                 var runState = RunTestsHandler.ReadRunningState();
                 bool transportInterrupted = runState != null &&
                     (runState.status == "Reloading" || runState.status == "ShuttingDown");
-                bool didNotMatchAnyTests = RunTestsHandler.HasActiveTestFilter && result.FailCount == 0 && result.PassCount == 0 && result.SkipCount == 0;
-                bool isFailed = result.FailCount > 0 || result.TestStatus == TestStatus.Failed || isCancelled || didNotMatchAnyTests;
+                bool isFailed = result.FailCount > 0 || result.TestStatus == TestStatus.Failed || isCancelled;
 
                 bool success = !isFailed;
                 string message = isCancelled ? (!string.IsNullOrEmpty(result.Message) ? result.Message : "Test run was cancelled or interrupted.")
-                               : didNotMatchAnyTests ? "No tests matched the supplied filter."
                                : "";
 
                 if (transportInterrupted && isCancelled)
@@ -613,8 +601,6 @@ namespace UnityCliRunner
                     resultState = resultState,
                     failedTests = new List<FailedTestInfo>(m_FailedTests)
                 };
-
-                RunTestsHandler.HasActiveTestFilter = false;
 
                 string json = JsonUtility.ToJson(runResult, true);
                 RunTestsHandler.WriteAtomic(resultsPath, json, runResult.runId);

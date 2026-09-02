@@ -109,11 +109,17 @@ bash unitycli.sh test --editmode
 # Run only PlayMode tests
 bash unitycli.sh test --playmode
 
-# Filter tests by name (substring or regex match)
+# Filter tests by name (searches both EditMode & PlayMode)
+bash unitycli.sh test --filter "MyNamespace.MyTestClass"
+
+# Filter tests by name in EditMode only
 bash unitycli.sh test --editmode --filter "MyNamespace.MyTestClass"
 
 # Filter tests by NUnit category (supports category negation like '!LongRunning')
 bash unitycli.sh test --playmode --category "Smoke"
+
+# Shortcut syntax (subcommand inferred)
+bash unitycli.sh --filter "MyNamespace.MyTestClass"
 ```
 
 ---
