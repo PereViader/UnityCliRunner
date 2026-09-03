@@ -32,8 +32,17 @@ namespace UnityCliRunner
                     Path.Combine(projectRoot, ".agents", "plugins", "unity-cli", "mcp_config.json"),
                     Path.Combine(projectRoot, ".vscode", "mcp.json"),
                     Path.Combine(projectRoot, ".cursor", "mcp.json"),
-                    Path.Combine(projectRoot, ".claude", "mcp.json")
+                    Path.Combine(projectRoot, ".claude", "mcp.json"),
+                    Path.Combine(projectRoot, ".mcp.json")
                 };
+
+                string pluginJsonPath = Path.Combine(projectRoot, ".agents", "plugins", "unity-cli", "plugin.json");
+                if (!File.Exists(pluginJsonPath))
+                {
+                    string pluginDir = Path.GetDirectoryName(pluginJsonPath);
+                    if (!Directory.Exists(pluginDir)) Directory.CreateDirectory(pluginDir);
+                    File.WriteAllText(pluginJsonPath, "{\n  \"name\": \"unity-cli\"\n}\n", Encoding.UTF8);
+                }
 
                 var sb = new StringBuilder();
                 sb.AppendLine("Installed MCP configuration to:");
@@ -45,13 +54,19 @@ namespace UnityCliRunner
                 }
 
                 Debug.Log($"[UnityCliRunner] {sb}");
-                EditorUtility.DisplayDialog("UnityCliRunner Success", sb.ToString(), "OK");
+                if (!Application.isBatchMode)
+                {
+                    EditorUtility.DisplayDialog("UnityCliRunner Success", sb.ToString(), "OK");
+                }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[UnityCliRunner] Failed to install MCP configurations: {ex.Message}");
                 Debug.LogException(ex);
-                EditorUtility.DisplayDialog("UnityCliRunner Error", $"Failed to install MCP configurations:\n{ex.Message}", "OK");
+                if (!Application.isBatchMode)
+                {
+                    EditorUtility.DisplayDialog("UnityCliRunner Error", $"Failed to install MCP configurations:\n{ex.Message}", "OK");
+                }
             }
         }
 

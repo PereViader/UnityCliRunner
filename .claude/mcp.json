@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "unity-cli": {
+      "command": "dotnet",
+      "args": [
+        "Packages/com.pereviader.unityclirunner/MCP~/UnityCliRunner.Mcp.dll"
+      ]
+    }
+  }
+}
