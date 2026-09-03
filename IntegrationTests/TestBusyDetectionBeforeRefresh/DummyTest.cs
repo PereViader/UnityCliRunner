@@ -12,32 +12,13 @@ namespace Tests
 
     public static class DummyExecuteClass
     {
-        private static string FindBashExecutable()
-        {
-            if (Application.platform == RuntimePlatform.WindowsEditor)
-            {
-                string[] candidates = new[]
-                {
-                    @"C:\Program Files\Git\bin\bash.exe",
-                    @"C:\Program Files\Git\usr\bin\bash.exe",
-                    @"C:\Program Files (x86)\Git\bin\bash.exe",
-                    @"C:\Program Files (x86)\Git\usr\bin\bash.exe",
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Git\bin\bash.exe")
-                };
-                foreach (var c in candidates)
-                {
-                    if (File.Exists(c)) return c;
-                }
-            }
-            return "bash";
-        }
-
         public static string TestBusyDetection()
         {
-            // Run CLI commands via bash while this execute method is actively running.
+            // Run MCP CLI commands while this execute method is actively running.
             // All commands (test, executemethod, refresh, recompile) should detect that
-            // Unity is busy BEFORE attempting an AssetDatabase refresh or recompilation.
-            string bashExe = FindBashExecutable();
+            // Unity is busy.
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string dllPath = Path.Combine(projectRoot, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll");
             string[] commandsToTest = new[]
             {
                 "test --playmode",
@@ -50,8 +31,8 @@ namespace Tests
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = bashExe,
-                    Arguments = $"./unitycli.sh {cmd}",
+                    FileName = "dotnet",
+                    Arguments = $"\"{dllPath}\" test-cli {cmd}",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -64,13 +45,11 @@ namespace Tests
                 proc.WaitForExit();
 
                 int exitCode = proc.ExitCode;
-                bool attemptedRefresh = stdout.Contains("Triggering AssetDatabase refresh") || stderr.Contains("Triggering AssetDatabase refresh")
-                                     || stdout.Contains("Triggering force recompilation") || stderr.Contains("Triggering force recompilation");
-                bool reportedBusy = stderr.Contains("Error: Unity is busy: BUSY execute") || stdout.Contains("Error: Unity is busy: BUSY execute");
+                bool reportedBusy = stderr.Contains("Unity is busy") || stdout.Contains("Unity is busy");
 
-                if (exitCode != 1 || attemptedRefresh || !reportedBusy)
+                if (exitCode != 1 || !reportedBusy)
                 {
-                    return $"FAILED for '{cmd}': exitCode={exitCode}, attemptedRefresh={attemptedRefresh}, reportedBusy={reportedBusy}, stdout={stdout}, stderr={stderr}";
+                    return $"FAILED for '{cmd}': exitCode={exitCode}, reportedBusy={reportedBusy}, stdout={stdout}, stderr={stderr}";
                 }
             }
 

@@ -1,5 +1,4 @@
-FAILED for 'test --playmode': exitCode=127, attemptedRefresh=False, reportedBusy=False, stdout=, stderr=/usr/bin/bash: ./unitycli.sh: No such file or directory
-
+ALL_COMMANDS_BUSY_DETECTED_BEFORE_REFRESH
 Unity Response: SUCCESS
 Method execution succeeded.
 EXIT_CODE: 0
