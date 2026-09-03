@@ -70,6 +70,16 @@ restore_backup() {
 }
 trap restore_backup EXIT INT TERM
 
+MCP_DLL="Packages/com.pereviader.unityclirunner/MCP~/UnityCliRunner.Mcp.dll"
+if [ ! -f "$MCP_DLL" ]; then
+  echo "Building UnityCliRunner.Mcp..."
+  dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net8.0 -o Packages/com.pereviader.unityclirunner/MCP~ >/dev/null 2>&1
+fi
+
+run_mcp_cmd() {
+  dotnet "$MCP_DLL" test-cli "$@"
+}
+
 # Helper function to find Unity path
 find_unity_path() {
   local configured_path="${UNITY_PATH:-${UNITY_EDITOR:-}}"
@@ -163,6 +173,7 @@ normalize_output() {
   fi
 
   sed -E \
+    -e 's|\r||g' \
     -e 's|\\|/|g' \
     -e '/^DEBUG:/d' \
     -e 's|\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]||g' \
@@ -170,9 +181,11 @@ normalize_output() {
     -e "s|$escaped_proj_path_win|PROJECT_PATH|gI" \
     -e 's|\[[0-9]+ ms\]|[DURATION]|g' \
     -e 's|\[< 1 ms\]|[DURATION]|g' \
+    -e 's|\([0-9]+[,.][0-9]+s\)|(DURATION)|g' \
     -e '/DummyTest\.cs:/ s|\[0x[0-9a-fA-F]+\]|[0x00000]|g' \
     -e 's|Waiting for tests to complete\.*$|Waiting for tests to complete...|g' \
     -e 's|Cancelling test run \(cli-[^)]+\)\.\.\.*$|Cancelling test run (OPERATION_ID)...|g' \
+    -e 's|BUSY ([a-z]+) [a-f0-9]+|BUSY \1 OPERATION_ID|g' \
     -e 's|Detaching from in-flight ([a-z]+) operation \(cli-[^)]+\)\.\.\.*$|Detaching from in-flight \1 operation (OPERATION_ID)...|g' \
     -e 's|Cancelling test run\.*$|Cancelling test run...|g' \
     -e 's|Waiting for AssetDatabase refresh/compilation to finish\.*$|Waiting for AssetDatabase refresh/compilation to finish...|g' \
@@ -398,10 +411,10 @@ run_integration_case() {
   # indicates that a writer exposed a partially-written result instead of an
   # atomic replacement.
   if [ "$cmd_args" = "cancel_sigint_test" ]; then
-    bash ./unitycli.sh test --editmode --filter LongRunningTest > "$raw_out" 2>&1 &
+    run_mcp_cmd test --editmode --filter LongRunningTest > "$raw_out" 2>&1 &
     local test_pid=$!
     for wait_i in {1..50}; do
-      if grep -q "Waiting for tests to complete" "$raw_out" 2>/dev/null; then
+      if grep -q "Waiting for" "$raw_out" 2>/dev/null || [ -s "$raw_out" ] || [ -f "Temp/unity_test_running.txt" ]; then
         break
       fi
       sleep 0.2
@@ -411,13 +424,19 @@ run_integration_case() {
     wait "$test_pid" 2>/dev/null
     local exit_code=$?
     echo "EXIT_CODE: $exit_code" >> "$raw_out"
+    for wait_c in {1..50}; do
+      if [ ! -f "Temp/unity_test_running.txt" ]; then
+        break
+      fi
+      sleep 0.2
+    done
     echo "--- Follow-up refresh command ---" >> "$raw_out"
-    bash ./unitycli.sh refresh >> "$raw_out" 2>&1
+    run_mcp_cmd refresh >> "$raw_out" 2>&1
     local follow_exit=$?
     exit_code=$follow_exit
   elif [[ "$cmd_args" == test* ]]; then
     rm -f "$atomic_probe_file"
-    bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1 &
+    run_mcp_cmd $cmd_args > "$raw_out" 2>&1 &
     local test_pid=$!
     (
       while kill -0 "$test_pid" 2>/dev/null; do
@@ -435,7 +454,7 @@ run_integration_case() {
     local exit_code=$?
     wait "$atomic_probe_pid" 2>/dev/null || true
   else
-    bash ./unitycli.sh $cmd_args > "$raw_out" 2>&1
+    run_mcp_cmd $cmd_args > "$raw_out" 2>&1
     local exit_code=$?
   fi
 
@@ -500,7 +519,7 @@ run_integration_case() {
 if has_matching_cases "${ONLINE_CASES[@]}"; then
   # Check if Unity is running
   IS_RUNNING=false
-  if bash ./unitycli.sh status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
+  if run_mcp_cmd status 2>/dev/null | grep -q -e "Status: Ready" -e "Status: Running"; then
     IS_RUNNING=true
   fi
 
@@ -512,7 +531,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
 
   run_setup "online"
   if [ "$IS_RUNNING" = false ]; then
-    bash ./unitycli.sh start batchmode >/dev/null 2>&1
+    run_mcp_cmd start batchmode >/dev/null 2>&1
   fi
 
   for tc in "${TEST_CASES[@]}"; do
@@ -568,7 +587,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
 
   # Close Unity
   run_teardown "online"
-  bash ./unitycli.sh stop >/dev/null 2>&1
+  run_mcp_cmd stop >/dev/null 2>&1
 fi
 
 if has_matching_cases "${AUTOSTART_CASES[@]}"; then
@@ -582,13 +601,13 @@ if has_matching_cases "${AUTOSTART_CASES[@]}"; then
   run_integration_case "TestBackgroundStartAlreadyRunning" "start batchmode" "autostart"
 
   # 4. Stop Unity before testing auto-start eval from stopped state.
-  bash ./unitycli.sh stop >/dev/null 2>&1
+  run_mcp_cmd stop >/dev/null 2>&1
 
   # 5. Run eval when stopped (should auto-start Unity and evaluate).
   run_integration_case "TestEvalAutostart" "eval 2 + 2" "autostart"
 
   # 6. Stop Unity.
-  bash ./unitycli.sh stop >/dev/null 2>&1
+  run_mcp_cmd stop >/dev/null 2>&1
 
   # 7. CLI validation tests (fail-fast without starting Unity)
   run_integration_case "TestCliValidationInvalidSubcommand" "invalid_subcommand" "autostart"

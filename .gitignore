@@ -59,6 +59,12 @@ ExportedObj/
 *.opendb
 *.VC.db
 
+# Allow standalone .NET MCP server and tests in src/
+!src/**/*.csproj
+!src/**/*.sln
+src/**/bin/
+src/**/obj/
+
 # Unity3D generated meta files
 *.pidb.meta
 *.pdb.meta

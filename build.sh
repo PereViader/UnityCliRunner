@@ -17,12 +17,17 @@ if [ -d "$BUILD_DIR" ]; then
 fi
 mkdir -p "$BUILD_DIR"
 
-# 2. Copy the contents of the package source into the build folder
+# 2. Build and publish the cross-platform .NET MCP Server into MCP~
+echo "Publishing UnityCliRunner.Mcp server to package MCP~ folder..."
+mkdir -p "$PACKAGE_SRC/MCP~"
+dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net8.0 -o "$PACKAGE_SRC/MCP~"
+
+# 3. Copy the contents of the package source into the build folder
 echo "Copying package contents..."
 # cp -R with trailing '/.' copies all contents of source, including hidden files/directories
 cp -R "$PACKAGE_SRC/." "$BUILD_DIR/"
 
-# 2.5. Update version in package.json from .env.shared
+# 4. Update version in package.json from .env.shared
 if [ -f ".env.shared" ]; then
   VERSION_VAL=$(source .env.shared && echo "$VERSION")
   echo "Updating version in build/package.json to $VERSION_VAL..."
@@ -43,17 +48,10 @@ else
   exit 1
 fi
 
-
-# 3. Copy unitycli.sh (wrapper) into the CLI~ folder as unitycli-forward.sh
-echo "Copying forwarding script to build CLI~ folder..."
-cp "unitycli.sh" "$BUILD_DIR/CLI~/unitycli-forward.sh"
-chmod +x "$BUILD_DIR/CLI~/unitycli-forward.sh"
-
-# 4. Copy unity-cli agent skill into the CLI~ folder, replacing the dummy placeholder
-echo "Copying actual unity-cli agent skill to build CLI~ folder..."
-# Remove the dummy placeholder directory
-rm -rf "$BUILD_DIR/CLI~/.agents/skills/unity-cli"
-# Copy the actual skill directory recursively
-cp -R ".agents/skills/unity-cli" "$BUILD_DIR/CLI~/.agents/skills/"
+# 5. Verify published MCP binary exists in build
+if [ ! -f "$BUILD_DIR/MCP~/UnityCliRunner.Mcp.dll" ]; then
+  echo "Error: UnityCliRunner.Mcp.dll was not found in $BUILD_DIR/MCP~/" >&2
+  exit 1
+fi
 
 echo "=== Build completed successfully! ==="

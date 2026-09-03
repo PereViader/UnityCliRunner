@@ -1,12 +1,6 @@
-Detected running Unity instance (via UnityLockfile).
-Triggering AssetDatabase refresh...
-Done!
-Waiting for AssetDatabase refresh/compilation to finish...
-Unity is ready!
-Sending command to run method Tests.DummyExecuteClass.FailMethod...
-Waiting for method execution to complete...
-Done!
-Unity Response: FAILURE
 System.InvalidOperationException: Intentional execution failure!
+  at Tests.DummyExecuteClass.FailMethod () [0x00000] in PROJECT_PATH/Assets/Tests/Editor/DummyTest.cs:13 
+  at (wrapper managed-to-native) System.Reflection.RuntimeMethodInfo.InternalInvoke(System.Reflection.RuntimeMethodInfo,object,object[],System.Exception&)
+  at System.Reflection.RuntimeMethodInfo.Invoke (System.Object obj, System.Reflection.BindingFlags invokeAttr, System.Reflection.Binder binder, System.Object[] parameters, System.Globalization.CultureInfo culture) [0x0006a] in <ASSEMBLY_HASH>:0 
 Method execution failed.
 EXIT_CODE: 1

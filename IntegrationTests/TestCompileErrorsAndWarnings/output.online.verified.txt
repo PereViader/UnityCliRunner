@@ -1,10 +1,3 @@
-Detected running Unity instance (via UnityLockfile).
-Triggering AssetDatabase refresh...
-Done!
-Waiting for AssetDatabase refresh/compilation to finish...
+Tests Failed: 0 failed, 0 passed, 0 skipped.
 Assets/Tests/Editor/DummyTest.cs(15,29): error CS1002: ; expected
-
-Build FAILED.
-    0 Warning(s)
-    1 Error(s)
 EXIT_CODE: 1

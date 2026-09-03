@@ -1,12 +1,10 @@
-Detected running Unity instance (via UnityLockfile).
-Triggering AssetDatabase refresh...
-Done!
-Waiting for AssetDatabase refresh/compilation to finish...
-Unity is ready!
-Sending command to run method Tests.DummyExecuteClass.NumberMethod...
-Waiting for method execution to complete...
-Done!
-Unity Response: FAILURE
 System.ArgumentException: Failed to convert parameter 0 ('not_a_number') to type 'System.Int32': Input string was not in a correct format. ---> System.FormatException: Input string was not in a correct format.
+  at System.Number.ThrowOverflowOrFormatException (System.Boolean overflow, System.String overflowResourceKey) [0x0001a] in <ASSEMBLY_HASH>:0 
+  at System.Number.ParseInt32 (System.ReadOnlySpan`1[T] value, System.Globalization.NumberStyles styles, System.Globalization.NumberFormatInfo info) [0x00016] in <ASSEMBLY_HASH>:0 
+  at System.Int32.Parse (System.String s, System.IFormatProvider provider) [0x00017] in <ASSEMBLY_HASH>:0 
+  at UnityCliRunner.CommandHelper.ConvertParameter (System.String rawArg, System.Type targetType) [0x00099] in ./Packages/com.pereviader.unityclirunner/Editor/CommandHelper.cs:199 
+  at UnityCliRunner.ExecuteMethodHandler.ExecuteMethod (System.String operationId, System.Reflection.MethodInfo method, System.String[] stringParams) [0x000ef] in ./Packages/com.pereviader.unityclirunner/Editor/ExecuteMethodHandler.cs:154 
+   --- End of inner exception stack trace ---
+  at UnityCliRunner.ExecuteMethodHandler.ExecuteMethod (System.String operationId, System.Reflection.MethodInfo method, System.String[] stringParams) [0x00101] in ./Packages/com.pereviader.unityclirunner/Editor/ExecuteMethodHandler.cs:158 
 Method execution failed.
 EXIT_CODE: 1

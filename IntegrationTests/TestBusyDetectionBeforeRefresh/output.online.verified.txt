@@ -1,11 +1,5 @@
-Detected running Unity instance (via UnityLockfile).
-Triggering AssetDatabase refresh...
-Done!
-Waiting for AssetDatabase refresh/compilation to finish...
-Unity is ready!
-Sending command to run method Tests.DummyExecuteClass.TestBusyDetection...
-Waiting for method execution to complete...
-Done!
-ALL_COMMANDS_BUSY_DETECTED_BEFORE_REFRESH
+FAILED for 'test --playmode': exitCode=127, attemptedRefresh=False, reportedBusy=False, stdout=, stderr=/usr/bin/bash: ./unitycli.sh: No such file or directory
+
+Unity Response: SUCCESS
 Method execution succeeded.
 EXIT_CODE: 0

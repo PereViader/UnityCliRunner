@@ -1,4 +1,2 @@
-Starting Unity background instance...
-Started successfully!
 4
 EXIT_CODE: 0
