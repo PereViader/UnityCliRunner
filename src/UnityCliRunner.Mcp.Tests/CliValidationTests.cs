@@ -11,17 +11,23 @@ public class CliValidationTests
     private static string GetRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "Packages")))
+        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "src", "UnityCliRunner.Unity3d")))
         {
             dir = dir.Parent;
         }
         return dir?.FullName ?? throw new DirectoryNotFoundException("Could not find repository root");
     }
 
+    private static string GetUnityProjectRoot()
+    {
+        return Path.Combine(GetRepoRoot(), "src", "UnityCliRunner.Unity3d");
+    }
+
     private static string GetMcpServerDllPath()
     {
         string root = GetRepoRoot();
-        string dllPath = Path.Combine(root, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll");
+        string unityRoot = GetUnityProjectRoot();
+        string dllPath = Path.Combine(unityRoot, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll");
         if (File.Exists(dllPath)) return dllPath;
 
         string debugDll = Path.Combine(root, "src", "UnityCliRunner.Mcp", "bin", "Debug", "net8.0", "UnityCliRunner.Mcp.dll");
@@ -33,7 +39,7 @@ public class CliValidationTests
     private async Task<(int ExitCode, string StdOut, string StdErr)> RunCliAsync(string arguments)
     {
         string dllPath = GetMcpServerDllPath();
-        string projectRoot = GetRepoRoot();
+        string projectRoot = GetUnityProjectRoot();
 
         var psi = new ProcessStartInfo
         {

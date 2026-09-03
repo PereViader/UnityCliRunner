@@ -72,7 +72,7 @@ jobs:
             -serial "$UNITY_SERIAL" \
             -username "$UNITY_EMAIL" \
             -password "$UNITY_PASSWORD" \
-            -projectPath "$GITHUB_WORKSPACE"
+            -projectPath "$GITHUB_WORKSPACE/src/UnityCliRunner.Unity3d"
 
       - name: Debug Container Environment
         run: |
@@ -114,4 +114,4 @@ jobs:
             -returnlicense \
             -username "$UNITY_EMAIL" \
             -password "$UNITY_PASSWORD" \
-            -projectPath "$GITHUB_WORKSPACE"
+            -projectPath "$GITHUB_WORKSPACE/src/UnityCliRunner.Unity3d"

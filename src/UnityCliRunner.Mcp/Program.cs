@@ -108,6 +108,14 @@ static string ResolveProjectRoot()
         {
             return dir.FullName;
         }
+
+        string candidate = Path.Combine(dir.FullName, "src", "UnityCliRunner.Unity3d");
+        if (Directory.Exists(Path.Combine(candidate, "Assets")) &&
+            Directory.Exists(Path.Combine(candidate, "ProjectSettings")))
+        {
+            return candidate;
+        }
+
         dir = dir.Parent;
     }
     return current;

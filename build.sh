@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 # Define directories
 BUILD_DIR="build"
-PACKAGE_SRC="Packages/com.pereviader.unityclirunner"
+PACKAGE_SRC="src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner"
 
 echo "=== Starting UnityCliRunner build ==="
 

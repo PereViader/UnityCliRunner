@@ -42,8 +42,9 @@ mkdir -p "$BACKUP_DIR"
 # Test logs temp directory
 mkdir -p "IntegrationTests/Temp"
 
-DUMMY_TEST_PATH="Assets/Tests/Editor/DummyTest.cs"
-DUMMY_TEST_META_PATH="Assets/Tests/Editor/DummyTest.cs.meta"
+UNITY_DIR="src/UnityCliRunner.Unity3d"
+DUMMY_TEST_PATH="$UNITY_DIR/Assets/Tests/Editor/DummyTest.cs"
+DUMMY_TEST_META_PATH="$UNITY_DIR/Assets/Tests/Editor/DummyTest.cs.meta"
 
 # Back up original files
 if [ -f "$DUMMY_TEST_PATH" ]; then
@@ -70,10 +71,10 @@ restore_backup() {
 }
 trap restore_backup EXIT INT TERM
 
-MCP_DLL="Packages/com.pereviader.unityclirunner/MCP~/UnityCliRunner.Mcp.dll"
+MCP_DLL="$UNITY_DIR/Packages/com.pereviader.unityclirunner/MCP~/UnityCliRunner.Mcp.dll"
 if [ ! -f "$MCP_DLL" ]; then
   echo "Building UnityCliRunner.Mcp..."
-  dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net8.0 -o Packages/com.pereviader.unityclirunner/MCP~ >/dev/null 2>&1
+  dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net8.0 -o "$UNITY_DIR/Packages/com.pereviader.unityclirunner/MCP~" >/dev/null 2>&1
 fi
 
 run_mcp_cmd() {
@@ -93,8 +94,8 @@ find_unity_path() {
   fi
 
   local version=""
-  if [ -f "ProjectSettings/ProjectVersion.txt" ]; then
-    version=$(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')
+  if [ -f "$UNITY_DIR/ProjectSettings/ProjectVersion.txt" ]; then
+    version=$(grep "m_EditorVersion:" "$UNITY_DIR/ProjectSettings/ProjectVersion.txt" | awk '{print $2}' | tr -d '\r')
   fi
 
   local paths=()
@@ -267,11 +268,12 @@ run_teardown() {
   fi
 }
 
-abs_proj_path="$(pwd)"
+abs_proj_path="$(cd "$UNITY_DIR" 2>/dev/null && pwd || pwd)"
 abs_proj_path_win=""
 if is_windows_platform; then
   abs_proj_path_win=$(to_native_path "$abs_proj_path" | tr -d '\r')
 fi
+export UNITY_CLI_PROJECT_ROOT="$abs_proj_path"
 
 # Parse CLI arguments for test case filtering
 FILTER_PATTERNS=()
@@ -414,7 +416,7 @@ run_integration_case() {
     run_mcp_cmd test --editmode --filter LongRunningTest > "$raw_out" 2>&1 &
     local test_pid=$!
     for wait_i in {1..50}; do
-      if grep -q "Waiting for" "$raw_out" 2>/dev/null || [ -s "$raw_out" ] || [ -f "Temp/unity_test_running.txt" ]; then
+      if grep -q "Waiting for" "$raw_out" 2>/dev/null || [ -s "$raw_out" ] || [ -f "$UNITY_DIR/Temp/unity_test_running.txt" ]; then
         break
       fi
       sleep 0.2
@@ -425,7 +427,7 @@ run_integration_case() {
     local exit_code=$?
     echo "EXIT_CODE: $exit_code" >> "$raw_out"
     for wait_c in {1..50}; do
-      if [ ! -f "Temp/unity_test_running.txt" ]; then
+      if [ ! -f "$UNITY_DIR/Temp/unity_test_running.txt" ]; then
         break
       fi
       sleep 0.2
@@ -440,8 +442,8 @@ run_integration_case() {
     local test_pid=$!
     (
       while kill -0 "$test_pid" 2>/dev/null; do
-        if [ -s "Temp/unity_test_results.json" ] &&
-           ! perl -MJSON::PP -e 'local $/; my $c = <>; exit 0 if !defined($c) || $c =~ /^\s*$/; decode_json($c)' "Temp/unity_test_results.json" >/dev/null 2>&1; then
+        if [ -s "$UNITY_DIR/Temp/unity_test_results.json" ] &&
+           ! perl -MJSON::PP -e 'local $/; my $c = <>; exit 0 if !defined($c) || $c =~ /^\s*$/; decode_json($c)' "$UNITY_DIR/Temp/unity_test_results.json" >/dev/null 2>&1; then
           touch "$atomic_probe_file"
           exit 0
         fi
@@ -525,7 +527,7 @@ if has_matching_cases "${ONLINE_CASES[@]}"; then
 
   UNITY_EXE=$(find_unity_path)
   if [ -z "$UNITY_EXE" ]; then
-    echo "Error: Unity executable not found for Unity version $(grep "m_EditorVersion:" ProjectSettings/ProjectVersion.txt | awk '{print $2}' | tr -d '\r')." >&2
+    echo "Error: Unity executable not found for Unity version $(grep "m_EditorVersion:" "$UNITY_DIR/ProjectSettings/ProjectVersion.txt" | awk '{print $2}' | tr -d '\r')." >&2
     exit 1
   fi
 

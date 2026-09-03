@@ -52,7 +52,7 @@ openupm add com.pereviader.unityclirunner
 ```
 Or add via git URL in Unity's Package Manager:
 ```
-https://github.com/PereViader/UnityCliRunner.git?path=Packages/com.pereviader.unityclirunner
+https://github.com/PereViader/UnityCliRunner.git?path=src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner
 ```
 
 ### 3. Install MCP Configurations
