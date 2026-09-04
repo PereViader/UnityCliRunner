@@ -1,2 +1,0 @@
-Error: executemethod requires a method name argument (e.g., Namespace.Class.Method)
-EXIT_CODE: 1

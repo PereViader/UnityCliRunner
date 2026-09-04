@@ -1,2 +1,0 @@
-Status: Ready
-EXIT_CODE: 0

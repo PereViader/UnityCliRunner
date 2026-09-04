@@ -1,2 +1,0 @@
-Error: --filter requires an argument
-EXIT_CODE: 1

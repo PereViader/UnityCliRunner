@@ -1,2 +1,0 @@
-Error: eval requires a C# code snippet or expression (e.g., Application.unityVersion)
-EXIT_CODE: 1

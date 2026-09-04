@@ -1,2 +1,0 @@
-Unity is already running.
-EXIT_CODE: 0

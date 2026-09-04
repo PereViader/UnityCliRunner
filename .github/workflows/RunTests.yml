@@ -99,7 +99,7 @@ jobs:
         env:
           USE_UNITY_EDITOR_WRAPPER: true
         run: |
-          bash ./test.sh
+          dotnet test src/UnityCliRunner.Mcp.Tests/UnityCliRunner.Mcp.Tests.csproj
 
       - name: Return Unity License
         if: always() && steps.activate_unity.outcome == 'success'

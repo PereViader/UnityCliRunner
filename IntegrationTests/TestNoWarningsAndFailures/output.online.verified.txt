@@ -1,8 +1,0 @@
-Tests Failed: 1 failed, 0 passed, 0 skipped.
-
-Failures:
-• Tests.DummyTest.FailTest (DURATION)
-  Message: This test failed intentionally.
-  Stack trace:
-at Tests.DummyTest.FailTest () [0x00000] in PROJECT_PATH/Assets/Tests/Editor/DummyTest.cs:10
-EXIT_CODE: 1

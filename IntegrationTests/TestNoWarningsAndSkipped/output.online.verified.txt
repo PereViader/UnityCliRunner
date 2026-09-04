@@ -1,2 +1,0 @@
-Tests Passed: 0 passed, 1 skipped.
-EXIT_CODE: 0

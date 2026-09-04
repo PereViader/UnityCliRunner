@@ -1,2 +1,0 @@
-Unknown command: invalid_subcommand
-EXIT_CODE: 1

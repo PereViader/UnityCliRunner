@@ -1,2 +1,0 @@
-Error: refresh does not accept extra arguments
-EXIT_CODE: 1

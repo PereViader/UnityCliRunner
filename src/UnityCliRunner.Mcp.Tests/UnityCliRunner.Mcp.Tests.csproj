@@ -22,4 +22,9 @@
     <ProjectReference Include="..\UnityCliRunner.Mcp\UnityCliRunner.Mcp.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="Fixtures\**" />
+    <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

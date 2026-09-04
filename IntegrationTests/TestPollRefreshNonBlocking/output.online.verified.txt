@@ -1,4 +1,0 @@
-READY
-Unity Response: SUCCESS
-Method execution succeeded.
-EXIT_CODE: 0

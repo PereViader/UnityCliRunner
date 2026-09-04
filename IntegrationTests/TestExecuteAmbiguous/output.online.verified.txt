@@ -1,3 +1,0 @@
-ERROR: Ambiguous match: multiple static methods named 'Ambiguous' with 1 parameters found in type 'Tests.DummyExecuteClass'.
-Method execution failed.
-EXIT_CODE: 1

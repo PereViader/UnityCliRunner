@@ -1,3 +1,0 @@
-Tests Failed: 0 failed, 0 passed, 0 skipped.
-Assets/Tests/Editor/DummyTest.cs(15,29): error CS1002: ; expected
-EXIT_CODE: 1

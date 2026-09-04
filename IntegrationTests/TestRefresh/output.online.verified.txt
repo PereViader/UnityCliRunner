@@ -1,2 +1,0 @@
-Unity is ready!
-EXIT_CODE: 0

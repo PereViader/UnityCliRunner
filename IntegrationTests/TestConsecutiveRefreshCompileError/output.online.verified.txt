@@ -1,3 +1,0 @@
-Assets/Tests/Editor/DummyTest.cs(6,25): error CS1002: ; expected
-Error: Unity compilation failed.
-EXIT_CODE: 1

@@ -1,4 +1,0 @@
-Tests Passed: 1 passed, 0 skipped.
- command ---
-Unity is ready!
-EXIT_CODE: 0
