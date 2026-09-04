@@ -11,6 +11,9 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using UnityCliRunner.Mcp;
 
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.InputEncoding = System.Text.Encoding.UTF8;
+
 if (args.Contains("--help") || args.Contains("-h"))
 {
     Console.WriteLine("UnityCliRunner MCP Server");
@@ -261,6 +264,9 @@ static async Task<int> RunTestRpcClientAsync(string[] clientArgs, string project
         RedirectStandardInput = true,
         RedirectStandardOutput = true,
         RedirectStandardError = true,
+        StandardInputEncoding = System.Text.Encoding.UTF8,
+        StandardOutputEncoding = System.Text.Encoding.UTF8,
+        StandardErrorEncoding = System.Text.Encoding.UTF8,
         UseShellExecute = false,
         CreateNoWindow = true
     };
