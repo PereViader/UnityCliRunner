@@ -5,7 +5,14 @@ namespace Tests
     public class DummyTest
     {
         [Test]
-        public void PassTest()
+        public void NormalTest()
+        {
+            Assert.Pass();
+        }
+
+        [Test]
+        [Category("LongRunning")]
+        public void LongTest()
         {
             Assert.Pass();
         }
