@@ -115,3 +115,17 @@ ServerData/
 
 # UnityCliRunner background log
 unity_background_log.txt
+
+# MCP configuration files (contain user/machine-specific absolute paths)
+.agents/plugins/*/mcp_config.json
+.vscode/mcp.json
+.cursor/mcp.json
+.claude/mcp.json
+.mcp.json
+.codex/
+
+# MCP server published binaries
+[Mm][Cc][Pp]~/
+
+
+

@@ -65,6 +65,7 @@ This automatically creates or updates the configuration files for:
 - **VS Code**: `.vscode/mcp.json`
 - **Cursor**: `.cursor/mcp.json`
 - **Claude Code**: `.claude/mcp.json`
+- **Codex**: `.codex/config.toml`
 
 ### Manual MCP Server Configuration
 
@@ -76,8 +77,9 @@ If configuring manually, add the following to your MCP client configuration:
     "unity-cli": {
       "command": "dotnet",
       "args": [
-        "Packages/com.pereviader.unityclirunner/MCP~/UnityCliRunner.Mcp.dll"
-      ]
+        "UnityCliRunner.Mcp.dll"
+      ],
+      "cwd": "<path-to-project>/Packages/com.pereviader.unityclirunner/MCP~/"
     }
   }
 }

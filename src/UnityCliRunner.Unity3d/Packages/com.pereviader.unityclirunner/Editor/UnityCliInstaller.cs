@@ -21,22 +21,25 @@ namespace UnityCliRunner
                     return;
                 }
 
-                string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+                string assetsPath = Application.dataPath;
+                string rootFolder = FindRepositoryRoot(assetsPath);
                 string packagePath = packageInfo.resolvedPath;
-                string dllPath = Path.Combine(packagePath, "MCP~", "UnityCliRunner.Mcp.dll");
-
-                string relDllPath = MakeRelativePath(projectRoot, dllPath).Replace('\\', '/');
+                string mcpDir = Path.GetFullPath(Path.Combine(packagePath, "MCP~")).Replace('\\', '/');
+                if (!mcpDir.EndsWith("/"))
+                {
+                    mcpDir += "/";
+                }
 
                 string[] targetConfigs = new[]
                 {
-                    Path.Combine(projectRoot, ".agents", "plugins", "unity-cli", "mcp_config.json"),
-                    Path.Combine(projectRoot, ".vscode", "mcp.json"),
-                    Path.Combine(projectRoot, ".cursor", "mcp.json"),
-                    Path.Combine(projectRoot, ".claude", "mcp.json"),
-                    Path.Combine(projectRoot, ".mcp.json")
+                    Path.Combine(rootFolder, ".agents", "plugins", "unity-cli", "mcp_config.json"),
+                    Path.Combine(rootFolder, ".vscode", "mcp.json"),
+                    Path.Combine(rootFolder, ".cursor", "mcp.json"),
+                    Path.Combine(rootFolder, ".claude", "mcp.json"),
+                    Path.Combine(rootFolder, ".mcp.json")
                 };
 
-                string pluginJsonPath = Path.Combine(projectRoot, ".agents", "plugins", "unity-cli", "plugin.json");
+                string pluginJsonPath = Path.Combine(rootFolder, ".agents", "plugins", "unity-cli", "plugin.json");
                 if (!File.Exists(pluginJsonPath))
                 {
                     string pluginDir = Path.GetDirectoryName(pluginJsonPath);
@@ -49,9 +52,13 @@ namespace UnityCliRunner
 
                 foreach (string configPath in targetConfigs)
                 {
-                    UpdateOrWriteMcpConfig(configPath, relDllPath);
-                    sb.AppendLine($"• {MakeRelativePath(projectRoot, configPath).Replace('\\', '/')}");
+                    UpdateOrWriteMcpConfig(configPath, mcpDir);
+                    sb.AppendLine($"• {MakeRelativePath(rootFolder, configPath).Replace('\\', '/')}");
                 }
+
+                string codexConfigPath = Path.Combine(rootFolder, ".codex", "config.toml");
+                AppendCodexMcpConfig(codexConfigPath, mcpDir);
+                sb.AppendLine($"• {MakeRelativePath(rootFolder, codexConfigPath).Replace('\\', '/')}");
 
                 Debug.Log($"[UnityCliRunner] {sb}");
                 if (!Application.isBatchMode)
@@ -70,7 +77,23 @@ namespace UnityCliRunner
             }
         }
 
-        private static void UpdateOrWriteMcpConfig(string configPath, string relDllPath)
+        public static string FindRepositoryRoot(string assetsPath)
+        {
+            var dir = new DirectoryInfo(assetsPath);
+            while (dir != null)
+            {
+                string gitDir = Path.Combine(dir.FullName, ".git");
+                if (Directory.Exists(gitDir) || File.Exists(gitDir))
+                {
+                    return dir.FullName;
+                }
+                dir = dir.Parent;
+            }
+
+            return Path.GetFullPath(Path.Combine(assetsPath, ".."));
+        }
+
+        public static void UpdateOrWriteMcpConfig(string configPath, string mcpDir)
         {
             string dir = Path.GetDirectoryName(configPath);
             if (!Directory.Exists(dir))
@@ -78,12 +101,19 @@ namespace UnityCliRunner
                 Directory.CreateDirectory(dir);
             }
 
+            string formattedMcpDir = mcpDir.Replace('\\', '/');
+            if (!formattedMcpDir.EndsWith("/"))
+            {
+                formattedMcpDir += "/";
+            }
+
             string serverJsonSnippet =
                 "    \"unity-cli\": {\n" +
                 "      \"command\": \"dotnet\",\n" +
                 "      \"args\": [\n" +
-                $"        \"{relDllPath}\"\n" +
-                "      ]\n" +
+                "        \"UnityCliRunner.Mcp.dll\"\n" +
+                "      ],\n" +
+                $"      \"cwd\": \"{formattedMcpDir}\"\n" +
                 "    }";
 
             if (!File.Exists(configPath))
@@ -160,6 +190,82 @@ namespace UnityCliRunner
             }
 
             File.WriteAllText(configPath, existing, Encoding.UTF8);
+        }
+
+        public static void AppendCodexMcpConfig(string configPath, string mcpDir)
+        {
+            string dir = Path.GetDirectoryName(configPath);
+            if (!Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string formattedMcpDir = mcpDir.Replace('\\', '/');
+            if (!formattedMcpDir.EndsWith("/"))
+            {
+                formattedMcpDir += "/";
+            }
+
+            string codexTomlSnippet =
+                "[mcp_servers.unity-cli]\n" +
+                "command = \"dotnet\"\n" +
+                "args = [\"UnityCliRunner.Mcp.dll\"]\n" +
+                $"cwd = \"{formattedMcpDir}\"\n";
+
+            if (!File.Exists(configPath))
+            {
+                File.WriteAllText(configPath, codexTomlSnippet, Encoding.UTF8);
+                return;
+            }
+
+            string existing = File.ReadAllText(configPath, Encoding.UTF8);
+            const string targetHeader = "[mcp_servers.unity-cli]";
+            int headerIndex = existing.IndexOf(targetHeader, StringComparison.Ordinal);
+
+            if (headerIndex != -1)
+            {
+                // Find where this section ends: either the next section header starting with '[' on a line, or end of text.
+                int nextSectionIndex = -1;
+                var nextMatch = System.Text.RegularExpressions.Regex.Match(
+                    existing.Substring(headerIndex + targetHeader.Length),
+                    @"(?m)^\[");
+                if (nextMatch.Success)
+                {
+                    nextSectionIndex = headerIndex + targetHeader.Length + nextMatch.Index;
+                }
+
+                string before = existing.Substring(0, headerIndex);
+                string after = nextSectionIndex != -1 ? existing.Substring(nextSectionIndex) : string.Empty;
+
+                var sbReplace = new StringBuilder();
+                sbReplace.Append(before);
+                sbReplace.Append(codexTomlSnippet);
+                if (!string.IsNullOrEmpty(after))
+                {
+                    if (!sbReplace.ToString().EndsWith("\n\n"))
+                    {
+                        sbReplace.AppendLine();
+                    }
+                    sbReplace.Append(after.TrimStart('\r', '\n'));
+                }
+
+                string newText = sbReplace.ToString();
+                if (newText != existing)
+                {
+                    File.WriteAllText(configPath, newText, Encoding.UTF8);
+                }
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append(existing);
+            if (!existing.EndsWith("\n"))
+            {
+                sb.AppendLine();
+            }
+            sb.AppendLine();
+            sb.Append(codexTomlSnippet);
+            File.WriteAllText(configPath, sb.ToString(), Encoding.UTF8);
         }
 
         private static string MakeRelativePath(string fromPath, string toPath)
