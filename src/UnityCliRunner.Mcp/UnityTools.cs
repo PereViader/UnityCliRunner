@@ -284,7 +284,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_stop")]
-    [Description("Safely stops the running Unity background instance.")]
+    [Description("Safely stops the running Unity background instance. Do NOT call this automatically after operations; keep the instance warm for speed. Only use when explicitly requested by the user, to recover from a freeze/hang, or to release project locks so the user can open the Unity GUI.")]
     public async Task<CallToolResult> UnityStopAsync(CancellationToken cancellationToken = default)
     {
         bool stopped = await _processManager.StopUnityAsync(cancellationToken);

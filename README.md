@@ -10,7 +10,7 @@ By communicating with a running Unity Editor (or a headless background instance)
 
 ## Overview & Key Capabilities
 
-UnityCliRunner provides 6 core MCP tools:
+UnityCliRunner provides 8 MCP tools:
 
 1. **`unity_status`**: Inspects Editor connection state (`Ready`, `Not Running`, `Compiling`, or `Running Unreachable`).
 2. **`unity_refresh`**: Triggers `AssetDatabase.Refresh()` and returns compiler diagnostics.
@@ -18,7 +18,8 @@ UnityCliRunner provides 6 core MCP tools:
 4. **`unity_run_tests`**: Runs EditMode and/or PlayMode unit and integration tests with granular filtering by name (`filter`) and category (`category`).
 5. **`unity_execute_method`**: Executes static C# methods (`Namespace.Class.Method`) with typed arguments and returns formatted outputs and console logs.
 6. **`unity_eval`**: Evaluates live C# expressions, statements, or multiline blocks dynamically in-memory without domain reloads.
-7. **`unity_stop`**: Safely stops the running Unity background instance.
+7. **`unity_start`**: Starts a background Unity batchmode instance ahead of time and waits until ready.
+8. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
 
 ---
 
@@ -32,9 +33,10 @@ UnityCliRunner provides 6 core MCP tools:
 | **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`) | Runs tests and reports pass/fail/skip counts and failed stack traces. |
 | **`unity_execute_method`** | `methodName`, `args` (array) | Executes static C# method with arguments (refreshes first, stops Play Mode). |
 | **`unity_eval`** | `code` (string) | Evaluates C# expression or script dynamically in-memory against active Editor/Play Mode. |
-| **`unity_stop`** | _none_ | Safely terminates the background Unity Editor instance. |
+| **`unity_start`** | _none_ | Explicitly boots a background Unity instance in batchmode. |
+| **`unity_stop`** | _none_ | Safely terminates the background instance (used to release GUI locks or recover; do not stop routinely). |
 
-> **Auto-Start**: If Unity is not running when an operation is requested, UnityCliRunner automatically starts a headless background instance in batchmode first.
+> **Auto-Start & Warm Instance**: If Unity is not running when an operation is requested, UnityCliRunner automatically starts a headless background instance in batchmode first and keeps it warm for subsequent commands.
 
 ---
 
