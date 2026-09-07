@@ -75,8 +75,7 @@ public class InstallerTests
               "command": "dotnet",
               "args": [
                 "run",
-                "-v",
-                "q",
+                "--file",
                 "${workspaceFolder}/.unity-cli/Launcher.cs",
                 "--",
                 "--project",
@@ -97,8 +96,7 @@ public class InstallerTests
               "command": "dotnet",
               "args": [
                 "run",
-                "-v",
-                "q",
+                "--file",
                 "${workspaceFolder}/.unity-cli/Launcher.cs",
                 "--",
                 "--project",
@@ -119,8 +117,7 @@ public class InstallerTests
               "command": "dotnet",
               "args": [
                 "run",
-                "-v",
-                "q",
+                "--file",
                 "${CLAUDE_PROJECT_DIR:-.}/.unity-cli/Launcher.cs",
                 "--",
                 "--project",
@@ -140,8 +137,7 @@ public class InstallerTests
               "command": "dotnet",
               "args": [
                 "run",
-                "-v",
-                "q",
+                "--file",
                 "{{formattedLauncherPath}}",
                 "--",
                 "--project",
@@ -286,7 +282,7 @@ public class InstallerTests
         string codexTomlSnippet = $$"""
             [mcp_servers.unity-cli]
             command = "dotnet"
-            args = ["run", "-v", "q", "{{formattedLauncherPath}}", "--", "--project", "{{formattedProjectPath}}"]
+            args = ["run", "--file", "{{formattedLauncherPath}}", "--", "--project", "{{formattedProjectPath}}"]
 
             """;
 
@@ -500,6 +496,7 @@ public class InstallerTests
             Assert.Equal("dotnet", server.GetProperty("command").GetString());
             var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
             Assert.Contains("run", args);
+            Assert.Contains("--file", args);
             Assert.Contains("${workspaceFolder}/.unity-cli/Launcher.cs", args);
             Assert.Contains("${workspaceFolder}/src/UnityProject", args);
             Assert.False(server.TryGetProperty("cwd", out _));
@@ -529,6 +526,8 @@ public class InstallerTests
 
             Assert.Equal("dotnet", server.GetProperty("command").GetString());
             var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
+            Assert.Contains("run", args);
+            Assert.Contains("--file", args);
             Assert.Contains("${workspaceFolder}/.unity-cli/Launcher.cs", args);
             Assert.Contains("${workspaceFolder}/src/UnityProject", args);
         }
@@ -556,6 +555,8 @@ public class InstallerTests
             var server = servers.GetProperty("unity-cli");
 
             var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
+            Assert.Contains("run", args);
+            Assert.Contains("--file", args);
             Assert.Contains("${CLAUDE_PROJECT_DIR:-.}/.unity-cli/Launcher.cs", args);
             Assert.Contains("${CLAUDE_PROJECT_DIR:-.}/src/UnityProject", args);
         }
@@ -585,6 +586,8 @@ public class InstallerTests
 
             Assert.Equal("dotnet", server.GetProperty("command").GetString());
             var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
+            Assert.Contains("run", args);
+            Assert.Contains("--file", args);
             Assert.Contains(launcherPath, args);
             Assert.Contains(projectPath, args);
             Assert.False(server.TryGetProperty("cwd", out _));
@@ -736,7 +739,7 @@ public class InstallerTests
             string content = File.ReadAllText(configFile);
             Assert.Contains("[mcp_servers.unity-cli]", content);
             Assert.Contains("command = \"dotnet\"", content);
-            Assert.Contains($"args = [\"run\", \"-v\", \"q\", \"{launcherPath}\", \"--\", \"--project\", \"{projectPath}\"]", content);
+            Assert.Contains($"args = [\"run\", \"--file\", \"{launcherPath}\", \"--\", \"--project\", \"{projectPath}\"]", content);
         }
         finally
         {
@@ -758,7 +761,7 @@ public class InstallerTests
 
                 [mcp_servers.unity-cli]
                 command = "dotnet"
-                args = ["run", "-v", "q", "C:/OldPath/.unity-cli/Launcher.cs", "--", "--project", "C:/OldPath"]
+                args = ["run", "--file", "C:/OldPath/.unity-cli/Launcher.cs", "--", "--project", "C:/OldPath"]
 
                 [other_section]
                 key = "value"

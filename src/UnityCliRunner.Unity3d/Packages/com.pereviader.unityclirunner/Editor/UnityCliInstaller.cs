@@ -214,8 +214,7 @@ namespace UnityCliRunner
       ""command"": ""dotnet"",
       ""args"": [
         ""run"",
-        ""-v"",
-        ""q"",
+        ""--file"",
         ""${{workspaceFolder}}/.unity-cli/Launcher.cs"",
         ""--"",
         ""--project"",
@@ -234,8 +233,7 @@ namespace UnityCliRunner
       ""command"": ""dotnet"",
       ""args"": [
         ""run"",
-        ""-v"",
-        ""q"",
+        ""--file"",
         ""${{workspaceFolder}}/.unity-cli/Launcher.cs"",
         ""--"",
         ""--project"",
@@ -254,8 +252,7 @@ namespace UnityCliRunner
       ""command"": ""dotnet"",
       ""args"": [
         ""run"",
-        ""-v"",
-        ""q"",
+        ""--file"",
         ""${{CLAUDE_PROJECT_DIR:-.}}/.unity-cli/Launcher.cs"",
         ""--"",
         ""--project"",
@@ -273,8 +270,7 @@ namespace UnityCliRunner
       ""command"": ""dotnet"",
       ""args"": [
         ""run"",
-        ""-v"",
-        ""q"",
+        ""--file"",
         ""{formattedLauncherPath}"",
         ""--"",
         ""--project"",
@@ -411,7 +407,7 @@ namespace UnityCliRunner
 
             string codexTomlSnippet = $@"[mcp_servers.unity-cli]
 command = ""dotnet""
-args = [""run"", ""-v"", ""q"", ""{formattedLauncherPath}"", ""--"", ""--project"", ""{formattedProjectPath}""]
+args = [""run"", ""--file"", ""{formattedLauncherPath}"", ""--"", ""--project"", ""{formattedProjectPath}""]
 
 ";
 

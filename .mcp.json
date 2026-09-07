@@ -4,8 +4,7 @@
       "command": "dotnet",
       "args": [
         "run",
-        "-v",
-        "q",
+        "--file",
         "${CLAUDE_PROJECT_DIR:-.}/.unity-cli/Launcher.cs",
         "--",
         "--project",

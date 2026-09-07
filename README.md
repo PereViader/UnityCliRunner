@@ -85,8 +85,7 @@ For repository-portable configurations (e.g. VS Code, Cursor, Claude Code), invo
       "command": "dotnet",
       "args": [
         "run",
-        "-v",
-        "q",
+        "--file",
         "${workspaceFolder}/.unity-cli/Launcher.cs",
         "--",
         "--project",
