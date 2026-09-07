@@ -8,22 +8,6 @@ namespace UnityCliRunner
 {
     public static class UnityCliInstaller
     {
-        [InitializeOnLoadMethod]
-        private static void OnEditorLoaded()
-        {
-            try
-            {
-                string assetsPath = Application.dataPath;
-                string rootFolder = FindRepositoryRoot(assetsPath);
-                string launcherPath = Path.Combine(rootFolder, ".unity-cli", "Launcher.cs");
-                if (!File.Exists(launcherPath))
-                {
-                    InstallLauncher(rootFolder);
-                }
-            }
-            catch { }
-        }
-
         [MenuItem("Tools/UnityCliRunner/Install MCP Configurations")]
         public static void InstallMcpConfigurations()
         {
@@ -46,13 +30,14 @@ namespace UnityCliRunner
                     mcpDir += "/";
                 }
 
-                string unityProjectFolder = Path.GetFullPath(Path.Combine(assetsPath, ".."));
-                string relProjectPath = GetRelativeProjectPath(rootFolder, unityProjectFolder);
+                // Clean up legacy .unity-cli directory if present
+                string unityCliDir = Path.Combine(rootFolder, ".unity-cli");
+                if (Directory.Exists(unityCliDir))
+                {
+                    try { Directory.Delete(unityCliDir, true); } catch { }
+                }
 
-                // 1. Install repository launcher
-                InstallLauncher(rootFolder, packagePath);
-
-                // 2. Ensure Antigravity plugin manifest
+                // Ensure Antigravity plugin manifest
                 string pluginJsonPath = Path.Combine(rootFolder, ".agents", "plugins", "unity-cli", "plugin.json");
                 if (!File.Exists(pluginJsonPath))
                 {
@@ -61,33 +46,25 @@ namespace UnityCliRunner
                     File.WriteAllText(pluginJsonPath, "{\n  \"name\": \"unity-cli\"\n}\n", Encoding.UTF8);
                 }
 
+                string[] targetConfigs = new[]
+                {
+                    Path.Combine(rootFolder, ".agents", "plugins", "unity-cli", "mcp_config.json"),
+                    Path.Combine(rootFolder, ".vscode", "mcp.json"),
+                    Path.Combine(rootFolder, ".cursor", "mcp.json"),
+                    Path.Combine(rootFolder, ".mcp.json")
+                };
+
                 var sb = new StringBuilder();
-                sb.AppendLine("Installed MCP launcher and configurations to:");
-                sb.AppendLine($"• {MakeRelativePath(rootFolder, Path.Combine(rootFolder, ".unity-cli", "Launcher.cs")).Replace('\\', '/')}");
+                sb.AppendLine("Installed MCP configuration to:");
 
-                // 3. Update portable configs (VS Code, Cursor, Claude Code)
-                string vsCodePath = Path.Combine(rootFolder, ".vscode", "mcp.json");
-                UpdateOrWriteVsCodeConfig(vsCodePath, relProjectPath);
-                sb.AppendLine($"• {MakeRelativePath(rootFolder, vsCodePath).Replace('\\', '/')}");
-
-                string cursorPath = Path.Combine(rootFolder, ".cursor", "mcp.json");
-                UpdateOrWriteCursorConfig(cursorPath, relProjectPath);
-                sb.AppendLine($"• {MakeRelativePath(rootFolder, cursorPath).Replace('\\', '/')}");
-
-                string mcpJsonPath = Path.Combine(rootFolder, ".mcp.json");
-                UpdateOrWriteClaudeCodeConfig(mcpJsonPath, relProjectPath);
-                sb.AppendLine($"• {MakeRelativePath(rootFolder, mcpJsonPath).Replace('\\', '/')}");
-
-                // 4. Update absolute configs (Antigravity, Codex)
-                string launcherPath = Path.GetFullPath(Path.Combine(rootFolder, ".unity-cli", "Launcher.cs")).Replace('\\', '/');
-                string fullProjectPath = Path.GetFullPath(unityProjectFolder).Replace('\\', '/');
-
-                string agyConfigPath = Path.Combine(rootFolder, ".agents", "plugins", "unity-cli", "mcp_config.json");
-                UpdateOrWriteAntigravityConfig(agyConfigPath, launcherPath, fullProjectPath);
-                sb.AppendLine($"• {MakeRelativePath(rootFolder, agyConfigPath).Replace('\\', '/')}");
+                foreach (string configPath in targetConfigs)
+                {
+                    UpdateOrWriteMcpConfig(configPath, mcpDir);
+                    sb.AppendLine($"• {MakeRelativePath(rootFolder, configPath).Replace('\\', '/')}");
+                }
 
                 string codexConfigPath = Path.Combine(rootFolder, ".codex", "config.toml");
-                AppendCodexMcpConfig(codexConfigPath, launcherPath, fullProjectPath);
+                AppendCodexMcpConfig(codexConfigPath, mcpDir);
                 sb.AppendLine($"• {MakeRelativePath(rootFolder, codexConfigPath).Replace('\\', '/')}");
 
                 Debug.Log($"[UnityCliRunner] {sb}");
@@ -123,183 +100,7 @@ namespace UnityCliRunner
             return Path.GetFullPath(Path.Combine(assetsPath, ".."));
         }
 
-        public static string GetRelativeProjectPath(string rootFolder, string unityProjectFolder)
-        {
-            string fullRoot = Path.GetFullPath(rootFolder).TrimEnd('/', '\\');
-            string fullProject = Path.GetFullPath(unityProjectFolder).TrimEnd('/', '\\');
-            if (string.Equals(fullRoot, fullProject, StringComparison.OrdinalIgnoreCase))
-            {
-                return "";
-            }
-            string rel = MakeRelativePath(fullRoot, fullProject).Trim().Replace('\\', '/');
-            if (string.IsNullOrEmpty(rel) || rel == "." || rel == "./")
-            {
-                return "";
-            }
-            return rel.TrimEnd('/');
-        }
-
-        public static string FindLauncherTemplatePath(string packagePath = null)
-        {
-            if (!string.IsNullOrEmpty(packagePath))
-            {
-                string p = Path.Combine(packagePath, "Launcher~", "Launcher.cs");
-                if (File.Exists(p)) return p;
-            }
-
-            try
-            {
-                var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(UnityCliInstaller).Assembly);
-                if (packageInfo != null && !string.IsNullOrEmpty(packageInfo.resolvedPath))
-                {
-                    string p = Path.Combine(packageInfo.resolvedPath, "Launcher~", "Launcher.cs");
-                    if (File.Exists(p)) return p;
-                }
-            }
-            catch { }
-
-            string assetsPath = Application.dataPath;
-            string unityProjectFolder = Path.GetFullPath(Path.Combine(assetsPath, ".."));
-            string[] searchPaths = new[]
-            {
-                Path.Combine(unityProjectFolder, "Packages", "com.pereviader.unityclirunner", "Launcher~", "Launcher.cs"),
-                Path.Combine(unityProjectFolder, "src", "UnityCliRunner.Unity3d", "Packages", "com.pereviader.unityclirunner", "Launcher~", "Launcher.cs")
-            };
-
-            foreach (var sp in searchPaths)
-            {
-                if (File.Exists(sp)) return sp;
-            }
-
-            return null;
-        }
-
-        public static void InstallLauncher(string rootFolder, string packagePath = null)
-        {
-            string unityCliDir = Path.Combine(rootFolder, ".unity-cli");
-            if (!Directory.Exists(unityCliDir))
-            {
-                Directory.CreateDirectory(unityCliDir);
-            }
-
-            string launcherPath = Path.Combine(unityCliDir, "Launcher.cs");
-            string templatePath = FindLauncherTemplatePath(packagePath);
-
-            if (templatePath != null && File.Exists(templatePath))
-            {
-                if (!File.Exists(launcherPath) || File.ReadAllText(launcherPath, Encoding.UTF8) != File.ReadAllText(templatePath, Encoding.UTF8))
-                {
-                    File.Copy(templatePath, launcherPath, overwrite: true);
-                }
-            }
-            else if (!File.Exists(launcherPath))
-            {
-                Debug.LogWarning("[UnityCliRunner] Launcher template file 'Launcher~/Launcher.cs' could not be found.");
-            }
-
-            string legacyLauncherDir = Path.Combine(unityCliDir, "launcher");
-            if (Directory.Exists(legacyLauncherDir))
-            {
-                try { Directory.Delete(legacyLauncherDir, true); } catch { }
-            }
-        }
-
-        public static string BuildVsCodeSnippet(string relProjectPath)
-        {
-            string projectArg = string.IsNullOrEmpty(relProjectPath)
-                ? "${workspaceFolder}"
-                : "${workspaceFolder}/" + relProjectPath.TrimStart('/');
-
-            return $@"    ""unity-cli"": {{
-      ""command"": ""dotnet"",
-      ""args"": [
-        ""run"",
-        ""--file"",
-        ""${{workspaceFolder}}/.unity-cli/Launcher.cs"",
-        ""--"",
-        ""--project"",
-        ""{projectArg}""
-      ]
-    }}";
-        }
-
-        public static string BuildCursorSnippet(string relProjectPath)
-        {
-            string projectArg = string.IsNullOrEmpty(relProjectPath)
-                ? "${workspaceFolder}"
-                : "${workspaceFolder}/" + relProjectPath.TrimStart('/');
-
-            return $@"    ""unity-cli"": {{
-      ""command"": ""dotnet"",
-      ""args"": [
-        ""run"",
-        ""--file"",
-        ""${{workspaceFolder}}/.unity-cli/Launcher.cs"",
-        ""--"",
-        ""--project"",
-        ""{projectArg}""
-      ]
-    }}";
-        }
-
-        public static string BuildClaudeCodeSnippet(string relProjectPath)
-        {
-            string projectArg = string.IsNullOrEmpty(relProjectPath)
-                ? "${CLAUDE_PROJECT_DIR:-.}"
-                : "${CLAUDE_PROJECT_DIR:-.}/" + relProjectPath.TrimStart('/');
-
-            return $@"    ""unity-cli"": {{
-      ""command"": ""dotnet"",
-      ""args"": [
-        ""run"",
-        ""--file"",
-        ""${{CLAUDE_PROJECT_DIR:-.}}/.unity-cli/Launcher.cs"",
-        ""--"",
-        ""--project"",
-        ""{projectArg}""
-      ]
-    }}";
-        }
-
-        public static string BuildAntigravitySnippet(string launcherPath, string fullProjectPath)
-        {
-            string formattedLauncherPath = launcherPath.Replace('\\', '/');
-            string formattedProjectPath = fullProjectPath.Replace('\\', '/');
-
-            return $@"    ""unity-cli"": {{
-      ""command"": ""dotnet"",
-      ""args"": [
-        ""run"",
-        ""--file"",
-        ""{formattedLauncherPath}"",
-        ""--"",
-        ""--project"",
-        ""{formattedProjectPath}""
-      ]
-    }}";
-        }
-
-        public static void UpdateOrWriteVsCodeConfig(string configPath, string relProjectPath)
-        {
-            UpdateOrWriteServerConfig(configPath, "servers", BuildVsCodeSnippet(relProjectPath));
-        }
-
-        public static void UpdateOrWriteCursorConfig(string configPath, string relProjectPath)
-        {
-            UpdateOrWriteServerConfig(configPath, "mcpServers", BuildCursorSnippet(relProjectPath));
-        }
-
-        public static void UpdateOrWriteClaudeCodeConfig(string configPath, string relProjectPath)
-        {
-            UpdateOrWriteServerConfig(configPath, "mcpServers", BuildClaudeCodeSnippet(relProjectPath));
-        }
-
-        public static void UpdateOrWriteAntigravityConfig(string configPath, string launcherPath, string fullProjectPath)
-        {
-            UpdateOrWriteServerConfig(configPath, "mcpServers", BuildAntigravitySnippet(launcherPath, fullProjectPath));
-        }
-
-        public static void UpdateOrWriteServerConfig(string configPath, string rootKey, string serverSnippet)
+        public static void UpdateOrWriteMcpConfig(string configPath, string mcpDir, string rootKey = "mcpServers")
         {
             string dir = Path.GetDirectoryName(configPath);
             if (!Directory.Exists(dir))
@@ -307,14 +108,36 @@ namespace UnityCliRunner
                 Directory.CreateDirectory(dir);
             }
 
+            string formattedMcpDir = mcpDir.Replace('\\', '/');
+            if (!formattedMcpDir.EndsWith("/"))
+            {
+                formattedMcpDir += "/";
+            }
+
+            string serverJsonSnippet =
+                "    \"unity-cli\": {\n" +
+                "      \"command\": \"dotnet\",\n" +
+                "      \"args\": [\n" +
+                "        \"UnityCliRunner.Mcp.dll\"\n" +
+                "      ],\n" +
+                $"      \"cwd\": \"{formattedMcpDir}\"\n" +
+                "    }";
+
+            string normalizedPath = configPath.Replace('\\', '/');
+            string effectiveRootKey = rootKey;
+            if (normalizedPath.EndsWith("/.vscode/mcp.json"))
+            {
+                effectiveRootKey = "servers";
+            }
+
             if (!File.Exists(configPath))
             {
-                string newContent = $@"{{
-  ""{rootKey}"": {{
-{serverSnippet}
-  }}
-}}
-";
+                string newContent =
+                    "{\n" +
+                    $"  \"{effectiveRootKey}\": {{\n" +
+                    serverJsonSnippet.TrimStart() + "\n" +
+                    "  }\n" +
+                    "}\n";
                 File.WriteAllText(configPath, newContent, Encoding.UTF8);
                 return;
             }
@@ -322,16 +145,17 @@ namespace UnityCliRunner
             string existing = File.ReadAllText(configPath, Encoding.UTF8).Trim();
             if (string.IsNullOrWhiteSpace(existing))
             {
-                string newContent = $@"{{
-  ""{rootKey}"": {{
-{serverSnippet}
-  }}
-}}
-";
+                string newContent =
+                    "{\n" +
+                    $"  \"{effectiveRootKey}\": {{\n" +
+                    serverJsonSnippet.TrimStart() + "\n" +
+                    "  }\n" +
+                    "}\n";
                 File.WriteAllText(configPath, newContent, Encoding.UTF8);
                 return;
             }
 
+            // If unity-cli already exists, replace its block; otherwise insert into root key
             if (existing.Contains("\"unity-cli\""))
             {
                 int unityIndex = existing.IndexOf("\"unity-cli\"", StringComparison.Ordinal);
@@ -358,17 +182,22 @@ namespace UnityCliRunner
                     {
                         string before = existing.Substring(0, unityIndex);
                         string after = existing.Substring(closeBrace + 1);
-                        string updated = before + serverSnippet.TrimStart() + after;
+                        string updated = before + serverJsonSnippet.TrimStart() + after;
                         File.WriteAllText(configPath, updated, Encoding.UTF8);
                         return;
                     }
                 }
             }
 
-            int sectionIndex = existing.IndexOf($"\"{rootKey}\"", StringComparison.Ordinal);
-            if (sectionIndex == -1 && rootKey == "servers")
+            // Insert into root section (effectiveRootKey, or fallback to alternatives)
+            int sectionIndex = existing.IndexOf($"\"{effectiveRootKey}\"", StringComparison.Ordinal);
+            if (sectionIndex == -1 && effectiveRootKey == "servers")
             {
                 sectionIndex = existing.IndexOf("\"mcpServers\"", StringComparison.Ordinal);
+            }
+            else if (sectionIndex == -1 && effectiveRootKey == "mcpServers")
+            {
+                sectionIndex = existing.IndexOf("\"servers\"", StringComparison.Ordinal);
             }
 
             if (sectionIndex != -1)
@@ -379,22 +208,22 @@ namespace UnityCliRunner
                     string before = existing.Substring(0, openBrace + 1);
                     string after = existing.Substring(openBrace + 1);
                     string separator = after.TrimStart().StartsWith("}") ? "\n" : ",\n";
-                    string updated = before + "\n" + serverSnippet + separator + after.TrimStart();
+                    string updated = before + "\n" + serverJsonSnippet + separator + after.TrimStart();
                     File.WriteAllText(configPath, updated, Encoding.UTF8);
                     return;
                 }
             }
 
-            string fallbackContent = $@"{{
-  ""{rootKey}"": {{
-{serverSnippet}
-  }}
-}}
-";
+            string fallbackContent =
+                "{\n" +
+                $"  \"{effectiveRootKey}\": {{\n" +
+                serverJsonSnippet.TrimStart() + "\n" +
+                "  }\n" +
+                "}\n";
             File.WriteAllText(configPath, fallbackContent, Encoding.UTF8);
         }
 
-        public static void AppendCodexMcpConfig(string configPath, string launcherPath, string fullProjectPath)
+        public static void AppendCodexMcpConfig(string configPath, string mcpDir)
         {
             string dir = Path.GetDirectoryName(configPath);
             if (!Directory.Exists(dir))
@@ -402,15 +231,17 @@ namespace UnityCliRunner
                 Directory.CreateDirectory(dir);
             }
 
-            string formattedLauncherPath = launcherPath.Replace('\\', '/');
-            string formattedProjectPath = fullProjectPath.Replace('\\', '/');
+            string formattedMcpDir = mcpDir.Replace('\\', '/');
+            if (!formattedMcpDir.EndsWith("/"))
+            {
+                formattedMcpDir += "/";
+            }
 
-            string codexTomlSnippet = $@"[mcp_servers.unity-cli]
-command = ""dotnet""
-args = [""run"", ""--file"", ""{formattedLauncherPath}"", ""--"", ""--project"", ""{formattedProjectPath}""]
-
-";
-
+            string codexTomlSnippet =
+                "[mcp_servers.unity-cli]\n" +
+                "command = \"dotnet\"\n" +
+                "args = [\"UnityCliRunner.Mcp.dll\"]\n" +
+                $"cwd = \"{formattedMcpDir}\"\n";
 
             if (!File.Exists(configPath))
             {

@@ -24,150 +24,7 @@ public class InstallerTests
         return Path.GetFullPath(Path.Combine(assetsPath, ".."));
     }
 
-    private static string GetRelativeProjectPath(string rootFolder, string unityProjectFolder)
-    {
-        string fullRoot = Path.GetFullPath(rootFolder).TrimEnd('/', '\\');
-        string fullProject = Path.GetFullPath(unityProjectFolder).TrimEnd('/', '\\');
-        if (string.Equals(fullRoot, fullProject, StringComparison.OrdinalIgnoreCase))
-        {
-            return "";
-        }
-        string rel = MakeRelativePath(fullRoot, fullProject).Trim().Replace('\\', '/');
-        if (string.IsNullOrEmpty(rel) || rel == "." || rel == "./")
-        {
-            return "";
-        }
-        return rel.TrimEnd('/');
-    }
-
-    private static void InstallLauncher(string rootFolder, string? templateFilePath = null)
-    {
-        string unityCliDir = Path.Combine(rootFolder, ".unity-cli");
-        if (!Directory.Exists(unityCliDir))
-        {
-            Directory.CreateDirectory(unityCliDir);
-        }
-
-        string launcherPath = Path.Combine(unityCliDir, "Launcher.cs");
-        if (!string.IsNullOrEmpty(templateFilePath) && File.Exists(templateFilePath))
-        {
-            if (!File.Exists(launcherPath) || File.ReadAllText(launcherPath, System.Text.Encoding.UTF8) != File.ReadAllText(templateFilePath, System.Text.Encoding.UTF8))
-            {
-                File.Copy(templateFilePath, launcherPath, overwrite: true);
-            }
-        }
-
-        string legacyLauncherDir = Path.Combine(unityCliDir, "launcher");
-        if (Directory.Exists(legacyLauncherDir))
-        {
-            try { Directory.Delete(legacyLauncherDir, true); } catch { }
-        }
-    }
-
-    private static string BuildVsCodeSnippet(string relProjectPath)
-    {
-        string projectArg = string.IsNullOrEmpty(relProjectPath)
-            ? "${workspaceFolder}"
-            : "${workspaceFolder}/" + relProjectPath.TrimStart('/');
-
-        return $$"""
-            "unity-cli": {
-              "command": "dotnet",
-              "args": [
-                "run",
-                "--file",
-                "${workspaceFolder}/.unity-cli/Launcher.cs",
-                "--",
-                "--project",
-                "{{projectArg}}"
-              ]
-            }
-        """;
-    }
-
-    private static string BuildCursorSnippet(string relProjectPath)
-    {
-        string projectArg = string.IsNullOrEmpty(relProjectPath)
-            ? "${workspaceFolder}"
-            : "${workspaceFolder}/" + relProjectPath.TrimStart('/');
-
-        return $$"""
-            "unity-cli": {
-              "command": "dotnet",
-              "args": [
-                "run",
-                "--file",
-                "${workspaceFolder}/.unity-cli/Launcher.cs",
-                "--",
-                "--project",
-                "{{projectArg}}"
-              ]
-            }
-        """;
-    }
-
-    private static string BuildClaudeCodeSnippet(string relProjectPath)
-    {
-        string projectArg = string.IsNullOrEmpty(relProjectPath)
-            ? "${CLAUDE_PROJECT_DIR:-.}"
-            : "${CLAUDE_PROJECT_DIR:-.}/" + relProjectPath.TrimStart('/');
-
-        return $$"""
-            "unity-cli": {
-              "command": "dotnet",
-              "args": [
-                "run",
-                "--file",
-                "${CLAUDE_PROJECT_DIR:-.}/.unity-cli/Launcher.cs",
-                "--",
-                "--project",
-                "{{projectArg}}"
-              ]
-            }
-        """;
-    }
-
-    private static string BuildAntigravitySnippet(string launcherPath, string fullProjectPath)
-    {
-        string formattedLauncherPath = launcherPath.Replace('\\', '/');
-        string formattedProjectPath = fullProjectPath.Replace('\\', '/');
-
-        return $$"""
-            "unity-cli": {
-              "command": "dotnet",
-              "args": [
-                "run",
-                "--file",
-                "{{formattedLauncherPath}}",
-                "--",
-                "--project",
-                "{{formattedProjectPath}}"
-              ]
-            }
-        """;
-    }
-
-    private static void UpdateOrWriteVsCodeConfig(string configPath, string relProjectPath)
-    {
-        UpdateOrWriteServerConfig(configPath, "servers", BuildVsCodeSnippet(relProjectPath));
-    }
-
-    private static void UpdateOrWriteCursorConfig(string configPath, string relProjectPath)
-    {
-        UpdateOrWriteServerConfig(configPath, "mcpServers", BuildCursorSnippet(relProjectPath));
-    }
-
-    private static void UpdateOrWriteClaudeCodeConfig(string configPath, string relProjectPath)
-    {
-        UpdateOrWriteServerConfig(configPath, "mcpServers", BuildClaudeCodeSnippet(relProjectPath));
-    }
-
-    private static void UpdateOrWriteAntigravityConfig(string configPath, string launcherPath, string fullProjectPath)
-    {
-        UpdateOrWriteServerConfig(configPath, "mcpServers", BuildAntigravitySnippet(launcherPath, fullProjectPath));
-    }
-
-    private static void UpdateOrWriteServerConfig(string configPath, string rootKey, string serverSnippet)
+    private static void UpdateOrWriteMcpConfig(string configPath, string mcpDir, string rootKey = "mcpServers")
     {
         string dir = Path.GetDirectoryName(configPath)!;
         if (!Directory.Exists(dir))
@@ -175,16 +32,36 @@ public class InstallerTests
             Directory.CreateDirectory(dir);
         }
 
+        string formattedMcpDir = mcpDir.Replace('\\', '/');
+        if (!formattedMcpDir.EndsWith("/"))
+        {
+            formattedMcpDir += "/";
+        }
+
+        string serverJsonSnippet =
+            "    \"unity-cli\": {\n" +
+            "      \"command\": \"dotnet\",\n" +
+            "      \"args\": [\n" +
+            "        \"UnityCliRunner.Mcp.dll\"\n" +
+            "      ],\n" +
+            $"      \"cwd\": \"{formattedMcpDir}\"\n" +
+            "    }";
+
+        string normalizedPath = configPath.Replace('\\', '/');
+        string effectiveRootKey = rootKey;
+        if (normalizedPath.EndsWith("/.vscode/mcp.json"))
+        {
+            effectiveRootKey = "servers";
+        }
+
         if (!File.Exists(configPath))
         {
-            string newContent = $$"""
-            {
-              "{{rootKey}}": {
-            {{serverSnippet}}
-              }
-            }
-
-            """;
+            string newContent =
+                "{\n" +
+                $"  \"{effectiveRootKey}\": {{\n" +
+                serverJsonSnippet.TrimStart() + "\n" +
+                "  }\n" +
+                "}\n";
             File.WriteAllText(configPath, newContent, System.Text.Encoding.UTF8);
             return;
         }
@@ -192,14 +69,12 @@ public class InstallerTests
         string existing = File.ReadAllText(configPath, System.Text.Encoding.UTF8).Trim();
         if (string.IsNullOrWhiteSpace(existing))
         {
-            string newContent = $$"""
-            {
-              "{{rootKey}}": {
-            {{serverSnippet}}
-              }
-            }
-
-            """;
+            string newContent =
+                "{\n" +
+                $"  \"{effectiveRootKey}\": {{\n" +
+                serverJsonSnippet.TrimStart() + "\n" +
+                "  }\n" +
+                "}\n";
             File.WriteAllText(configPath, newContent, System.Text.Encoding.UTF8);
             return;
         }
@@ -230,17 +105,21 @@ public class InstallerTests
                 {
                     string before = existing.Substring(0, unityIndex);
                     string after = existing.Substring(closeBrace + 1);
-                    string updated = before + serverSnippet.TrimStart() + after;
+                    string updated = before + serverJsonSnippet.TrimStart() + after;
                     File.WriteAllText(configPath, updated, System.Text.Encoding.UTF8);
                     return;
                 }
             }
         }
 
-        int sectionIndex = existing.IndexOf($"\"{rootKey}\"", StringComparison.Ordinal);
-        if (sectionIndex == -1 && rootKey == "servers")
+        int sectionIndex = existing.IndexOf($"\"{effectiveRootKey}\"", StringComparison.Ordinal);
+        if (sectionIndex == -1 && effectiveRootKey == "servers")
         {
             sectionIndex = existing.IndexOf("\"mcpServers\"", StringComparison.Ordinal);
+        }
+        else if (sectionIndex == -1 && effectiveRootKey == "mcpServers")
+        {
+            sectionIndex = existing.IndexOf("\"servers\"", StringComparison.Ordinal);
         }
 
         if (sectionIndex != -1)
@@ -251,24 +130,22 @@ public class InstallerTests
                 string before = existing.Substring(0, openBrace + 1);
                 string after = existing.Substring(openBrace + 1);
                 string separator = after.TrimStart().StartsWith("}") ? "\n" : ",\n";
-                string updated = before + "\n" + serverSnippet + separator + after.TrimStart();
+                string updated = before + "\n" + serverJsonSnippet + separator + after.TrimStart();
                 File.WriteAllText(configPath, updated, System.Text.Encoding.UTF8);
                 return;
             }
         }
 
-        string fallbackContent = $$"""
-            {
-              "{{rootKey}}": {
-            {{serverSnippet}}
-              }
-            }
-
-            """;
+        string fallbackContent =
+            "{\n" +
+            $"  \"{effectiveRootKey}\": {{\n" +
+            serverJsonSnippet.TrimStart() + "\n" +
+            "  }\n" +
+            "}\n";
         File.WriteAllText(configPath, fallbackContent, System.Text.Encoding.UTF8);
     }
 
-    private static void AppendCodexMcpConfig(string configPath, string launcherPath, string fullProjectPath)
+    private static void AppendCodexMcpConfig(string configPath, string mcpDir)
     {
         string dir = Path.GetDirectoryName(configPath)!;
         if (!Directory.Exists(dir))
@@ -276,15 +153,17 @@ public class InstallerTests
             Directory.CreateDirectory(dir);
         }
 
-        string formattedLauncherPath = launcherPath.Replace('\\', '/');
-        string formattedProjectPath = fullProjectPath.Replace('\\', '/');
+        string formattedMcpDir = mcpDir.Replace('\\', '/');
+        if (!formattedMcpDir.EndsWith("/"))
+        {
+            formattedMcpDir += "/";
+        }
 
-        string codexTomlSnippet = $$"""
-            [mcp_servers.unity-cli]
-            command = "dotnet"
-            args = ["run", "--file", "{{formattedLauncherPath}}", "--", "--project", "{{formattedProjectPath}}"]
-
-            """;
+        string codexTomlSnippet =
+            "[mcp_servers.unity-cli]\n" +
+            "command = \"dotnet\"\n" +
+            "args = [\"UnityCliRunner.Mcp.dll\"]\n" +
+            $"cwd = \"{formattedMcpDir}\"\n";
 
         if (!File.Exists(configPath))
         {
@@ -341,76 +220,20 @@ public class InstallerTests
         File.WriteAllText(configPath, sb.ToString(), System.Text.Encoding.UTF8);
     }
 
-    private static string MakeRelativePath(string fromPath, string toPath)
-    {
-        var fromUri = new Uri(AppendSlash(Path.GetFullPath(fromPath)));
-        var toUri = new Uri(Path.GetFullPath(toPath));
-        if (fromUri.Scheme != toUri.Scheme)
-        {
-            return toPath;
-        }
-        var relativeUri = fromUri.MakeRelativeUri(toUri);
-        string relPath = Uri.UnescapeDataString(relativeUri.ToString());
-        return relPath.Replace('\\', '/');
-    }
-
-    private static string AppendSlash(string path)
-    {
-        return path.EndsWith(Path.DirectorySeparatorChar.ToString())
-            ? path
-            : path + Path.DirectorySeparatorChar;
-    }
-
-    private static string? FindMcpDll(string unityProjectPath)
-    {
-        string[] embeddedPaths = new[]
-        {
-            Path.Combine(unityProjectPath, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll"),
-            Path.Combine(unityProjectPath, "Packages", "com.pereviader.unityclirunner", "MCP", "UnityCliRunner.Mcp.dll")
-        };
-        foreach (var p in embeddedPaths)
-        {
-            if (File.Exists(p)) return p;
-        }
-
-        string packageCache = Path.Combine(unityProjectPath, "Library", "PackageCache");
-        if (Directory.Exists(packageCache))
-        {
-            try
-            {
-                var matchingDirs = new DirectoryInfo(packageCache)
-                    .GetDirectories("com.pereviader.unityclirunner*")
-                    .OrderByDescending(d => d.LastWriteTimeUtc);
-
-                foreach (var d in matchingDirs)
-                {
-                    string dll1 = Path.Combine(d.FullName, "MCP~", "UnityCliRunner.Mcp.dll");
-                    if (File.Exists(dll1)) return dll1;
-
-                    string dll2 = Path.Combine(d.FullName, "MCP", "UnityCliRunner.Mcp.dll");
-                    if (File.Exists(dll2)) return dll2;
-                }
-            }
-            catch { }
-        }
-
-        return null;
-    }
-
     [Fact]
-    public void FindRepositoryRoot_WhenGitFolderExistsInParent_FindsGitFolderRoot()
+    public void FindRepositoryRoot_WhenInsideNestedFolder_FindsGitDirectory()
     {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_repo_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_git_root_" + Guid.NewGuid().ToString("N"));
         try
         {
             string gitDir = Path.Combine(tempBase, ".git");
-            string unityDir = Path.Combine(tempBase, "src", "UnityProject");
-            string assetsDir = Path.Combine(unityDir, "Assets");
             Directory.CreateDirectory(gitDir);
+
+            string assetsDir = Path.Combine(tempBase, "unity_project", "Assets");
             Directory.CreateDirectory(assetsDir);
 
-            string detected = FindRepositoryRoot(assetsDir);
-            Assert.Equal(Path.GetFullPath(tempBase), Path.GetFullPath(detected));
+            string detectedRoot = FindRepositoryRoot(assetsDir);
+            Assert.Equal(Path.GetFullPath(tempBase), Path.GetFullPath(detectedRoot));
         }
         finally
         {
@@ -419,17 +242,17 @@ public class InstallerTests
     }
 
     [Fact]
-    public void FindRepositoryRoot_WhenNoGitFolder_FallsBackToUnityProjectRoot()
+    public void FindRepositoryRoot_WhenNoGitDirectory_FallsBackToParent()
     {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_nogit_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_no_git_" + Guid.NewGuid().ToString("N"));
         try
         {
-            string unityDir = Path.Combine(tempBase, "MyUnityProject");
-            string assetsDir = Path.Combine(unityDir, "Assets");
+            string assetsDir = Path.Combine(tempBase, "unity_project", "Assets");
             Directory.CreateDirectory(assetsDir);
 
-            string detected = FindRepositoryRoot(assetsDir);
-            Assert.Equal(Path.GetFullPath(unityDir), Path.GetFullPath(detected));
+            string detectedRoot = FindRepositoryRoot(assetsDir);
+            string expectedParent = Path.GetFullPath(Path.Combine(assetsDir, ".."));
+            Assert.Equal(expectedParent, Path.GetFullPath(detectedRoot));
         }
         finally
         {
@@ -438,98 +261,26 @@ public class InstallerTests
     }
 
     [Fact]
-    public void GetRelativeProjectPath_WhenSameFolder_ReturnsEmpty()
+    public void UpdateOrWriteMcpConfig_WhenFileDoesNotExist_CreatesNewFileWithMcpServers()
     {
-        string repoRoot = "C:/repo";
-        string unityProject = "C:/repo";
-        Assert.Equal("", GetRelativeProjectPath(repoRoot, unityProject));
-    }
-
-    [Fact]
-    public void GetRelativeProjectPath_WhenSubfolder_ReturnsRelativePath()
-    {
-        string repoRoot = "C:/repo";
-        string unityProject = "C:/repo/src/UnityProject";
-        Assert.Equal("src/UnityProject", GetRelativeProjectPath(repoRoot, unityProject));
-    }
-
-    [Fact]
-    public void InstallLauncher_CopiesLauncherTemplate()
-    {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_launcher_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(tempBase, "Launcher~"));
-            string templateFile = Path.Combine(tempBase, "Launcher~", "Launcher.cs");
-            File.WriteAllText(templateFile, "// Launcher template test content");
-
-            InstallLauncher(tempBase, templateFile);
-
-            string launcherFile = Path.Combine(tempBase, ".unity-cli", "Launcher.cs");
-            Assert.True(File.Exists(launcherFile));
-            Assert.Equal("// Launcher template test content", File.ReadAllText(launcherFile));
-            Assert.False(Directory.Exists(Path.Combine(tempBase, ".unity-cli", "launcher")));
-        }
-        finally
-        {
-            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
-        }
-    }
-
-    [Fact]
-    public void UpdateOrWriteVsCodeConfig_CreatesServersSectionWithWorkspaceFolder()
-    {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_vscode_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            string configFile = Path.Combine(tempBase, ".vscode", "mcp.json");
-            UpdateOrWriteVsCodeConfig(configFile, "src/UnityProject");
-
-            Assert.True(File.Exists(configFile));
-            string content = File.ReadAllText(configFile);
-
-            using var doc = JsonDocument.Parse(content);
-            var root = doc.RootElement;
-            Assert.True(root.TryGetProperty("servers", out var servers));
-            var server = servers.GetProperty("unity-cli");
-
-            Assert.Equal("dotnet", server.GetProperty("command").GetString());
-            var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
-            Assert.Contains("run", args);
-            Assert.Contains("--file", args);
-            Assert.Contains("${workspaceFolder}/.unity-cli/Launcher.cs", args);
-            Assert.Contains("${workspaceFolder}/src/UnityProject", args);
-            Assert.False(server.TryGetProperty("cwd", out _));
-        }
-        finally
-        {
-            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
-        }
-    }
-
-    [Fact]
-    public void UpdateOrWriteCursorConfig_CreatesMcpServersSectionWithWorkspaceFolder()
-    {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_cursor_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_config_" + Guid.NewGuid().ToString("N"));
         try
         {
             string configFile = Path.Combine(tempBase, ".cursor", "mcp.json");
-            UpdateOrWriteCursorConfig(configFile, "src/UnityProject");
+            string mcpDir = "C:/MyPackage/MCP~/";
+
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
 
             Assert.True(File.Exists(configFile));
             string content = File.ReadAllText(configFile);
-
             using var doc = JsonDocument.Parse(content);
-            var root = doc.RootElement;
-            Assert.True(root.TryGetProperty("mcpServers", out var servers));
-            var server = servers.GetProperty("unity-cli");
+            var servers = doc.RootElement.GetProperty("mcpServers");
+            var unityCli = servers.GetProperty("unity-cli");
 
-            Assert.Equal("dotnet", server.GetProperty("command").GetString());
-            var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
-            Assert.Contains("run", args);
-            Assert.Contains("--file", args);
-            Assert.Contains("${workspaceFolder}/.unity-cli/Launcher.cs", args);
-            Assert.Contains("${workspaceFolder}/src/UnityProject", args);
+            Assert.Equal("dotnet", unityCli.GetProperty("command").GetString());
+            var args = unityCli.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
+            Assert.Equal(new[] { "UnityCliRunner.Mcp.dll" }, args);
+            Assert.Equal(mcpDir, unityCli.GetProperty("cwd").GetString());
         }
         finally
         {
@@ -538,27 +289,26 @@ public class InstallerTests
     }
 
     [Fact]
-    public void UpdateOrWriteClaudeCodeConfig_UsesClaudeProjectDirSubstitution()
+    public void UpdateOrWriteMcpConfig_WhenVsCodeConfigDoesNotExist_CreatesNewFileWithServers()
     {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_claude_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_config_" + Guid.NewGuid().ToString("N"));
         try
         {
-            string configFile = Path.Combine(tempBase, ".mcp.json");
-            UpdateOrWriteClaudeCodeConfig(configFile, "src/UnityProject");
+            string configFile = Path.Combine(tempBase, ".vscode", "mcp.json");
+            string mcpDir = "C:/MyPackage/MCP~/";
+
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
 
             Assert.True(File.Exists(configFile));
             string content = File.ReadAllText(configFile);
-
             using var doc = JsonDocument.Parse(content);
-            var root = doc.RootElement;
-            Assert.True(root.TryGetProperty("mcpServers", out var servers));
-            var server = servers.GetProperty("unity-cli");
+            var servers = doc.RootElement.GetProperty("servers");
+            var unityCli = servers.GetProperty("unity-cli");
 
-            var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
-            Assert.Contains("run", args);
-            Assert.Contains("--file", args);
-            Assert.Contains("${CLAUDE_PROJECT_DIR:-.}/.unity-cli/Launcher.cs", args);
-            Assert.Contains("${CLAUDE_PROJECT_DIR:-.}/src/UnityProject", args);
+            Assert.Equal("dotnet", unityCli.GetProperty("command").GetString());
+            var args = unityCli.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
+            Assert.Equal(new[] { "UnityCliRunner.Mcp.dll" }, args);
+            Assert.Equal(mcpDir, unityCli.GetProperty("cwd").GetString());
         }
         finally
         {
@@ -567,30 +317,22 @@ public class InstallerTests
     }
 
     [Fact]
-    public void UpdateOrWriteAntigravityConfig_UsesLauncherAndProjectArgs()
+    public void UpdateOrWriteMcpConfig_WhenFileIsEmpty_OverwritesWithNewContent()
     {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_agy_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_empty_" + Guid.NewGuid().ToString("N"));
         try
         {
-            string configFile = Path.Combine(tempBase, ".agents", "plugins", "unity-cli", "mcp_config.json");
-            string launcherPath = "C:/MyRepo/.unity-cli/Launcher.cs";
-            string projectPath = "C:/MyRepo/src/UnityProject";
+            string configFile = Path.Combine(tempBase, ".cursor", "mcp.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
+            File.WriteAllText(configFile, "   \n\t  ");
 
-            UpdateOrWriteAntigravityConfig(configFile, launcherPath, projectPath);
+            string mcpDir = "C:/MyPackage/MCP~/";
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
 
-            Assert.True(File.Exists(configFile));
             string content = File.ReadAllText(configFile);
-
             using var doc = JsonDocument.Parse(content);
-            var server = doc.RootElement.GetProperty("mcpServers").GetProperty("unity-cli");
-
-            Assert.Equal("dotnet", server.GetProperty("command").GetString());
-            var args = server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ToList();
-            Assert.Contains("run", args);
-            Assert.Contains("--file", args);
-            Assert.Contains(launcherPath, args);
-            Assert.Contains(projectPath, args);
-            Assert.False(server.TryGetProperty("cwd", out _));
+            var servers = doc.RootElement.GetProperty("mcpServers");
+            Assert.True(servers.TryGetProperty("unity-cli", out _));
         }
         finally
         {
@@ -599,37 +341,94 @@ public class InstallerTests
     }
 
     [Fact]
-    public void UpdateOrWriteVsCodeConfig_WhenExistingFileHasOtherServers_PreservesOtherServers()
+    public void UpdateOrWriteMcpConfig_WhenFileDoesNotContainMcpServers_OverwritesWithNewContent()
     {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_vscode_preserve_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_other_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string configFile = Path.Combine(tempBase, ".cursor", "mcp.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
+            File.WriteAllText(configFile, "{\n  \"otherConfig\": true\n}");
+
+            string mcpDir = "C:/MyPackage/MCP~/";
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
+
+            string content = File.ReadAllText(configFile);
+            using var doc = JsonDocument.Parse(content);
+            var servers = doc.RootElement.GetProperty("mcpServers");
+            Assert.True(servers.TryGetProperty("unity-cli", out _));
+        }
+        finally
+        {
+            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
+        }
+    }
+
+    [Fact]
+    public void UpdateOrWriteMcpConfig_WhenFileContainsMcpServersWithoutUnityCli_InsertsUnityCliPreservingExisting()
+    {
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_insert_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string configFile = Path.Combine(tempBase, ".cursor", "mcp.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
+            string existingContent =
+                "{\n" +
+                "  \"mcpServers\": {\n" +
+                "    \"github\": {\n" +
+                "      \"command\": \"gh\"\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
+            File.WriteAllText(configFile, existingContent);
+
+            string mcpDir = "C:/MyPackage/MCP~/";
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
+
+            string content = File.ReadAllText(configFile);
+            using var doc = JsonDocument.Parse(content);
+            var servers = doc.RootElement.GetProperty("mcpServers");
+
+            Assert.True(servers.TryGetProperty("github", out _));
+            Assert.True(servers.TryGetProperty("unity-cli", out var unityCli));
+            Assert.Equal("dotnet", unityCli.GetProperty("command").GetString());
+            Assert.Equal(mcpDir, unityCli.GetProperty("cwd").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
+        }
+    }
+
+    [Fact]
+    public void UpdateOrWriteMcpConfig_WhenFileContainsServersWithoutUnityCli_InsertsUnityCliPreservingExisting()
+    {
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_insert_vscode_" + Guid.NewGuid().ToString("N"));
         try
         {
             string configFile = Path.Combine(tempBase, ".vscode", "mcp.json");
             Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
-
-            string existingContent = """
-                {
-                  "servers": {
-                    "other-server": {
-                      "command": "node",
-                      "args": ["index.js"]
-                    }
-                  }
-                }
-                """;
+            string existingContent =
+                "{\n" +
+                "  \"servers\": {\n" +
+                "    \"custom-server\": {\n" +
+                "      \"command\": \"custom\"\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
             File.WriteAllText(configFile, existingContent);
 
-            UpdateOrWriteVsCodeConfig(configFile, "");
+            string mcpDir = "C:/MyPackage/MCP~/";
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
 
             string content = File.ReadAllText(configFile);
             using var doc = JsonDocument.Parse(content);
             var servers = doc.RootElement.GetProperty("servers");
 
-            Assert.True(servers.TryGetProperty("other-server", out var otherServer));
-            Assert.Equal("node", otherServer.GetProperty("command").GetString());
-
+            Assert.True(servers.TryGetProperty("custom-server", out _));
             Assert.True(servers.TryGetProperty("unity-cli", out var unityCli));
             Assert.Equal("dotnet", unityCli.GetProperty("command").GetString());
+            Assert.Equal(mcpDir, unityCli.GetProperty("cwd").GetString());
         }
         finally
         {
@@ -638,84 +437,39 @@ public class InstallerTests
     }
 
     [Fact]
-    public void FindMcpDll_WhenEmbeddedPackageExists_FindsDll()
+    public void UpdateOrWriteMcpConfig_WhenFileContainsExistingUnityCli_ReplacesBlockPreservingOtherServers()
     {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_find_embedded_" + Guid.NewGuid().ToString("N"));
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_mcp_replace_" + Guid.NewGuid().ToString("N"));
         try
         {
-            string mcpDir = Path.Combine(tempBase, "Packages", "com.pereviader.unityclirunner", "MCP~");
-            Directory.CreateDirectory(mcpDir);
-            string dll = Path.Combine(mcpDir, "UnityCliRunner.Mcp.dll");
-            File.WriteAllText(dll, "fake dll");
+            string configFile = Path.Combine(tempBase, ".cursor", "mcp.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
 
-            string? found = FindMcpDll(tempBase);
-            Assert.NotNull(found);
-            Assert.Equal(Path.GetFullPath(dll), Path.GetFullPath(found));
-        }
-        finally
-        {
-            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
-        }
-    }
+            string existingContent =
+                "{\n" +
+                "  \"mcpServers\": {\n" +
+                "    \"unity-cli\": {\n" +
+                "      \"command\": \"dotnet\",\n" +
+                "      \"args\": [\"old_path/UnityCliRunner.Mcp.dll\"]\n" +
+                "    },\n" +
+                "    \"github\": {\n" +
+                "      \"command\": \"gh\"\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
+            File.WriteAllText(configFile, existingContent);
 
-    [Fact]
-    public void FindMcpDll_WhenInPackageCacheWithFingerprint_FindsDll()
-    {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_find_cache_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            string cacheFolder = Path.Combine(tempBase, "Library", "PackageCache", "com.pereviader.unityclirunner@a1b2c3d4", "MCP~");
-            Directory.CreateDirectory(cacheFolder);
-            string dll = Path.Combine(cacheFolder, "UnityCliRunner.Mcp.dll");
-            File.WriteAllText(dll, "fake dll");
+            string mcpDir = "C:/NewPackagePath/MCP~/";
+            UpdateOrWriteMcpConfig(configFile, mcpDir);
 
-            string? found = FindMcpDll(tempBase);
-            Assert.NotNull(found);
-            Assert.Equal(Path.GetFullPath(dll), Path.GetFullPath(found));
-        }
-        finally
-        {
-            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
-        }
-    }
+            string content = File.ReadAllText(configFile);
+            using var doc = JsonDocument.Parse(content);
+            var servers = doc.RootElement.GetProperty("mcpServers");
 
-    [Fact]
-    public void FindMcpDll_WhenMultipleFingerprintsExist_FindsNewestByWriteTime()
-    {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_find_multi_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            string olderFolder = Path.Combine(tempBase, "Library", "PackageCache", "com.pereviader.unityclirunner@old111", "MCP~");
-            Directory.CreateDirectory(olderFolder);
-            string oldDll = Path.Combine(olderFolder, "UnityCliRunner.Mcp.dll");
-            File.WriteAllText(oldDll, "old dll");
-            Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(olderFolder)!, DateTime.UtcNow.AddHours(-2));
-
-            string newerFolder = Path.Combine(tempBase, "Library", "PackageCache", "com.pereviader.unityclirunner@new222", "MCP~");
-            Directory.CreateDirectory(newerFolder);
-            string newDll = Path.Combine(newerFolder, "UnityCliRunner.Mcp.dll");
-            File.WriteAllText(newDll, "new dll");
-            Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(newerFolder)!, DateTime.UtcNow);
-
-            string? found = FindMcpDll(tempBase);
-            Assert.NotNull(found);
-            Assert.Equal(Path.GetFullPath(newDll), Path.GetFullPath(found));
-        }
-        finally
-        {
-            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
-        }
-    }
-
-    [Fact]
-    public void FindMcpDll_WhenNotRestored_ReturnsNull()
-    {
-        string tempBase = Path.Combine(Path.GetTempPath(), "test_find_none_" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            Directory.CreateDirectory(tempBase);
-            string? found = FindMcpDll(tempBase);
-            Assert.Null(found);
+            Assert.True(servers.TryGetProperty("github", out _));
+            Assert.True(servers.TryGetProperty("unity-cli", out var unityCli));
+            Assert.Equal(mcpDir, unityCli.GetProperty("cwd").GetString());
+            Assert.Equal("UnityCliRunner.Mcp.dll", unityCli.GetProperty("args")[0].GetString());
         }
         finally
         {
@@ -730,16 +484,40 @@ public class InstallerTests
         try
         {
             string configFile = Path.Combine(tempBase, ".codex", "config.toml");
-            string launcherPath = "C:/MyRepo/.unity-cli/Launcher.cs";
-            string projectPath = "C:/MyRepo/src/UnityProject";
+            string mcpDir = "C:/Packages/UnityCliRunner/MCP~/";
 
-            AppendCodexMcpConfig(configFile, launcherPath, projectPath);
+            AppendCodexMcpConfig(configFile, mcpDir);
 
             Assert.True(File.Exists(configFile));
             string content = File.ReadAllText(configFile);
             Assert.Contains("[mcp_servers.unity-cli]", content);
             Assert.Contains("command = \"dotnet\"", content);
-            Assert.Contains($"args = [\"run\", \"--file\", \"{launcherPath}\", \"--\", \"--project\", \"{projectPath}\"]", content);
+            Assert.Contains("args = [\"UnityCliRunner.Mcp.dll\"]", content);
+            Assert.Contains($"cwd = \"{mcpDir}\"", content);
+        }
+        finally
+        {
+            if (Directory.Exists(tempBase)) Directory.Delete(tempBase, true);
+        }
+    }
+
+    [Fact]
+    public void AppendCodexMcpConfig_WhenFileExists_AppendsAtEnd()
+    {
+        string tempBase = Path.Combine(Path.GetTempPath(), "test_codex_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string configFile = Path.Combine(tempBase, ".codex", "config.toml");
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
+            File.WriteAllText(configFile, "[model]\nname = \"o3-mini\"\n");
+
+            string mcpDir = "C:/Packages/UnityCliRunner/MCP~/";
+            AppendCodexMcpConfig(configFile, mcpDir);
+
+            string content = File.ReadAllText(configFile);
+            Assert.StartsWith("[model]\nname = \"o3-mini\"", content);
+            Assert.Contains("[mcp_servers.unity-cli]", content);
+            Assert.Contains($"cwd = \"{mcpDir}\"", content);
         }
         finally
         {
@@ -755,30 +533,26 @@ public class InstallerTests
         {
             string configFile = Path.Combine(tempBase, ".codex", "config.toml");
             Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
-            string initialContent = """
-                [general]
-                project = "demo"
-
-                [mcp_servers.unity-cli]
-                command = "dotnet"
-                args = ["run", "--file", "C:/OldPath/.unity-cli/Launcher.cs", "--", "--project", "C:/OldPath"]
-
-                [other_section]
-                key = "value"
-
-                """;
+            string initialContent =
+                "[general]\n" +
+                "project = \"demo\"\n\n" +
+                "[mcp_servers.unity-cli]\n" +
+                "command = \"dotnet\"\n" +
+                "args = [\"old_UnityCliRunner.Mcp.dll\"]\n" +
+                "cwd = \"C:/OldPath/\"\n\n" +
+                "[other_section]\n" +
+                "key = \"value\"\n";
             File.WriteAllText(configFile, initialContent);
 
-            string newLauncherPath = "C:/NewRepo/.unity-cli/Launcher.cs";
-            string newProjectPath = "C:/NewRepo/src/UnityProject";
-            AppendCodexMcpConfig(configFile, newLauncherPath, newProjectPath);
+            string newMcpDir = "C:/NewPackagePath/MCP~/";
+            AppendCodexMcpConfig(configFile, newMcpDir);
 
             string updated = File.ReadAllText(configFile);
             Assert.Contains("[general]\nproject = \"demo\"", updated);
             Assert.Contains("[other_section]\nkey = \"value\"", updated);
-            Assert.Contains(newLauncherPath, updated);
-            Assert.Contains(newProjectPath, updated);
-            Assert.DoesNotContain("C:/OldPath", updated);
+            Assert.Contains($"cwd = \"{newMcpDir}\"", updated);
+            Assert.DoesNotContain("C:/OldPath/", updated);
+            Assert.DoesNotContain("old_UnityCliRunner.Mcp.dll", updated);
         }
         finally
         {
@@ -794,13 +568,12 @@ public class InstallerTests
         {
             string configFile = Path.Combine(tempBase, ".codex", "config.toml");
             Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
-            string launcherPath = "C:/SameRepo/.unity-cli/Launcher.cs";
-            string projectPath = "C:/SameRepo/src/UnityProject";
-            AppendCodexMcpConfig(configFile, launcherPath, projectPath);
+            string mcpDir = "C:/SamePath/MCP~/";
+            AppendCodexMcpConfig(configFile, mcpDir);
             string original = File.ReadAllText(configFile);
 
             // Re-run with same configuration
-            AppendCodexMcpConfig(configFile, launcherPath, projectPath);
+            AppendCodexMcpConfig(configFile, mcpDir);
             string second = File.ReadAllText(configFile);
 
             Assert.Equal(original, second);
