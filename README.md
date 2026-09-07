@@ -60,26 +60,38 @@ https://github.com/PereViader/UnityCliRunner.git?path=src/UnityCliRunner.Unity3d
 In the Unity Editor menu, select:
 **Tools > UnityCliRunner > Install MCP Configurations**
 
-This automatically creates or updates the configuration files for:
-- **Antigravity**: `.agents/plugins/unity-cli/mcp_config.json`
-- **VS Code**: `.vscode/mcp.json`
-- **Cursor**: `.cursor/mcp.json`
-- **Claude Code**: `.claude/mcp.json`
-- **Codex**: `.codex/config.toml`
+This installs the repository launcher (`.unity-cli/Launcher.cs`) and configures your AI development tools:
+
+- **Repository-Portable Configurations (safe to commit to git)**:
+  - **VS Code**: `.vscode/mcp.json` (uses `servers` schema and `${workspaceFolder}`)
+  - **Cursor**: `.cursor/mcp.json` (uses `mcpServers` schema and `${workspaceFolder}`)
+  - **Claude Code**: `.mcp.json` (uses `mcpServers` schema and `${CLAUDE_PROJECT_DIR:-.}`)
+- **Machine-Specific Configurations (gitignored)**:
+  - **Antigravity**: `.agents/plugins/unity-cli/mcp_config.json` (uses absolute paths to `.unity-cli/Launcher.cs` and Unity project)
+  - **Codex**: `.codex/config.toml` (uses absolute paths to `.unity-cli/Launcher.cs` and Unity project)
+
+#### Client Limitations
+- **Codex & Antigravity**: Because these clients do not support environment/workspace variable substitution in their local MCP configs, the installer writes absolute paths to `.unity-cli/Launcher.cs` and the Unity project directory. Through `Launcher.cs`, they still automatically resolve and track any future updates to `com.pereviader.unityclirunner` across `Library/PackageCache`.
+- **Claude Desktop**: Claude Desktop only supports global user configurations (`claude_desktop_config.json`) rather than repository-level configurations. For Claude Desktop, configure the server in your global configuration using the launcher or absolute package path.
 
 ### Manual MCP Server Configuration
 
-If configuring manually, add the following to your MCP client configuration:
+For repository-portable configurations (e.g. VS Code, Cursor, Claude Code), invoke `.unity-cli/Launcher.cs`:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "unity-cli": {
       "command": "dotnet",
       "args": [
-        "UnityCliRunner.Mcp.dll"
-      ],
-      "cwd": "<path-to-project>/Packages/com.pereviader.unityclirunner/MCP~/"
+        "run",
+        "-v",
+        "q",
+        "${workspaceFolder}/.unity-cli/Launcher.cs",
+        "--",
+        "--project",
+        "${workspaceFolder}/<relative-path-to-unity-project>"
+      ]
     }
   }
 }

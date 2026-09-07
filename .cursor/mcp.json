@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "unity-cli": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "-v",
+        "q",
+        "${workspaceFolder}/.unity-cli/Launcher.cs",
+        "--",
+        "--project",
+        "${workspaceFolder}/src/UnityCliRunner.Unity3d"
+      ]
+    }
+  }
+}
