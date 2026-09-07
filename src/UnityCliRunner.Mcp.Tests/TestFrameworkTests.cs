@@ -106,4 +106,28 @@ public class TestFrameworkTests
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Tests Passed: 1 passed", result.Text);
     }
+
+    [Fact]
+    public async Task TestEverythingPasses_RunsAllTestsByDefault()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_run_tests");
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("Tests Passed:", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEverythingPasses_RunsAllTestsExplicitly()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_run_tests", new { mode = "all" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("Tests Passed:", result.Text);
+    }
 }

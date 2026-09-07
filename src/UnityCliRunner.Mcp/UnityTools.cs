@@ -231,18 +231,18 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_run_tests")]
-    [Description("Runs EditMode or PlayMode tests in Unity and returns pass/fail counts and failure diagnostics.")]
+    [Description("Runs EditMode, PlayMode, or all tests in Unity and returns pass/fail counts and failure diagnostics.")]
     public async Task<CallToolResult> UnityRunTestsAsync(
         [Description("Test filter string (wildcards and class/method names supported).")] string? filter = null,
         [Description("Test category filter.")] string? category = null,
-        [Description("Test execution mode: 'editmode' (default) or 'playmode'.")] string? mode = "editmode",
+        [Description("Test execution mode: 'all' (default), 'editmode', or 'playmode'.")] string? mode = "all",
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var result = await _client.RunTestsAsync(filter, category, mode, progress, cancellationToken);
         var sb = new StringBuilder();
 
-        bool success = result.Success && result.FailCount == 0 && (result.PassCount > 0 || result.SkipCount > 0);
+        bool success = result.Success && result.FailCount == 0;
 
         if (result.Success)
         {

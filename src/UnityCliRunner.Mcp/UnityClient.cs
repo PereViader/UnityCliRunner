@@ -445,7 +445,13 @@ public class UnityClient
         }
 
         string opId = Guid.NewGuid().ToString("N");
-        string testMode = string.Equals(mode, "playmode", StringComparison.OrdinalIgnoreCase) ? "playmode" : "editmode";
+        string testMode = mode?.Trim().ToLowerInvariant() switch
+        {
+            "playmode" => "playmode",
+            "editmode" => "editmode",
+            "all" => "all",
+            _ => "all"
+        };
 
         var sb = new StringBuilder($"RUN_TESTS {opId} {testMode}");
         if (!string.IsNullOrWhiteSpace(filter))

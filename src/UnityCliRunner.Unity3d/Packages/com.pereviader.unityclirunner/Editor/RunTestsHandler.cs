@@ -103,7 +103,7 @@ namespace UnityCliRunner
             string[] args = CommandHelper.SplitArguments(payload);
             if (args.Length < 2)
             {
-                writer.WriteLine("ERROR: Missing operation id or test mode (playmode/editmode)");
+                writer.WriteLine("ERROR: Missing operation id or test mode (all/playmode/editmode)");
                 return;
             }
 
@@ -112,12 +112,13 @@ namespace UnityCliRunner
             {
                 "playmode" => TestMode.PlayMode,
                 "editmode" => TestMode.EditMode,
+                "all" => TestMode.EditMode | TestMode.PlayMode,
                 _ => (TestMode)(-1)
             };
 
             if ((int)mode == -1)
             {
-                writer.WriteLine("ERROR: Invalid test mode. Must be playmode or editmode");
+                writer.WriteLine("ERROR: Invalid test mode. Must be all, playmode, or editmode");
                 return;
             }
 
