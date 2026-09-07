@@ -41,7 +41,7 @@ UnityCliRunner provides 6 core MCP tools:
 ## Installation & Setup
 
 ### 1. Requirements
-- **.NET 8.0 Runtime or SDK** (`dotnet`).
+- **.NET 10.0 Runtime or SDK** (`dotnet`).
 - **Unity**: Version 2021.3 or higher.
 
 ### 2. Install the Package

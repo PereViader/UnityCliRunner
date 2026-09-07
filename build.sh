@@ -20,7 +20,7 @@ mkdir -p "$BUILD_DIR"
 # 2. Build and publish the cross-platform .NET MCP Server into MCP~
 echo "Publishing UnityCliRunner.Mcp server to package MCP~ folder..."
 mkdir -p "$PACKAGE_SRC/MCP~"
-dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net8.0 -o "$PACKAGE_SRC/MCP~"
+dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net10.0 -o "$PACKAGE_SRC/MCP~"
 
 # 3. Copy the contents of the package source into the build folder
 echo "Copying package contents..."

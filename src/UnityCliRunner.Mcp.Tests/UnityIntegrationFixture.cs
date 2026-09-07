@@ -71,7 +71,7 @@ public class UnityIntegrationFixture : IAsyncLifetime
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = "dotnet",
-            Arguments = "publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net8.0 -o src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner/MCP~",
+            Arguments = "publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net10.0 -o src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner/MCP~",
             WorkingDirectory = McpTestClient.GetRepoRoot(),
             UseShellExecute = false,
             CreateNoWindow = true

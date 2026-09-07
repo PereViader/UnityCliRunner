@@ -30,7 +30,7 @@ public class CliValidationTests
         string dllPath = Path.Combine(unityRoot, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll");
         if (File.Exists(dllPath)) return dllPath;
 
-        string debugDll = Path.Combine(root, "src", "UnityCliRunner.Mcp", "bin", "Debug", "net8.0", "UnityCliRunner.Mcp.dll");
+        string debugDll = Path.Combine(root, "src", "UnityCliRunner.Mcp", "bin", "Debug", "net10.0", "UnityCliRunner.Mcp.dll");
         if (File.Exists(debugDll)) return debugDll;
 
         throw new FileNotFoundException($"Could not find UnityCliRunner.Mcp.dll at {dllPath} or {debugDll}");
