@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -232,9 +233,10 @@ public class UnityTools
         [Description("Test filter string (wildcards and class/method names supported).")] string? filter = null,
         [Description("Test category filter.")] string? category = null,
         [Description("Test execution mode: 'editmode' (default) or 'playmode'.")] string? mode = "editmode",
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _client.RunTestsAsync(filter, category, mode, cancellationToken);
+        var result = await _client.RunTestsAsync(filter, category, mode, progress, cancellationToken);
         var sb = new StringBuilder();
 
         bool success = result.Success && result.FailCount == 0 && (result.PassCount > 0 || result.SkipCount > 0);

@@ -67,12 +67,17 @@ public class McpTestClient : IAsyncDisposable
         string root = GetRepoRoot();
         string unityRoot = GetUnityProjectRoot();
         string publishedDll = Path.Combine(unityRoot, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll");
+        string debugDll = Path.Combine(root, "src", "UnityCliRunner.Mcp", "bin", "Debug", "net10.0", "UnityCliRunner.Mcp.dll");
+
+        if (File.Exists(publishedDll) && File.Exists(debugDll))
+        {
+            return File.GetLastWriteTimeUtc(debugDll) >= File.GetLastWriteTimeUtc(publishedDll) ? debugDll : publishedDll;
+        }
+        if (File.Exists(debugDll)) return debugDll;
         if (File.Exists(publishedDll)) return publishedDll;
 
-        string debugDll = Path.Combine(root, "src", "UnityCliRunner.Mcp", "bin", "Debug", "net10.0", "UnityCliRunner.Mcp.dll");
-        if (File.Exists(debugDll)) return debugDll;
-
         throw new FileNotFoundException($"Could not find UnityCliRunner.Mcp.dll at {publishedDll} or {debugDll}");
+
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -114,7 +119,9 @@ public class McpTestClient : IAsyncDisposable
         _initialized = true;
     }
 
-    public async Task<McpToolResult> CallToolAsync(string toolName, object? arguments = null, TimeSpan? timeout = null)
+    public List<JsonElement> ReceivedNotifications { get; } = new();
+
+    public async Task<McpToolResult> CallToolAsync(string toolName, object? arguments = null, TimeSpan? timeout = null, string? progressToken = null)
     {
         if (!_initialized)
         {
@@ -122,16 +129,16 @@ public class McpTestClient : IAsyncDisposable
         }
 
         int id = Interlocked.Increment(ref _nextId);
+        object paramsObj = progressToken != null
+            ? new { name = toolName, arguments = arguments ?? new { }, _meta = new { progressToken } }
+            : new { name = toolName, arguments = arguments ?? new { } };
+
         string callMsg = JsonSerializer.Serialize(new
         {
             jsonrpc = "2.0",
             id = id,
             method = "tools/call",
-            paramsObj = new
-            {
-                name = toolName,
-                arguments = arguments ?? new { }
-            }
+            paramsObj
         }).Replace("paramsObj", "params");
 
         using var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(180));
@@ -139,40 +146,53 @@ public class McpTestClient : IAsyncDisposable
         await _writer.WriteLineAsync(callMsg.AsMemory(), cts.Token);
         await _writer.FlushAsync(cts.Token);
 
-        string? responseLine = await _reader.ReadLineAsync(cts.Token);
-        if (string.IsNullOrEmpty(responseLine))
+        while (true)
         {
-            throw new InvalidOperationException($"MCP server closed connection without response for tool '{toolName}'.");
-        }
-
-        using var doc = JsonDocument.Parse(responseLine);
-        var root = doc.RootElement.Clone();
-
-        if (root.TryGetProperty("error", out var errorElem))
-        {
-            return new McpToolResult(true, $"JSON-RPC Error: {errorElem.GetRawText()}", root);
-        }
-
-        if (root.TryGetProperty("result", out var resultElem))
-        {
-            bool isError = resultElem.TryGetProperty("isError", out var isErrProp) && isErrProp.GetBoolean();
-            string text = "";
-            if (resultElem.TryGetProperty("content", out var contentElem) && contentElem.ValueKind == JsonValueKind.Array)
+            string? responseLine = await _reader.ReadLineAsync(cts.Token);
+            if (string.IsNullOrEmpty(responseLine))
             {
-                foreach (var item in contentElem.EnumerateArray())
-                {
-                    if (item.TryGetProperty("text", out var textProp))
-                    {
-                        text += textProp.GetString();
-                    }
-                }
+                throw new InvalidOperationException($"MCP server closed connection without response for tool '{toolName}'.");
             }
 
-            return new McpToolResult(isError, text, resultElem);
-        }
+            using var doc = JsonDocument.Parse(responseLine);
+            var root = doc.RootElement.Clone();
 
-        return new McpToolResult(true, $"Unexpected response: {responseLine}", root);
+            if (root.TryGetProperty("method", out var methodProp))
+            {
+                ReceivedNotifications.Add(root);
+                continue;
+            }
+
+            if (root.TryGetProperty("id", out var idProp) && idProp.GetInt32() == id)
+            {
+                if (root.TryGetProperty("error", out var errorElem))
+                {
+                    return new McpToolResult(true, $"JSON-RPC Error: {errorElem.GetRawText()}", root);
+                }
+
+                if (root.TryGetProperty("result", out var resultElem))
+                {
+                    bool isError = resultElem.TryGetProperty("isError", out var isErrProp) && isErrProp.GetBoolean();
+                    string text = "";
+                    if (resultElem.TryGetProperty("content", out var contentElem) && contentElem.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in contentElem.EnumerateArray())
+                        {
+                            if (item.TryGetProperty("text", out var textProp))
+                            {
+                                text += textProp.GetString();
+                            }
+                        }
+                    }
+
+                    return new McpToolResult(isError, text, resultElem);
+                }
+
+                return new McpToolResult(true, $"Unexpected response: {responseLine}", root);
+            }
+        }
     }
+
 
     public async ValueTask DisposeAsync()
     {

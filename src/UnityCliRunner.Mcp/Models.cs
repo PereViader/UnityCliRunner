@@ -72,6 +72,46 @@ public class UnityTestRunResult
     public List<FailedTestInfo> FailedTests { get; set; } = new();
 }
 
+public class UnityTestRunState
+{
+    [JsonPropertyName("runId")]
+    public string RunId { get; set; } = "";
+
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "";
+
+    [JsonPropertyName("filter")]
+    public string Filter { get; set; } = "";
+
+    [JsonPropertyName("category")]
+    public string Category { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("startedUtc")]
+    public string StartedUtc { get; set; } = "";
+
+    [JsonPropertyName("totalTests")]
+    public int TotalTests { get; set; }
+
+    [JsonPropertyName("completedTests")]
+    public int CompletedTests { get; set; }
+
+    [JsonPropertyName("passCount")]
+    public int PassCount { get; set; }
+
+    [JsonPropertyName("failCount")]
+    public int FailCount { get; set; }
+
+    [JsonPropertyName("skipCount")]
+    public int SkipCount { get; set; }
+
+    [JsonPropertyName("currentTestName")]
+    public string CurrentTestName { get; set; } = "";
+}
+
+
 public class UnityExecuteResult
 {
     [JsonPropertyName("operationId")]

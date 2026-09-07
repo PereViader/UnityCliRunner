@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
 
 namespace UnityCliRunner.Mcp;
 
@@ -419,8 +420,19 @@ public class UnityClient
     /// <summary>
     /// Runs EditMode or PlayMode tests in Unity.
     /// </summary>
-    public async Task<UnityTestRunResult> RunTestsAsync(string? filter, string? category, string? mode, CancellationToken cancellationToken = default)
+    public async Task<UnityTestRunResult> RunTestsAsync(
+        string? filter,
+        string? category,
+        string? mode,
+        IProgress<ProgressNotificationValue>? progress = null,
+        CancellationToken cancellationToken = default)
     {
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 0,
+            Message = "Checking compilation and refreshing AssetDatabase..."
+        });
+
         var refreshResult = await RefreshAsync(isRecompile: false, cancellationToken);
         if (!refreshResult.Success)
         {
@@ -445,16 +457,31 @@ public class UnityClient
             sb.Append(" --category \"").Append(EscapeParam(category)).Append('"');
         }
 
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 0,
+            Message = $"Initializing {testMode} test run..."
+        });
+
+
         _logger.LogInformation("Sending RUN_TESTS operation {OpId} (mode: {Mode})...", opId, testMode);
         string? initialResponse = await SendCommandAsync(sb.ToString(), 10, cancellationToken);
 
         var immediateResult = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-        if (immediateResult != null) return immediateResult;
+        if (immediateResult != null)
+        {
+            ReportFinalProgress(progress, immediateResult);
+            return immediateResult;
+        }
 
         if (initialResponse != null && initialResponse.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
         {
             return new UnityTestRunResult { RunId = opId, Success = false, Message = $"Unity is busy: {initialResponse}" };
         }
+
+        int lastCompleted = -1;
+        string? lastTestName = null;
+        string? lastStatus = null;
 
         var deadline = DateTime.UtcNow.AddSeconds(300);
         try
@@ -463,14 +490,61 @@ public class UnityClient
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                var runningState = TryReadJsonFile<UnityTestRunState>(_processManager.TestRunningFile, s => s.RunId == opId);
+                if (runningState != null && progress != null)
+                {
+                    if (runningState.CompletedTests != lastCompleted ||
+                        runningState.CurrentTestName != lastTestName ||
+                        runningState.Status != lastStatus)
+                    {
+                        lastCompleted = runningState.CompletedTests;
+                        lastTestName = runningState.CurrentTestName;
+                        lastStatus = runningState.Status;
+
+                        string msg;
+                        if (runningState.TotalTests > 0)
+                        {
+                            if (!string.IsNullOrEmpty(runningState.CurrentTestName))
+                            {
+                                msg = $"[{runningState.CompletedTests}/{runningState.TotalTests}] Running {runningState.CurrentTestName} (Passed: {runningState.PassCount}, Failed: {runningState.FailCount})";
+                            }
+                            else
+                            {
+                                msg = $"[{runningState.CompletedTests}/{runningState.TotalTests}] Running tests... (Passed: {runningState.PassCount}, Failed: {runningState.FailCount})";
+                            }
+                        }
+                        else
+                        {
+                            msg = !string.IsNullOrEmpty(runningState.CurrentTestName)
+                                ? $"Running {runningState.CurrentTestName}..."
+                                : "Running tests...";
+                        }
+
+                        progress.Report(new ProgressNotificationValue
+                        {
+                            Progress = runningState.CompletedTests,
+                            Total = runningState.TotalTests > 0 ? runningState.TotalTests : null,
+                            Message = msg
+                        });
+                    }
+                }
+
                 var result = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                if (result != null) return result;
+                if (result != null)
+                {
+                    ReportFinalProgress(progress, result);
+                    return result;
+                }
 
                 if (!_processManager.IsUnityRunning(out _))
                 {
                     await Task.Delay(300, cancellationToken);
                     var final = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                    if (final != null) return final;
+                    if (final != null)
+                    {
+                        ReportFinalProgress(progress, final);
+                        return final;
+                    }
 
                     return new UnityTestRunResult
                     {
@@ -486,14 +560,22 @@ public class UnityClient
                     if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
                     {
                         var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                        if (res != null) return res;
+                        if (res != null)
+                        {
+                            ReportFinalProgress(progress, res);
+                            return res;
+                        }
 
                         return new UnityTestRunResult { RunId = opId, Success = true, Message = pollResp };
                     }
                     if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
                     {
                         var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                        if (res != null) return res;
+                        if (res != null)
+                        {
+                            ReportFinalProgress(progress, res);
+                            return res;
+                        }
 
                         return new UnityTestRunResult { RunId = opId, Success = false, Message = pollResp };
                     }
@@ -520,7 +602,11 @@ public class UnityClient
         }
 
         var finalTimeout = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-        if (finalTimeout != null) return finalTimeout;
+        if (finalTimeout != null)
+        {
+            ReportFinalProgress(progress, finalTimeout);
+            return finalTimeout;
+        }
 
         return new UnityTestRunResult
         {
@@ -529,6 +615,22 @@ public class UnityClient
             Message = "Timed out waiting for test run to finish (300s)."
         };
     }
+
+    private static void ReportFinalProgress(IProgress<ProgressNotificationValue>? progress, UnityTestRunResult result)
+    {
+        if (progress == null) return;
+        int total = result.PassCount + result.FailCount + result.SkipCount;
+        string msg = result.Success
+            ? $"Tests finished: {result.PassCount} passed, {result.SkipCount} skipped."
+            : $"Tests finished: {result.FailCount} failed, {result.PassCount} passed, {result.SkipCount} skipped.";
+        progress.Report(new ProgressNotificationValue
+        {
+            Progress = total,
+            Total = total > 0 ? total : null,
+            Message = msg
+        });
+    }
+
 
     private async Task<string?> SendCommandAsync(string command, int timeoutSeconds = 10, CancellationToken cancellationToken = default)
     {

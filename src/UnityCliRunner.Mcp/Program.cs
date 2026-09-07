@@ -201,8 +201,9 @@ static async Task<int> RunDirectCallAsync(string[] callArgs, string projectRoot)
                 string? filter = root.HasValue && root.Value.TryGetProperty("filter", out var fElem) ? fElem.GetString() : null;
                 string? category = root.HasValue && root.Value.TryGetProperty("category", out var catElem) ? catElem.GetString() : null;
                 string? mode = root.HasValue && root.Value.TryGetProperty("mode", out var modElem) ? modElem.GetString() : "editmode";
-                result = await tools.UnityRunTestsAsync(filter, category, mode, cts.Token);
+                result = await tools.UnityRunTestsAsync(filter, category, mode, progress: null, cancellationToken: cts.Token);
                 break;
+
             case "unity_stop":
                 result = await tools.UnityStopAsync(cts.Token);
                 break;

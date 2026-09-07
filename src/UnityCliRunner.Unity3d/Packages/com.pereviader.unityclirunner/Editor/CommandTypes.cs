@@ -46,6 +46,12 @@ namespace UnityCliRunner
         public string category;
         public string status;
         public string startedUtc;
+        public int totalTests;
+        public int completedTests;
+        public int passCount;
+        public int failCount;
+        public int skipCount;
+        public string currentTestName;
     }
 
     [Serializable]

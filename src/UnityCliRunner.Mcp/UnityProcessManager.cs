@@ -34,6 +34,7 @@ public class UnityProcessManager
     public string RefreshResultFile => Path.Combine(TempDir, "unity_refresh_result.json");
     public string EvalResultFile => Path.Combine(TempDir, "unity_eval_result.json");
     public string ExecuteResultFile => Path.Combine(TempDir, "unity_execute_result.json");
+    public string TestRunningFile => Path.Combine(TempDir, "unity_test_running.txt");
     public string TestResultsFile => Path.Combine(TempDir, "unity_test_results.json");
     public string TestFailuresFile => Path.Combine(TempDir, "unity_test_failures.txt");
 

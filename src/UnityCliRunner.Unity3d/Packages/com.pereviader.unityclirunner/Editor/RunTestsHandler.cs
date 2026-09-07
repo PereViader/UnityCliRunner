@@ -189,7 +189,13 @@ namespace UnityCliRunner
                     filter = filter ?? "",
                     category = category ?? "",
                     status = "Queued",
-                    startedUtc = DateTime.UtcNow.ToString("o")
+                    startedUtc = DateTime.UtcNow.ToString("o"),
+                    totalTests = 0,
+                    completedTests = 0,
+                    passCount = 0,
+                    failCount = 0,
+                    skipCount = 0,
+                    currentTestName = ""
                 };
                 WriteAtomic(RunningFilePath, JsonUtility.ToJson(state, true), runId);
                 return runId;
@@ -274,6 +280,39 @@ namespace UnityCliRunner
                 Debug.LogWarning($"UnityCliRunner: Failed to update test run state: {ex.Message}");
             }
         }
+
+        internal static void UpdateTestRunProgress(string runId, int totalTests, int completedTests, int passCount, int failCount, int skipCount, string currentTestName, string status = null)
+        {
+            var state = ReadRunningState();
+            if (state == null || state.runId != runId)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(status))
+            {
+                state.status = status;
+            }
+            state.totalTests = totalTests;
+            state.completedTests = completedTests;
+            state.passCount = passCount;
+            state.failCount = failCount;
+            state.skipCount = skipCount;
+            if (currentTestName != null)
+            {
+                state.currentTestName = currentTestName;
+            }
+
+            try
+            {
+                WriteAtomic(RunningFilePath, JsonUtility.ToJson(state, true), runId);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"UnityCliRunner: Failed to update test run progress: {ex.Message}");
+            }
+        }
+
 
         internal static void WriteInterruptedResult(string message)
         {
@@ -452,6 +491,12 @@ namespace UnityCliRunner
         private readonly List<FailedTestInfo> m_FailedTests = new List<FailedTestInfo>();
         private bool m_IsRunning = false;
         private string m_RunId;
+        private int m_TotalTests = 0;
+        private int m_CompletedTests = 0;
+        private int m_PassCount = 0;
+        private int m_FailCount = 0;
+        private int m_SkipCount = 0;
+        private string m_CurrentTestName = "";
 
         public bool IsRunning => m_IsRunning || File.Exists(RunTestsHandler.RunningFilePath);
 
@@ -460,11 +505,27 @@ namespace UnityCliRunner
             m_IsRunning = false;
             m_RunId = null;
             m_FailedTests.Clear();
+            m_TotalTests = 0;
+            m_CompletedTests = 0;
+            m_PassCount = 0;
+            m_FailCount = 0;
+            m_SkipCount = 0;
+            m_CurrentTestName = "";
         }
 
         internal void BindRun(string runId)
         {
             m_RunId = runId;
+            var state = RunTestsHandler.ReadRunningState();
+            if (state != null && state.runId == runId)
+            {
+                m_TotalTests = state.totalTests;
+                m_CompletedTests = state.completedTests;
+                m_PassCount = state.passCount;
+                m_FailCount = state.failCount;
+                m_SkipCount = state.skipCount;
+                m_CurrentTestName = state.currentTestName ?? "";
+            }
         }
 
         public void RunStarted(ITestAdaptor testsToRun)
@@ -477,13 +538,21 @@ namespace UnityCliRunner
 
             m_FailedTests.Clear();
             m_IsRunning = true;
+            m_TotalTests = testsToRun != null ? testsToRun.TestCaseCount : 0;
+            m_CompletedTests = 0;
+            m_PassCount = 0;
+            m_FailCount = 0;
+            m_SkipCount = 0;
+            m_CurrentTestName = "";
+
             var state = RunTestsHandler.ReadRunningState();
             if (state != null)
             {
                 m_RunId = state.runId;
-                RunTestsHandler.UpdateTestRunStatus(state.runId, "Running");
+                RunTestsHandler.UpdateTestRunProgress(state.runId, m_TotalTests, m_CompletedTests, m_PassCount, m_FailCount, m_SkipCount, m_CurrentTestName, "Running");
             }
         }
+
 
         public void OnError(string message)
         {
@@ -650,12 +719,28 @@ namespace UnityCliRunner
 
         public void TestStarted(ITestAdaptor test)
         {
+            if (test != null && !test.HasChildren && !string.IsNullOrEmpty(m_RunId))
+            {
+                m_CurrentTestName = test.FullName ?? test.Name ?? "";
+                RunTestsHandler.UpdateTestRunProgress(m_RunId, m_TotalTests, m_CompletedTests, m_PassCount, m_FailCount, m_SkipCount, m_CurrentTestName);
+            }
         }
 
         public void TestFinished(ITestResultAdaptor result)
         {
-            if (!result.HasChildren && result.TestStatus == TestStatus.Failed)
+            if (result == null || result.HasChildren)
             {
+                return;
+            }
+
+            m_CompletedTests++;
+            if (result.TestStatus == TestStatus.Passed)
+            {
+                m_PassCount++;
+            }
+            else if (result.TestStatus == TestStatus.Failed)
+            {
+                m_FailCount++;
                 m_FailedTests.Add(new FailedTestInfo
                 {
                     name = result.Name,
@@ -665,6 +750,16 @@ namespace UnityCliRunner
                     duration = result.Duration
                 });
             }
+            else if (result.TestStatus == TestStatus.Skipped)
+            {
+                m_SkipCount++;
+            }
+
+            if (!string.IsNullOrEmpty(m_RunId))
+            {
+                RunTestsHandler.UpdateTestRunProgress(m_RunId, m_TotalTests, m_CompletedTests, m_PassCount, m_FailCount, m_SkipCount, m_CurrentTestName);
+            }
         }
     }
 }
+

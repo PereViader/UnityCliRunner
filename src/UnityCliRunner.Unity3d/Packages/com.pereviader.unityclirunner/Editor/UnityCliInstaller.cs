@@ -139,7 +139,7 @@ namespace UnityCliRunner
             return rel.TrimEnd('/');
         }
 
-        public static string? FindLauncherTemplatePath(string? packagePath = null)
+        public static string FindLauncherTemplatePath(string packagePath = null)
         {
             if (!string.IsNullOrEmpty(packagePath))
             {
@@ -174,7 +174,7 @@ namespace UnityCliRunner
             return null;
         }
 
-        public static void InstallLauncher(string rootFolder, string? packagePath = null)
+        public static void InstallLauncher(string rootFolder, string packagePath = null)
         {
             string unityCliDir = Path.Combine(rootFolder, ".unity-cli");
             if (!Directory.Exists(unityCliDir))
@@ -183,7 +183,7 @@ namespace UnityCliRunner
             }
 
             string launcherPath = Path.Combine(unityCliDir, "Launcher.cs");
-            string? templatePath = FindLauncherTemplatePath(packagePath);
+            string templatePath = FindLauncherTemplatePath(packagePath);
 
             if (templatePath != null && File.Exists(templatePath))
             {
@@ -210,20 +210,18 @@ namespace UnityCliRunner
                 ? "${workspaceFolder}"
                 : "${workspaceFolder}/" + relProjectPath.TrimStart('/');
 
-            return $$"""
-                "unity-cli": {
-                  "command": "dotnet",
-                  "args": [
-                    "run",
-                    "-v",
-                    "q",
-                    "${workspaceFolder}/.unity-cli/Launcher.cs",
-                    "--",
-                    "--project",
-                    "{{projectArg}}"
-                  ]
-                }
-            """;
+            return $@"    ""unity-cli"": {{
+      ""command"": ""dotnet"",
+      ""args"": [
+        ""run"",
+        ""-v"",
+        ""q"",
+        ""${{workspaceFolder}}/.unity-cli/Launcher.cs"",
+        ""--"",
+        ""--project"",
+        ""{projectArg}""
+      ]
+    }}";
         }
 
         public static string BuildCursorSnippet(string relProjectPath)
@@ -232,20 +230,18 @@ namespace UnityCliRunner
                 ? "${workspaceFolder}"
                 : "${workspaceFolder}/" + relProjectPath.TrimStart('/');
 
-            return $$"""
-                "unity-cli": {
-                  "command": "dotnet",
-                  "args": [
-                    "run",
-                    "-v",
-                    "q",
-                    "${workspaceFolder}/.unity-cli/Launcher.cs",
-                    "--",
-                    "--project",
-                    "{{projectArg}}"
-                  ]
-                }
-            """;
+            return $@"    ""unity-cli"": {{
+      ""command"": ""dotnet"",
+      ""args"": [
+        ""run"",
+        ""-v"",
+        ""q"",
+        ""${{workspaceFolder}}/.unity-cli/Launcher.cs"",
+        ""--"",
+        ""--project"",
+        ""{projectArg}""
+      ]
+    }}";
         }
 
         public static string BuildClaudeCodeSnippet(string relProjectPath)
@@ -254,20 +250,18 @@ namespace UnityCliRunner
                 ? "${CLAUDE_PROJECT_DIR:-.}"
                 : "${CLAUDE_PROJECT_DIR:-.}/" + relProjectPath.TrimStart('/');
 
-            return $$"""
-                "unity-cli": {
-                  "command": "dotnet",
-                  "args": [
-                    "run",
-                    "-v",
-                    "q",
-                    "${CLAUDE_PROJECT_DIR:-.}/.unity-cli/Launcher.cs",
-                    "--",
-                    "--project",
-                    "{{projectArg}}"
-                  ]
-                }
-            """;
+            return $@"    ""unity-cli"": {{
+      ""command"": ""dotnet"",
+      ""args"": [
+        ""run"",
+        ""-v"",
+        ""q"",
+        ""${{CLAUDE_PROJECT_DIR:-.}}/.unity-cli/Launcher.cs"",
+        ""--"",
+        ""--project"",
+        ""{projectArg}""
+      ]
+    }}";
         }
 
         public static string BuildAntigravitySnippet(string launcherPath, string fullProjectPath)
@@ -275,20 +269,18 @@ namespace UnityCliRunner
             string formattedLauncherPath = launcherPath.Replace('\\', '/');
             string formattedProjectPath = fullProjectPath.Replace('\\', '/');
 
-            return $$"""
-                "unity-cli": {
-                  "command": "dotnet",
-                  "args": [
-                    "run",
-                    "-v",
-                    "q",
-                    "{{formattedLauncherPath}}",
-                    "--",
-                    "--project",
-                    "{{formattedProjectPath}}"
-                  ]
-                }
-            """;
+            return $@"    ""unity-cli"": {{
+      ""command"": ""dotnet"",
+      ""args"": [
+        ""run"",
+        ""-v"",
+        ""q"",
+        ""{formattedLauncherPath}"",
+        ""--"",
+        ""--project"",
+        ""{formattedProjectPath}""
+      ]
+    }}";
         }
 
         public static void UpdateOrWriteVsCodeConfig(string configPath, string relProjectPath)
@@ -321,14 +313,12 @@ namespace UnityCliRunner
 
             if (!File.Exists(configPath))
             {
-                string newContent = $$"""
-                {
-                  "{{rootKey}}": {
-                {{serverSnippet}}
-                  }
-                }
-
-                """;
+                string newContent = $@"{{
+  ""{rootKey}"": {{
+{serverSnippet}
+  }}
+}}
+";
                 File.WriteAllText(configPath, newContent, Encoding.UTF8);
                 return;
             }
@@ -336,14 +326,12 @@ namespace UnityCliRunner
             string existing = File.ReadAllText(configPath, Encoding.UTF8).Trim();
             if (string.IsNullOrWhiteSpace(existing))
             {
-                string newContent = $$"""
-                {
-                  "{{rootKey}}": {
-                {{serverSnippet}}
-                  }
-                }
-
-                """;
+                string newContent = $@"{{
+  ""{rootKey}"": {{
+{serverSnippet}
+  }}
+}}
+";
                 File.WriteAllText(configPath, newContent, Encoding.UTF8);
                 return;
             }
@@ -401,14 +389,12 @@ namespace UnityCliRunner
                 }
             }
 
-            string fallbackContent = $$"""
-                {
-                  "{{rootKey}}": {
-                {{serverSnippet}}
-                  }
-                }
-
-                """;
+            string fallbackContent = $@"{{
+  ""{rootKey}"": {{
+{serverSnippet}
+  }}
+}}
+";
             File.WriteAllText(configPath, fallbackContent, Encoding.UTF8);
         }
 
@@ -423,12 +409,12 @@ namespace UnityCliRunner
             string formattedLauncherPath = launcherPath.Replace('\\', '/');
             string formattedProjectPath = fullProjectPath.Replace('\\', '/');
 
-            string codexTomlSnippet = $$"""
-                [mcp_servers.unity-cli]
-                command = "dotnet"
-                args = ["run", "-v", "q", "{{formattedLauncherPath}}", "--", "--project", "{{formattedProjectPath}}"]
+            string codexTomlSnippet = $@"[mcp_servers.unity-cli]
+command = ""dotnet""
+args = [""run"", ""-v"", ""q"", ""{formattedLauncherPath}"", ""--"", ""--project"", ""{formattedProjectPath}""]
 
-                """;
+";
+
 
             if (!File.Exists(configPath))
             {
