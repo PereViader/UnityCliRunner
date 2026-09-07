@@ -124,6 +124,7 @@ namespace UnityCliRunner
 
             string filter = "";
             string category = "";
+            bool failedOnly = false;
 
             for (int i = 2; i < args.Length; i++)
             {
@@ -134,6 +135,10 @@ namespace UnityCliRunner
                 else if (args[i] == "--category" && i + 1 < args.Length)
                 {
                     category = args[++i];
+                }
+                else if (args[i] == "--failed-only")
+                {
+                    failedOnly = true;
                 }
             }
 
@@ -156,6 +161,31 @@ namespace UnityCliRunner
                 return;
             }
 
+            List<string> failedTests = null;
+            if (failedOnly)
+            {
+                failedTests = GetPreviouslyFailedTestNames();
+                if (failedTests.Count == 0)
+                {
+                    var emptyResult = new UnityTestRunResult
+                    {
+                        runId = operationId,
+                        success = true,
+                        failCount = 0,
+                        passCount = 0,
+                        skipCount = 0,
+                        message = "No previously failed tests found.",
+                        resultState = "Passed",
+                        failedTests = new List<FailedTestInfo>()
+                    };
+                    WriteAtomic(ResultsFilePath, JsonUtility.ToJson(emptyResult, true), operationId);
+                    UnityCliOperationStore.Complete(operationId);
+                    writer.WriteLine("SUCCESS No previously failed tests found.");
+                    writer.Flush();
+                    return;
+                }
+            }
+
             // Persist the complete run identity before acknowledging the command.
             // The CLI can therefore recover if this socket is closed by a reload
             // immediately after the command is dispatched.
@@ -171,7 +201,36 @@ namespace UnityCliRunner
             writer.WriteLine("RUNNING");
             writer.Flush();
 
-            RunTests(mode, filter, category, runId);
+            RunTests(mode, filter, category, runId, failedTests?.ToArray());
+        }
+
+        private static List<string> GetPreviouslyFailedTestNames()
+        {
+            var failedNames = new List<string>();
+            try
+            {
+                if (File.Exists(ResultsFilePath))
+                {
+                    string json = File.ReadAllText(ResultsFilePath);
+                    var result = JsonUtility.FromJson<UnityTestRunResult>(json);
+                    if (result?.failedTests != null)
+                    {
+                        foreach (var fail in result.failedTests)
+                        {
+                            string name = !string.IsNullOrEmpty(fail.fullName) ? fail.fullName : fail.name;
+                            if (!string.IsNullOrEmpty(name) && !failedNames.Contains(name))
+                            {
+                                failedNames.Add(name);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"UnityCliRunner: Failed to read previous test results: {ex.Message}");
+            }
+            return failedNames;
         }
 
         private static string WriteTestRunningState(string runId, TestMode mode, string filter, string category)
@@ -208,7 +267,7 @@ namespace UnityCliRunner
             }
         }
 
-        private static void RunTests(TestMode mode, string filterText, string categoryText, string runId)
+        private static void RunTests(TestMode mode, string filterText, string categoryText, string runId, string[] testNames = null)
         {
             try
             {
@@ -220,6 +279,7 @@ namespace UnityCliRunner
                 var filter = new Filter
                 {
                     testMode = mode,
+                    testNames = testNames != null && testNames.Length > 0 ? testNames : null,
                     groupNames = !string.IsNullOrEmpty(filterText) ? new[] { filterText } : null,
                     categoryNames = !string.IsNullOrEmpty(categoryText) ? new[] { categoryText } : null
                 };
@@ -228,7 +288,7 @@ namespace UnityCliRunner
                 s_Callbacks.BindRun(runId);
 
                 var settings = new ExecutionSettings(filter);
-                Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}' and category '{categoryText}'...");
+                Debug.Log($"UnityCliRunner: Executing {mode} tests with filter '{filterText}', category '{categoryText}', testNames count '{(testNames?.Length ?? 0)}'...");
                 s_CurrentTestJobGuid = s_RunnerApi.Execute(settings);
             }
             catch (Exception ex)

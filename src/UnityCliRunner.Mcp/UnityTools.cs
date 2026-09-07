@@ -231,22 +231,30 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_run_tests")]
-    [Description("Runs EditMode, PlayMode, or all tests in Unity and returns pass/fail counts and failure diagnostics.")]
+    [Description("Runs EditMode, PlayMode, or all tests in Unity (with optional rerun of previously failed tests) and returns pass/fail counts and failure diagnostics.")]
     public async Task<CallToolResult> UnityRunTestsAsync(
         [Description("Test filter string (wildcards and class/method names supported).")] string? filter = null,
         [Description("Test category filter.")] string? category = null,
         [Description("Test execution mode: 'all' (default), 'editmode', or 'playmode'.")] string? mode = "all",
+        [Description("Only run tests that previously failed.")] bool failedOnly = false,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _client.RunTestsAsync(filter, category, mode, progress, cancellationToken);
+        var result = await _client.RunTestsAsync(filter, category, mode, failedOnly, progress, cancellationToken);
         var sb = new StringBuilder();
 
         bool success = result.Success && result.FailCount == 0;
 
         if (result.Success)
         {
-            sb.AppendLine($"Tests Passed: {result.PassCount} passed, {result.SkipCount} skipped.");
+            if (result.PassCount == 0 && result.SkipCount == 0 && !string.IsNullOrWhiteSpace(result.Message))
+            {
+                sb.AppendLine(result.Message);
+            }
+            else
+            {
+                sb.AppendLine($"Tests Passed: {result.PassCount} passed, {result.SkipCount} skipped.");
+            }
         }
         else if (result.ResultState == "Interrupted")
         {

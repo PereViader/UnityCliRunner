@@ -417,13 +417,19 @@ public class UnityClient
         };
     }
 
-    /// <summary>
-    /// Runs EditMode or PlayMode tests in Unity.
-    /// </summary>
+    public Task<UnityTestRunResult> RunTestsAsync(
+        string? filter,
+        string? category,
+        string? mode,
+        IProgress<ProgressNotificationValue>? progress,
+        CancellationToken cancellationToken = default) =>
+        RunTestsAsync(filter, category, mode, false, progress, cancellationToken);
+
     public async Task<UnityTestRunResult> RunTestsAsync(
         string? filter,
         string? category,
         string? mode,
+        bool failedOnly = false,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -461,6 +467,10 @@ public class UnityClient
         if (!string.IsNullOrWhiteSpace(category))
         {
             sb.Append(" --category \"").Append(EscapeParam(category)).Append('"');
+        }
+        if (failedOnly)
+        {
+            sb.Append(" --failed-only");
         }
 
         progress?.Report(new ProgressNotificationValue

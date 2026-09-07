@@ -130,4 +130,35 @@ public class TestFrameworkTests
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Tests Passed:", result.Text);
     }
+
+    [Fact]
+    public async Task TestEverythingPasses_FailedOnlyWhenNoFailures_ReturnsNoFailedTestsFound()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var initialRun = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        Assert.False(initialRun.IsError, initialRun.Text);
+
+        var failedRun = await client.CallToolAsync("unity_run_tests", new { failedOnly = true });
+        Assert.False(failedRun.IsError, failedRun.Text);
+        Assert.Contains("No previously failed tests found.", failedRun.Text);
+    }
+
+    [Fact]
+    public async Task TestNoWarningsAndFailures_FailedOnlyRerunsFailedTests()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestNoWarningsAndFailures");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var initialRun = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        Assert.True(initialRun.IsError);
+        Assert.Contains("Failures:", initialRun.Text);
+
+        var failedRun = await client.CallToolAsync("unity_run_tests", new { failedOnly = true });
+        Assert.True(failedRun.IsError);
+        Assert.Contains("Tests Failed:", failedRun.Text);
+        Assert.Contains("Failures:", failedRun.Text);
+        Assert.Contains("FailTest", failedRun.Text);
+    }
 }

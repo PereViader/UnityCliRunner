@@ -15,7 +15,7 @@ UnityCliRunner provides 7 MCP tools:
 1. **`unity_status`**: Inspects Editor connection state (`Ready`, `Not Running`, `Compiling`, or `Running Unreachable`). Unity automatically starts on demand when action tools are invoked.
 2. **`unity_refresh`**: Triggers `AssetDatabase.Refresh()` and returns compiler diagnostics.
 3. **`unity_recompile`**: Cleans compiler cache and forces a full rebuild of script assemblies.
-4. **`unity_run_tests`**: Runs EditMode and/or PlayMode unit and integration tests with granular filtering by name (`filter`) and category (`category`).
+4. **`unity_run_tests`**: Runs EditMode and/or PlayMode unit and integration tests with granular filtering by name (`filter`), category (`category`), and optional failed-tests rerun (`failedOnly`).
 5. **`unity_execute_method`**: Executes static C# methods (`Namespace.Class.Method`) with typed arguments and returns formatted outputs and console logs.
 6. **`unity_eval`**: Evaluates live C# expressions, statements, or multiline blocks dynamically in-memory without domain reloads.
 7. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
@@ -29,7 +29,7 @@ UnityCliRunner provides 7 MCP tools:
 | **`unity_status`** | _none_ | Checks Editor state (`Ready`, `Not Running`, etc.). Auto-starts on demand for action tools. |
 | **`unity_refresh`** | _none_ | Triggers `AssetDatabase.Refresh()` and returns compilation diagnostics. |
 | **`unity_recompile`** | _none_ | Forces a full C# recompilation (clears build cache) and returns compiler diagnostics. |
-| **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`) | Runs tests and reports pass/fail/skip counts and failed stack traces. |
+| **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`), `failedOnly` | Runs tests and reports pass/fail/skip counts and failed stack traces. Supports rerunning previously failed tests. |
 | **`unity_execute_method`** | `methodName`, `args` (array) | Executes static C# method with arguments (refreshes first, stops Play Mode). |
 | **`unity_eval`** | `code` (string) | Evaluates C# expression or script dynamically in-memory against active Editor/Play Mode. |
 | **`unity_stop`** | _none_ | Safely terminates the background instance (used to release GUI locks or recover; do not stop routinely). |
