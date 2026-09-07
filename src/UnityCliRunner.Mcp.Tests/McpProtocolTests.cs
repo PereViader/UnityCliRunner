@@ -110,7 +110,8 @@ public class McpProtocolTests
         Assert.Contains("unity_execute_method", toolNames);
         Assert.Contains("unity_run_tests", toolNames);
         Assert.Contains("unity_stop", toolNames);
-        Assert.Contains("unity_start", toolNames);
+        Assert.DoesNotContain("unity_start", toolNames);
+        Assert.Equal(7, toolNames.Count);
 
         // 4. tools/call unity_status
         string callMsg = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"unity_status\",\"arguments\":{}}}";

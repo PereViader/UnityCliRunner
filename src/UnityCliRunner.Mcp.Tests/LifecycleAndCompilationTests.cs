@@ -25,16 +25,6 @@ public class LifecycleAndCompilationTests
     }
 
     [Fact]
-    public async Task TestBackgroundStartAlreadyRunning_ReportsAlreadyRunningIdempotently()
-    {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_start");
-
-        Assert.False(result.IsError, result.Text);
-        Assert.Contains("already running", result.Text, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public async Task TestRefresh_TriggersAssetDatabaseRefreshSuccessfully()
     {
         await using var _ = await _fixture.UseFixtureAsync("TestRefresh");

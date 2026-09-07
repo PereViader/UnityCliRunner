@@ -58,7 +58,7 @@ public class UnityIntegrationFixture : IAsyncLifetime
         var statusRes = await client.CallToolAsync("unity_status");
         if (statusRes.Text.Contains("Not Running") || statusRes.Text.Contains("Running Unreachable"))
         {
-            var startRes = await client.CallToolAsync("unity_start", timeout: TimeSpan.FromSeconds(120));
+            var startRes = await client.CallToolAsync("unity_refresh", timeout: TimeSpan.FromSeconds(120));
             if (startRes.IsError)
             {
                 throw new InvalidOperationException($"Failed to start Unity for integration tests: {startRes.Text}");

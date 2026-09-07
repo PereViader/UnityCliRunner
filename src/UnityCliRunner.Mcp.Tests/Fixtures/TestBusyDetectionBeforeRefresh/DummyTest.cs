@@ -14,42 +14,52 @@ namespace Tests
     {
         public static string TestBusyDetection()
         {
-            // Run MCP CLI commands while this execute method is actively running.
-            // All commands (test, executemethod, refresh, recompile) should detect that
-            // Unity is busy.
-            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            string dllPath = Path.Combine(projectRoot, "Packages", "com.pereviader.unityclirunner", "MCP~", "UnityCliRunner.Mcp.dll");
+            // Connect to UnityCliServer TCP socket while this execute method is actively running.
+            // All mutating commands (RUN_TESTS, EXECUTE_METHOD, REFRESH, RECOMPILE) should detect
+            // that Unity is busy.
+            int port = 0;
+            string portFile = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_cli_port.txt");
+            if (File.Exists(portFile))
+            {
+                int.TryParse(File.ReadAllText(portFile).Trim(), out port);
+            }
+
+            if (port == 0)
+            {
+                return "FAIL_NO_PORT";
+            }
+
             string[] commandsToTest = new[]
             {
-                "test --playmode",
-                "executemethod Tests.DummyExecuteClass.TestBusyDetection",
-                "refresh",
-                "recompile"
+                "RUN_TESTS busy_test_op playmode",
+                "EXECUTE_METHOD busy_test_op Tests.DummyExecuteClass.TestBusyDetection",
+                "REFRESH busy_test_op",
+                "RECOMPILE busy_test_op"
             };
 
             foreach (var cmd in commandsToTest)
             {
-                var psi = new ProcessStartInfo
+                try
                 {
-                    FileName = "dotnet",
-                    Arguments = $"\"{dllPath}\" test-cli {cmd}",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-
-                using var proc = Process.Start(psi);
-                string stdout = proc.StandardOutput.ReadToEnd();
-                string stderr = proc.StandardError.ReadToEnd();
-                proc.WaitForExit();
-
-                int exitCode = proc.ExitCode;
-                bool reportedBusy = stderr.Contains("Unity is busy") || stdout.Contains("Unity is busy");
-
-                if (exitCode != 1 || !reportedBusy)
+                    using (var client = new System.Net.Sockets.TcpClient("127.0.0.1", port))
+                    {
+                        client.ReceiveTimeout = 2000;
+                        using (var stream = client.GetStream())
+                        using (var reader = new StreamReader(stream, System.Text.Encoding.UTF8))
+                        using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false)) { AutoFlush = true })
+                        {
+                            writer.WriteLine(cmd);
+                            string response = reader.ReadLine();
+                            if (response == null || !response.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
+                            {
+                                return $"FAILED for '{cmd}': expected response starting with BUSY, got: '{response}'";
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
                 {
-                    return $"FAILED for '{cmd}': exitCode={exitCode}, reportedBusy={reportedBusy}, stdout={stdout}, stderr={stderr}";
+                    return $"FAILED for '{cmd}' with exception: {ex.Message}";
                 }
             }
 

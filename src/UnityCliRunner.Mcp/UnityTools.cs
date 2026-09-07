@@ -22,13 +22,16 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_status", ReadOnly = true)]
-    [Description("Returns the current Unity Editor connection state (Ready, Not Running, Compiling, Running Unreachable).")]
+    [Description("Returns the current Unity Editor connection state (Ready, Not Running, Compiling, Running Unreachable). Note: Unity automatically starts on demand when action tools are called.")]
     public async Task<CallToolResult> UnityStatusAsync(CancellationToken cancellationToken = default)
     {
         string status = await _client.GetStatusAsync(cancellationToken);
+        string text = status == "Not Running"
+            ? "Status: Not Running (will auto-start on demand)"
+            : $"Status: {status}";
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = $"Status: {status}" }],
+            Content = [new TextContentBlock { Text = text }],
             IsError = false
         };
     }
@@ -292,27 +295,6 @@ public class UnityTools
         {
             Content = [new TextContentBlock { Text = stopped ? "Stopped." : "Error: Unity background instance could not be stopped." }],
             IsError = !stopped
-        };
-    }
-
-    [McpServerTool(Name = "unity_start")]
-    [Description("Starts a background Unity instance in batchmode and waits until ready.")]
-    public async Task<CallToolResult> UnityStartAsync(CancellationToken cancellationToken = default)
-    {
-        if (_processManager.IsUnityRunning(out _))
-        {
-            return new CallToolResult
-            {
-                Content = [new TextContentBlock { Text = "Unity is already running." }],
-                IsError = false
-            };
-        }
-
-        await _processManager.EnsureUnityRunningAsync(cancellationToken);
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = "Starting Unity background instance...\nStarted successfully!" }],
-            IsError = false
         };
     }
 }
