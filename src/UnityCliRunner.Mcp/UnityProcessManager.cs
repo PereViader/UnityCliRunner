@@ -420,6 +420,19 @@ public class UnityProcessManager
         try { File.Delete(PidFile); } catch { }
         try { File.Delete(CompilationErrorsFile); } catch { }
 
+        long initialLogOffset = 0;
+        if (File.Exists(LogFile))
+        {
+            try
+            {
+                initialLogOffset = new FileInfo(LogFile).Length;
+            }
+            catch
+            {
+                initialLogOffset = 0;
+            }
+        }
+
         var psi = new ProcessStartInfo
         {
             FileName = unityExe,
@@ -449,10 +462,10 @@ public class UnityProcessManager
         }
 
         _logger.LogInformation("Unity process started with PID {Pid}. Waiting up to 90s for socket server...", proc.Id);
-        await WaitForSocketReadinessAsync(proc, 90, cancellationToken);
+        await WaitForSocketReadinessAsync(proc, 90, cancellationToken, initialLogOffset);
     }
 
-    private async Task WaitForSocketReadinessAsync(Process? startedProcess, int timeoutSeconds, CancellationToken cancellationToken)
+    internal async Task WaitForSocketReadinessAsync(Process? startedProcess, int timeoutSeconds, CancellationToken cancellationToken, long initialLogOffset = 0)
     {
         var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
 
@@ -465,7 +478,7 @@ public class UnityProcessManager
             {
                 if (File.Exists(LogFile))
                 {
-                    string logText = ReadFileWithRetry(LogFile);
+                    string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
                     if (s_CompileErrorRegex.IsMatch(logText))
                     {
                         var errorLines = ExtractUniqueCompilationLines(logText);
@@ -481,15 +494,15 @@ public class UnityProcessManager
                     }
                 }
 
-                string logSnippet = GetLogSnippet();
+                string logSnippet = GetLogSnippet(initialLogOffset);
                 throw new InvalidOperationException(
                     $"Unity background process exited unexpectedly with exit code {startedProcess.ExitCode}.\n{logSnippet}");
             }
 
             // 2. Monitor unity_background_log.txt for compilation errors during startup
-            if (File.Exists(LogFile))
+            if (startedProcess != null && File.Exists(LogFile))
             {
-                string logText = ReadFileWithRetry(LogFile);
+                string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
                 if (s_CompileErrorRegex.IsMatch(logText))
                 {
                     _logger.LogError("Compilation errors detected in Unity background log during startup.");
@@ -501,7 +514,7 @@ public class UnityProcessManager
                     }
                     catch { }
 
-                    if (startedProcess != null && !startedProcess.HasExited)
+                    if (!startedProcess.HasExited)
                     {
                         try { startedProcess.Kill(true); } catch { }
                     }
@@ -595,12 +608,13 @@ public class UnityProcessManager
         }
     }
 
-    private string GetLogSnippet()
+    private string GetLogSnippet(long initialOffset = 0)
     {
         if (!File.Exists(LogFile)) return "No Unity log file found.";
         try
         {
-            var lines = File.ReadAllLines(LogFile);
+            string text = ReadFileWithRetry(LogFile, fromOffset: initialOffset);
+            var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             int start = Math.Max(0, lines.Length - 25);
             return "Last log lines:\n" + string.Join(Environment.NewLine, lines[start..]);
         }
@@ -626,24 +640,38 @@ public class UnityProcessManager
         return result;
     }
 
-    public static string ReadFileWithRetry(string path, int maxRetries = 5, int delayMs = 100)
+    public static string ReadFileWithRetry(string path, int maxRetries = 5, int delayMs = 100, long fromOffset = 0)
     {
         for (int i = 0; i < maxRetries; i++)
         {
             try
             {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                using var reader = new StreamReader(fs, Encoding.UTF8);
-                return reader.ReadToEnd();
+                return ReadFileFromOffset(path, fromOffset);
             }
             catch (IOException) when (i < maxRetries - 1)
             {
                 Thread.Sleep(delayMs);
             }
         }
-        using var finalFs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var finalReader = new StreamReader(finalFs, Encoding.UTF8);
-        return finalReader.ReadToEnd();
+        return ReadFileFromOffset(path, fromOffset);
+    }
+
+    private static string ReadFileFromOffset(string path, long fromOffset)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (fromOffset > 0)
+        {
+            if (fs.Length < fromOffset)
+            {
+                fs.Seek(0, SeekOrigin.Begin);
+            }
+            else
+            {
+                fs.Seek(fromOffset, SeekOrigin.Begin);
+            }
+        }
+        using var reader = new StreamReader(fs, Encoding.UTF8);
+        return reader.ReadToEnd();
     }
 
     public async Task<bool> StopUnityAsync(CancellationToken cancellationToken = default)

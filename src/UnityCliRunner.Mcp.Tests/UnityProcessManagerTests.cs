@@ -1,0 +1,349 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace UnityCliRunner.Mcp.Tests;
+
+public class UnityProcessManagerTests
+{
+    private static Process StartDummyProcess()
+    {
+        var psi = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? new ProcessStartInfo("ping.exe", "127.0.0.1 -n 15") { CreateNoWindow = true, UseShellExecute = false }
+            : new ProcessStartInfo("sleep", "15") { CreateNoWindow = true, UseShellExecute = false };
+        return Process.Start(psi)!;
+    }
+
+    [Fact]
+    public void ReadFileWithRetry_WithFromOffset_ReadsOnlyAppendedContent()
+    {
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempFile, "Historical line 1\nHistorical line 2\n", Encoding.UTF8);
+            long offset = new FileInfo(tempFile).Length;
+
+            File.AppendAllText(tempFile, "New line 3\nNew line 4\n", Encoding.UTF8);
+
+            string result = UnityProcessManager.ReadFileWithRetry(tempFile, fromOffset: offset);
+
+            Assert.Equal("New line 3\nNew line 4\n", result);
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+        }
+    }
+
+    [Fact]
+    public void ReadFileWithRetry_WhenFileTruncated_ReadsFromBeginning()
+    {
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempFile, "A very long historical text that will be truncated later.\n", Encoding.UTF8);
+            long offset = new FileInfo(tempFile).Length;
+
+            // Truncate and write shorter new text
+            File.WriteAllText(tempFile, "Short fresh text.\n", Encoding.UTF8);
+            Assert.True(new FileInfo(tempFile).Length < offset);
+
+            string result = UnityProcessManager.ReadFileWithRetry(tempFile, fromOffset: offset);
+
+            Assert.Equal("Short fresh text.\n", result);
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+        }
+    }
+
+    [Fact]
+    public void ReadFileWithRetry_WhenOffsetEqualsLength_ReturnsEmpty()
+    {
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempFile, "Some existing content\n", Encoding.UTF8);
+            long offset = new FileInfo(tempFile).Length;
+
+            string result = UnityProcessManager.ReadFileWithRetry(tempFile, fromOffset: offset);
+
+            Assert.Equal(string.Empty, result);
+        }
+        finally
+        {
+            try { File.Delete(tempFile); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task EnsureUnityRunningAsync_WhenUnityAlreadyRunning_IgnoresHistoricalCompilationErrorsInLogFile()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var serverTask = Task.Run(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                TcpClient tcp;
+                try
+                {
+                    tcp = await listener.AcceptTcpClientAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+
+                _ = Task.Run(async () =>
+                {
+                    using (tcp)
+                    using (var stream = tcp.GetStream())
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    using (var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true })
+                    {
+                        string? line = await reader.ReadLineAsync(cts.Token);
+                        if (line == null) return;
+
+                        if (line == "PING")
+                        {
+                            await writer.WriteLineAsync("PONG".AsMemory(), cts.Token);
+                        }
+                        else if (line.StartsWith("POLL_REFRESH"))
+                        {
+                            await writer.WriteLineAsync("READY".AsMemory(), cts.Token);
+                        }
+                    }
+                }, cts.Token);
+            }
+        });
+
+        try
+        {
+            // Simulate already running Unity instance
+            await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_cli_port.txt"), port.ToString());
+            await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_cli_process.pid"), Environment.ProcessId.ToString());
+
+            // Write historical compilation error to unity_background_log.txt
+            string historicalErrorLog = "Assets/Scripts/Broken.cs(10,5): error CS0103: The name 'foo' does not exist in the current context\n";
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "unity_background_log.txt"), historicalErrorLog);
+
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+
+            // Should succeed without throwing UnityCompilationException from historical log
+            var ensureTask = procManager.EnsureUnityRunningAsync(cts.Token);
+            await ensureTask;
+        }
+        finally
+        {
+            cts.Cancel();
+            listener.Stop();
+            try { await serverTask; } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task EnsureUnityRunningAsync_WhenSocketTemporarilyUnavailable_WaitsForReadinessWithoutAbortingOnHistoricalErrors()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_delayed_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var serverStartedTime = DateTime.UtcNow;
+
+        var serverTask = Task.Run(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                TcpClient tcp;
+                try
+                {
+                    tcp = await listener.AcceptTcpClientAsync(cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+
+                _ = Task.Run(async () =>
+                {
+                    using (tcp)
+                    using (var stream = tcp.GetStream())
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    using (var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true })
+                    {
+                        // Simulate delay (e.g. domain reload) before socket responds
+                        if (DateTime.UtcNow - serverStartedTime < TimeSpan.FromSeconds(2))
+                        {
+                            // Close connection to simulate unavailable socket during initial probe
+                            return;
+                        }
+
+                        string? line = await reader.ReadLineAsync(cts.Token);
+                        if (line == null) return;
+
+                        if (line == "PING")
+                        {
+                            await writer.WriteLineAsync("PONG".AsMemory(), cts.Token);
+                        }
+                        else if (line.StartsWith("POLL_REFRESH"))
+                        {
+                            await writer.WriteLineAsync("READY".AsMemory(), cts.Token);
+                        }
+                    }
+                }, cts.Token);
+            }
+        });
+
+        try
+        {
+            // Simulate already running Unity instance
+            await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_cli_port.txt"), port.ToString());
+            await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_cli_process.pid"), Environment.ProcessId.ToString());
+
+            // Write historical compilation error to unity_background_log.txt
+            string historicalErrorLog = "Assets/Scripts/Broken.cs(10,5): error CS0103: The name 'foo' does not exist in the current context\n";
+            await File.WriteAllTextAsync(Path.Combine(tempDir, "unity_background_log.txt"), historicalErrorLog);
+
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+
+            // Should wait for socket readiness without aborting on historical errors in WaitForSocketReadinessAsync
+            await procManager.EnsureUnityRunningAsync(cts.Token);
+        }
+        finally
+        {
+            cts.Cancel();
+            listener.Stop();
+            try { await serverTask; } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task WaitForSocketReadinessAsync_WhenStartedProcessNotNull_IgnoresHistoricalErrorsBeforeOffset()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_proc_hist_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var serverTask = Task.Run(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+            {
+                TcpClient tcp;
+                try { tcp = await listener.AcceptTcpClientAsync(cts.Token); }
+                catch { break; }
+
+                _ = Task.Run(async () =>
+                {
+                    using (tcp)
+                    using (var stream = tcp.GetStream())
+                    using (var reader = new StreamReader(stream, Encoding.UTF8))
+                    using (var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true })
+                    {
+                        string? line = await reader.ReadLineAsync(cts.Token);
+                        if (line == "PING") await writer.WriteLineAsync("PONG".AsMemory(), cts.Token);
+                        else if (line != null && line.StartsWith("POLL_REFRESH")) await writer.WriteLineAsync("READY".AsMemory(), cts.Token);
+                    }
+                }, cts.Token);
+            }
+        });
+
+        using var proc = StartDummyProcess();
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_cli_port.txt"), port.ToString());
+
+            // Write historical error BEFORE offset
+            string logFile = Path.Combine(tempDir, "unity_background_log.txt");
+            await File.WriteAllTextAsync(logFile, "Assets/Scripts/OldBroken.cs(10,5): error CS0103: The name 'old' does not exist\n");
+            long initialOffset = new FileInfo(logFile).Length;
+
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+
+            // Should succeed without throwing UnityCompilationException because historical error is before offset
+            await procManager.WaitForSocketReadinessAsync(proc, 5, cts.Token, initialOffset);
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(true); } catch { }
+            cts.Cancel();
+            listener.Stop();
+            try { await serverTask; } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task WaitForSocketReadinessAsync_WhenStartedProcessNotNull_ThrowsWhenNewErrorsAppendedAfterOffset()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_proc_new_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var proc = StartDummyProcess();
+
+        try
+        {
+            string logFile = Path.Combine(tempDir, "unity_background_log.txt");
+            await File.WriteAllTextAsync(logFile, "Some clean startup log line\n");
+            long initialOffset = new FileInfo(logFile).Length;
+
+            // Append new error AFTER offset
+            await File.AppendAllTextAsync(logFile, "Assets/Scripts/NewBroken.cs(42,1): error CS0246: The type or namespace could not be found\n");
+
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+
+            var ex = await Assert.ThrowsAsync<UnityCompilationException>(async () =>
+            {
+                await procManager.WaitForSocketReadinessAsync(proc, 5, cts.Token, initialOffset);
+            });
+
+            Assert.Contains("NewBroken.cs", ex.Message);
+            Assert.True(proc.HasExited, "Started process should have been killed when compilation error was detected.");
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(true); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+}
