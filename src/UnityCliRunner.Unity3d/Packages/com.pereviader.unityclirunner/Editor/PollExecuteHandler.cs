@@ -12,7 +12,7 @@ namespace UnityCliRunner
             PollHelper.PollOperationResult<UnityExecuteResult>(
                 operationId,
                 UnityCliPaths.ExecuteResultFile,
-                UnityCliPaths.ExecuteRunningFile,
+                null,
                 writer,
                 res => res.operationId,
                 (res, w) =>
@@ -21,7 +21,7 @@ namespace UnityCliRunner
                     {
                         if (!string.IsNullOrEmpty(res.payload))
                         {
-                            w.WriteLine($"SUCCESS {res.payload}");
+                            w.WriteLine($"SUCCESS {PollHelper.EscapeLine(res.payload)}");
                         }
                         else
                         {
@@ -30,11 +30,11 @@ namespace UnityCliRunner
                     }
                     else if (res.interrupted)
                     {
-                        w.WriteLine($"INTERRUPTION {res.message}");
+                        w.WriteLine($"INTERRUPTION {PollHelper.EscapeLine(res.message)}");
                     }
                     else
                     {
-                        w.WriteLine($"FAILURE {res.message}");
+                        w.WriteLine($"FAILURE {PollHelper.EscapeLine(res.message)}");
                     }
                 });
         }

@@ -276,4 +276,37 @@ public class ExecuteMethodTests
         Assert.Contains("AsyncVoidMethod end", result.Text);
         Assert.Contains("Method execution succeeded.", result.Text);
     }
+
+    [Fact]
+    public async Task TestExecuteCancellableMethod_ResolvesTrailingCancellationTokenSuccessfully()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestExecuteCancellable");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_execute_method", new
+        {
+            methodName = "Tests.DummyExecuteClass.QuickCancellable"
+        });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("quick-cancellable", result.Text);
+        Assert.Contains("Method execution succeeded.", result.Text);
+    }
+
+    [Fact]
+    public async Task TestExecuteCancellableOverload_PrefersCancellationTokenOverload()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestExecuteCancellable");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_execute_method", new
+        {
+            methodName = "Tests.DummyExecuteClass.OverloadedMethod",
+            args = new[] { "foo" }
+        });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("with-ct: foo", result.Text);
+        Assert.Contains("Method execution succeeded.", result.Text);
+    }
 }

@@ -4,37 +4,15 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
-using UnityEditor;
 using UnityEngine;
 
 namespace UnityCliRunner
 {
     internal class EvalHandler : ICommandHandler
     {
-        private static ConsoleLogCapture s_ActiveLogCapture;
-        private static readonly object s_CtsLock = new object();
-        private static CancellationTokenSource s_ActiveCts;
-        private static string s_ActiveOperationId;
-
         public static bool CancelActiveEval(string operationId)
         {
-            lock (s_CtsLock)
-            {
-                if (s_ActiveCts != null && (string.IsNullOrEmpty(operationId) || s_ActiveOperationId == operationId))
-                {
-                    try
-                    {
-                        s_ActiveCts.Cancel();
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogWarning($"UnityCliRunner: Failed to cancel active eval: {ex.Message}");
-                    }
-                }
-            }
-            return false;
+            return OperationExecutionEngine.TryCancel(operationId);
         }
 
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.MainThread;
@@ -67,22 +45,13 @@ namespace UnityCliRunner
                 return;
             }
 
-            CancellationTokenSource cts;
-            lock (s_CtsLock)
-            {
-                s_ActiveCts?.Dispose();
-                s_ActiveCts = new CancellationTokenSource();
-                s_ActiveOperationId = operationId;
-                cts = s_ActiveCts;
-            }
+            var cts = OperationExecutionEngine.RegisterActiveOperation(operationId, isCancelable: true);
 
             try
             {
-                WriteEvalRunningState(operationId);
-
                 if (cts.IsCancellationRequested)
                 {
-                    FinishEval(operationId, false, "Evaluation was canceled.", 0, null, interrupted: true);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, false, "Evaluation was canceled.", 0, null, null, interrupted: true);
                     writer.WriteLine("FAILURE Evaluation was canceled.");
                     return;
                 }
@@ -90,7 +59,7 @@ namespace UnityCliRunner
                 if (!RoslynCompilerHelper.IsSupported)
                 {
                     string msg = "The 'eval' command is not supported on this Unity version (" + RoslynCompilerHelper.UnsupportedReason + ")";
-                    FinishEval(operationId, false, msg, 0, null);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, false, msg, 0, null, null);
                     writer.WriteLine($"FAILURE {msg}");
                     return;
                 }
@@ -103,7 +72,7 @@ namespace UnityCliRunner
                 if (!TryCompileSnippet(rawCode, out assemblyBytes, out isVoidStatement, out errors) || assemblyBytes == null)
                 {
                     string combinedErrors = string.Join("\n", errors);
-                    FinishEval(operationId, false, combinedErrors, 0, null);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, false, combinedErrors, 0, null, null);
                     string singleLineErrors = string.Join(" | ", errors);
                     writer.WriteLine($"FAILURE {singleLineErrors}");
                     return;
@@ -111,7 +80,7 @@ namespace UnityCliRunner
 
                 if (cts.IsCancellationRequested)
                 {
-                    FinishEval(operationId, false, "Evaluation was canceled.", 0, null, interrupted: true);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, false, "Evaluation was canceled.", 0, null, null, interrupted: true);
                     writer.WriteLine("FAILURE Evaluation was canceled.");
                     return;
                 }
@@ -122,255 +91,37 @@ namespace UnityCliRunner
 
                 // Execute compiled assembly under async harness
                 UnityCliOperationStore.Update(operationId, OperationStatus.Executing);
-                UnityCliDispatcher.EnsureInitialized();
 
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var logCapture = new ConsoleLogCapture();
-                s_ActiveLogCapture = logCapture;
-
-                Task<object> task;
-                try
-                {
-                    var asm = Assembly.Load(assemblyBytes);
-                    var runnerType = asm.GetType("__UnityCliEvalRunner");
-                    if (runnerType == null)
+                OperationExecutionEngine.Execute(
+                    operationId: operationId,
+                    operationKind: OperationKinds.Eval,
+                    resultFilePath: UnityCliPaths.EvalResultFile,
+                    isVoid: isVoidStatement,
+                    invoker: ct =>
                     {
-                        throw new Exception("Evaluation runner type could not be loaded from dynamic assembly.");
-                    }
-
-                    var execMethod = runnerType.GetMethod("Execute", BindingFlags.Public | BindingFlags.Static);
-                    if (execMethod == null)
-                    {
-                        throw new Exception("Evaluation runner execute method not found.");
-                    }
-
-                    task = (Task<object>)execMethod.Invoke(null, new object[] { cts.Token });
-                }
-                catch (TargetInvocationException tie)
-                {
-                    stopwatch.Stop();
-                    var inner = tie.InnerException ?? tie;
-                    var logs = logCapture.GetLogs();
-                    DisposeCapture(logCapture);
-                    bool isCanceled = inner is OperationCanceledException;
-                    FinishEval(operationId, false, isCanceled ? "Evaluation was canceled." : inner.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: isCanceled);
-                    return;
-                }
-                catch (OperationCanceledException)
-                {
-                    stopwatch.Stop();
-                    var logs = logCapture.GetLogs();
-                    DisposeCapture(logCapture);
-                    FinishEval(operationId, false, "Evaluation was canceled.", stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: true);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    stopwatch.Stop();
-                    var logs = logCapture.GetLogs();
-                    DisposeCapture(logCapture);
-                    FinishEval(operationId, false, ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs);
-                    return;
-                }
-
-                if (task.IsCompleted)
-                {
-                    try
-                    {
-                        ProcessCompletedTask(task, operationId, isVoidStatement, stopwatch, logCapture);
-                    }
-                    catch (Exception ex)
-                    {
-                        stopwatch.Stop();
-                        var logs = logCapture.GetLogs();
-                        DisposeCapture(logCapture);
-                        FinishEval(operationId, false, ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs);
-                    }
-                }
-                else
-                {
-                    task.ContinueWith(t => UnityCliDispatcher.Enqueue(() =>
-                    {
-                        try
+                        var asm = Assembly.Load(assemblyBytes);
+                        var runnerType = asm.GetType("__UnityCliEvalRunner");
+                        if (runnerType == null)
                         {
-                            ProcessCompletedTask(t, operationId, isVoidStatement, stopwatch, logCapture);
+                            throw new Exception("Evaluation runner type could not be loaded from dynamic assembly.");
                         }
-                        catch (Exception ex)
+
+                        var execMethod = runnerType.GetMethod("Execute", BindingFlags.Public | BindingFlags.Static);
+                        if (execMethod == null)
                         {
-                            stopwatch.Stop();
-                            var logs = logCapture.GetLogs();
-                            DisposeCapture(logCapture);
-                            FinishEval(operationId, false, ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs);
+                            throw new Exception("Evaluation runner execute method not found.");
                         }
-                    }));
-                }
+
+                        return execMethod.Invoke(null, new object[] { ct });
+                    },
+                    canCancel: true
+                );
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Unhandled exception during Eval: {ex}");
-                FinishEval(operationId, false, ex.ToString(), 0, null);
+                OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, false, ex.ToString(), 0, null, null);
             }
-        }
-
-        private static void ProcessCompletedTask(Task<object> task, string operationId, bool isVoidStatement, System.Diagnostics.Stopwatch stopwatch, ConsoleLogCapture logCapture)
-        {
-            if (task.IsFaulted)
-            {
-                stopwatch.Stop();
-                var ex = task.Exception != null
-                    ? (task.Exception.InnerExceptions.Count == 1 ? task.Exception.InnerExceptions[0] : task.Exception)
-                    : new Exception("Unknown task failure");
-                var logs = logCapture.GetLogs();
-                DisposeCapture(logCapture);
-                bool isCanceled = ex is OperationCanceledException;
-                FinishEval(operationId, false, isCanceled ? "Evaluation was canceled." : ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: isCanceled);
-                return;
-            }
-
-            if (task.IsCanceled)
-            {
-                stopwatch.Stop();
-                var logs = logCapture.GetLogs();
-                DisposeCapture(logCapture);
-                FinishEval(operationId, false, "Evaluation was canceled.", stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: true);
-                return;
-            }
-
-            object rawResult = task.Result;
-            UnwrapAndFinish(rawResult, operationId, isVoidStatement, stopwatch, logCapture);
-        }
-
-        private static void UnwrapAndFinish(object rawResult, string operationId, bool isVoidStatement, System.Diagnostics.Stopwatch stopwatch, ConsoleLogCapture logCapture)
-        {
-            // Check if rawResult is a ValueTask or ValueTask<T>
-            if (rawResult != null)
-            {
-                Type resultType = rawResult.GetType();
-                if (resultType.FullName != null && resultType.FullName.StartsWith("System.Threading.Tasks.ValueTask", StringComparison.Ordinal))
-                {
-                    var asTaskMethod = resultType.GetMethod("AsTask", BindingFlags.Public | BindingFlags.Instance);
-                    if (asTaskMethod != null && asTaskMethod.GetParameters().Length == 0 && typeof(Task).IsAssignableFrom(asTaskMethod.ReturnType))
-                    {
-                        try
-                        {
-                            rawResult = asTaskMethod.Invoke(rawResult, null);
-                        }
-                        catch (Exception ex)
-                        {
-                            stopwatch.Stop();
-                            var inner = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
-                            var logs = logCapture.GetLogs();
-                            DisposeCapture(logCapture);
-                            bool isCanceled = inner is OperationCanceledException;
-                            FinishEval(operationId, false, isCanceled ? "Evaluation was canceled." : inner.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: isCanceled);
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // Check if rawResult is a Task
-            if (rawResult is Task innerTask)
-            {
-                if (!innerTask.IsCompleted)
-                {
-                    innerTask.ContinueWith(t => UnityCliDispatcher.Enqueue(() =>
-                    {
-                        UnwrapCompletedTask(t, operationId, stopwatch, logCapture);
-                    }));
-                    return;
-                }
-
-                UnwrapCompletedTask(innerTask, operationId, stopwatch, logCapture);
-                return;
-            }
-
-            // Not a task, finish directly
-            stopwatch.Stop();
-            double duration = stopwatch.Elapsed.TotalSeconds;
-            var finalLogs = logCapture.GetLogs();
-            DisposeCapture(logCapture);
-            string formattedPayload = null;
-            if (!isVoidStatement)
-            {
-                try
-                {
-                    formattedPayload = CommandHelper.FormatResult(rawResult, isVoidStatement);
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"UnityCliRunner: Failed to format eval result: {ex.Message}");
-                    formattedPayload = rawResult?.ToString();
-                }
-            }
-            FinishEval(operationId, true, "", duration, formattedPayload, finalLogs);
-        }
-
-        private static void UnwrapCompletedTask(Task innerTask, string operationId, System.Diagnostics.Stopwatch stopwatch, ConsoleLogCapture logCapture)
-        {
-            if (innerTask.IsFaulted)
-            {
-                stopwatch.Stop();
-                double duration = stopwatch.Elapsed.TotalSeconds;
-                var logs = logCapture.GetLogs();
-                DisposeCapture(logCapture);
-                var ex = innerTask.Exception != null
-                    ? (innerTask.Exception.InnerExceptions.Count == 1 ? innerTask.Exception.InnerExceptions[0] : innerTask.Exception)
-                    : new Exception("Unknown task failure");
-                bool isCanceled = ex is OperationCanceledException;
-                FinishEval(operationId, false, isCanceled ? "Evaluation was canceled." : ex.ToString(), duration, null, logs, interrupted: isCanceled);
-                return;
-            }
-
-            if (innerTask.IsCanceled)
-            {
-                stopwatch.Stop();
-                double duration = stopwatch.Elapsed.TotalSeconds;
-                var logs = logCapture.GetLogs();
-                DisposeCapture(logCapture);
-                FinishEval(operationId, false, "Evaluation was canceled.", duration, null, logs, interrupted: true);
-                return;
-            }
-
-            // Check if generic Task<T>
-            Type tType = innerTask.GetType();
-            PropertyInfo resultProp = null;
-            Type cur = tType;
-            while (cur != null && cur != typeof(object))
-            {
-                if (cur.IsGenericType && cur.GetGenericTypeDefinition() == typeof(Task<>))
-                {
-                    resultProp = cur.GetProperty("Result");
-                    break;
-                }
-                cur = cur.BaseType;
-            }
-
-            if (resultProp != null)
-            {
-                object innerVal = resultProp.GetValue(innerTask);
-                UnwrapAndFinish(innerVal, operationId, false, stopwatch, logCapture);
-            }
-            else
-            {
-                // Non-generic Task (void)
-                stopwatch.Stop();
-                double duration = stopwatch.Elapsed.TotalSeconds;
-                var logs = logCapture.GetLogs();
-                DisposeCapture(logCapture);
-                string payload = CommandHelper.FormatResult(null, true);
-                FinishEval(operationId, true, "", duration, payload, logs);
-            }
-        }
-
-        private static void DisposeCapture(ConsoleLogCapture logCapture)
-        {
-            if (logCapture == null) return;
-            if (s_ActiveLogCapture == logCapture)
-            {
-                s_ActiveLogCapture = null;
-            }
-            logCapture.Dispose();
         }
 
         private static string UnescapeCode(string input)
@@ -504,136 +255,24 @@ public static class __UnityCliEvalRunner
 }";
         }
 
+        [Obsolete("Running state is now tracked exclusively in UnityCliOperationStore.")]
         public static void WriteEvalRunningState(string operationId)
         {
-            try
-            {
-                if (!Directory.Exists(UnityCliPaths.TempDir))
-                {
-                    Directory.CreateDirectory(UnityCliPaths.TempDir);
-                }
-                UnityCliOperationStore.WriteAtomic(UnityCliPaths.EvalRunningFile, operationId, operationId);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"UnityCliRunner: Failed to write eval running state: {ex}");
-            }
         }
 
+        [Obsolete("Running state is now tracked exclusively in UnityCliOperationStore.")]
         public static void ClearEvalRunningState()
         {
-            try
-            {
-                if (File.Exists(UnityCliPaths.EvalRunningFile))
-                {
-                    File.Delete(UnityCliPaths.EvalRunningFile);
-                }
-            }
-            catch { }
         }
 
         public static void WriteEvalResult(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs = null, bool interrupted = false)
         {
-            try
-            {
-                if (!Directory.Exists(UnityCliPaths.TempDir))
-                {
-                    Directory.CreateDirectory(UnityCliPaths.TempDir);
-                }
-                string resultsPath = UnityCliPaths.EvalResultFile;
-
-                var runResult = new UnityEvalResult
-                {
-                    operationId = operationId,
-                    success = success,
-                    interrupted = interrupted,
-                    message = message,
-                    duration = duration,
-                    payload = payload,
-                    logs = logs
-                };
-                string json = JsonUtility.ToJson(runResult, true);
-                UnityCliOperationStore.WriteAtomic(resultsPath, json, operationId);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"UnityCliRunner: Failed to write eval result: {ex}");
-            }
+            OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, success, message, duration, payload, logs, interrupted);
         }
 
         public static void MarkInterrupted(string message, string targetOperationId = null)
         {
-            lock (s_CtsLock)
-            {
-                if (string.IsNullOrEmpty(targetOperationId) || s_ActiveOperationId == targetOperationId)
-                {
-                    s_ActiveCts?.Dispose();
-                    s_ActiveCts = null;
-                    s_ActiveOperationId = null;
-                }
-            }
-
-            if (s_ActiveLogCapture != null)
-            {
-                s_ActiveLogCapture.Dispose();
-                s_ActiveLogCapture = null;
-            }
-
-            var operation = UnityCliOperationStore.Read();
-            string opId = targetOperationId ?? operation?.operationId;
-            if (string.IsNullOrEmpty(opId))
-            {
-                return;
-            }
-            if (operation != null && operation.kind != OperationKinds.Eval && targetOperationId == null)
-            {
-                return;
-            }
-
-            try
-            {
-                WriteEvalResult(opId, false, message, 0, null, null, true);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"UnityCliRunner: Failed to write interrupted eval result: {ex}");
-            }
-            finally
-            {
-                ClearEvalRunningState();
-                UnityCliOperationStore.Complete(opId);
-            }
-        }
-
-        private static void FinishEval(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs = null, bool interrupted = false)
-        {
-            lock (s_CtsLock)
-            {
-                if (s_ActiveOperationId == operationId)
-                {
-                    s_ActiveCts?.Dispose();
-                    s_ActiveCts = null;
-                    s_ActiveOperationId = null;
-                }
-            }
-
-            if (!UnityCliOperationStore.IsOwnedBy(operationId, OperationKinds.Eval))
-            {
-                return;
-            }
-            try
-            {
-                WriteEvalResult(operationId, success, message, duration, payload, logs, interrupted);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"UnityCliRunner: Failed to write eval result: {ex}");
-            }
-            finally
-            {
-                ClearEvalRunningState();
-                UnityCliOperationStore.Complete(operationId);
-            }
+            OperationExecutionEngine.MarkInterrupted(OperationKinds.Eval, UnityCliPaths.EvalResultFile, message, targetOperationId);
         }
     }
 }

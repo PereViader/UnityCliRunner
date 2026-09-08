@@ -309,6 +309,11 @@ namespace UnityCliRunner
 
         public static MethodInfo FindStaticMethod(Type type, string methodName, int paramCount)
         {
+            return FindStaticMethod(type, methodName, paramCount, allowTrailingCancellationToken: true);
+        }
+
+        public static MethodInfo FindStaticMethod(Type type, string methodName, int paramCount, bool allowTrailingCancellationToken)
+        {
             var methods = type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
             var candidatesWithCt = new List<MethodInfo>();
             var candidatesWithoutCt = new List<MethodInfo>();
@@ -318,20 +323,14 @@ namespace UnityCliRunner
                 if (m.Name != methodName) continue;
 
                 var parameters = m.GetParameters();
-                int ctCount = 0;
-                foreach (var p in parameters)
-                {
-                    if (p.ParameterType == typeof(CancellationToken))
-                    {
-                        ctCount++;
-                    }
-                }
 
-                if (ctCount == 1 && parameters.Length - 1 == paramCount)
+                if (allowTrailingCancellationToken &&
+                    parameters.Length == paramCount + 1 &&
+                    parameters[paramCount].ParameterType == typeof(CancellationToken))
                 {
                     candidatesWithCt.Add(m);
                 }
-                else if (ctCount == 0 && parameters.Length == paramCount)
+                else if (parameters.Length == paramCount)
                 {
                     candidatesWithoutCt.Add(m);
                 }

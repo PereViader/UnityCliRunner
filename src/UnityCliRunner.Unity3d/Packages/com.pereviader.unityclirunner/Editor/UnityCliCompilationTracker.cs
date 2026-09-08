@@ -14,12 +14,14 @@ namespace UnityCliRunner
         private static readonly Dictionary<string, List<string>> s_AssemblyDiagnostics = new Dictionary<string, List<string>>();
         private static readonly object s_DiagnosticsLock = new object();
 
+        private const int CompilationRequestIdleFrameThreshold = 3;
+
         private static volatile bool s_IsCompiling;
         private static volatile bool s_IsUpdating;
         private static volatile bool s_RefreshPending;
         private static volatile bool s_ScriptCompilationFailed;
         private static volatile bool s_CompilationRequested;
-        private static double s_CompilationRequestTime;
+        private static int s_CompilationRequestIdleFrames;
         private static string s_ObservedOperationId;
         private static int s_SettledUpdateCount;
         private static volatile UnityRefreshResult s_LastRefreshResult;
@@ -40,10 +42,7 @@ namespace UnityCliRunner
             set
             {
                 s_CompilationRequested = value;
-                if (value)
-                {
-                    s_CompilationRequestTime = EditorApplication.timeSinceStartup;
-                }
+                s_CompilationRequestIdleFrames = 0;
             }
         }
 
@@ -92,6 +91,7 @@ namespace UnityCliRunner
         {
             s_IsCompiling = true;
             s_CompilationRequested = false;
+            s_CompilationRequestIdleFrames = 0;
         }
 
         private static void OnCompilationFinished(object obj)
@@ -214,15 +214,29 @@ namespace UnityCliRunner
 
             if (s_CompilationRequested)
             {
-                if (s_IsCompiling)
+                if (s_IsCompiling || EditorApplication.isCompiling)
                 {
                     s_CompilationRequested = false;
+                    s_CompilationRequestIdleFrames = 0;
                 }
-                else if (EditorApplication.timeSinceStartup - s_CompilationRequestTime > 1.5)
+                else if (s_RefreshPending || s_IsUpdating || EditorApplication.isUpdating)
                 {
-                    s_CompilationRequested = false;
-                    WriteActiveErrorsToFile();
+                    s_CompilationRequestIdleFrames = 0;
                 }
+                else
+                {
+                    s_CompilationRequestIdleFrames++;
+                    if (s_CompilationRequestIdleFrames >= CompilationRequestIdleFrameThreshold)
+                    {
+                        s_CompilationRequested = false;
+                        s_CompilationRequestIdleFrames = 0;
+                        WriteActiveErrorsToFile();
+                    }
+                }
+            }
+            else
+            {
+                s_CompilationRequestIdleFrames = 0;
             }
 
             ObserveOperationUntilSettled();

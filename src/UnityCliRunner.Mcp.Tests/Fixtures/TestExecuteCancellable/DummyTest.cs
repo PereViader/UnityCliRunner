@@ -27,5 +27,20 @@ namespace Tests
             await Task.Delay(2000);
             return "completed";
         }
+
+        public static string QuickCancellable(CancellationToken ct)
+        {
+            return "quick-cancellable";
+        }
+
+        public static string OverloadedMethod(string value)
+        {
+            return "no-ct: " + value;
+        }
+
+        public static string OverloadedMethod(string value, CancellationToken ct)
+        {
+            return "with-ct: " + value;
+        }
     }
 }

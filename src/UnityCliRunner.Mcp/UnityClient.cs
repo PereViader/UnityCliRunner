@@ -223,7 +223,7 @@ public class UnityClient
                             OperationId = opId,
                             Success = false,
                             Interrupted = true,
-                            Message = msg
+                            Message = UnescapeLine(msg)
                         };
                     }
 
@@ -298,7 +298,7 @@ public class UnityClient
         }
         if (initialResponse != null && (initialResponse.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || initialResponse.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase)))
         {
-            return new UnityEvalResult { OperationId = opId, Success = false, Message = initialResponse };
+            return new UnityEvalResult { OperationId = opId, Success = false, Message = UnescapeLine(initialResponse) };
         }
 
         try
@@ -334,21 +334,21 @@ public class UnityClient
                     if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
                     {
                         string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
-                        return new UnityEvalResult { OperationId = opId, Success = true, Payload = payload };
+                        return new UnityEvalResult { OperationId = opId, Success = true, Payload = UnescapeLine(payload) };
                     }
                     if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
                     {
                         string msg = pollResp.Length > 7 ? pollResp[7..].Trim() : "Evaluation failed.";
-                        return new UnityEvalResult { OperationId = opId, Success = false, Message = msg };
+                        return new UnityEvalResult { OperationId = opId, Success = false, Message = UnescapeLine(msg) };
                     }
                     if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
                     {
                         string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Evaluation interrupted.";
-                        return new UnityEvalResult { OperationId = opId, Success = false, Interrupted = true, Message = msg };
+                        return new UnityEvalResult { OperationId = opId, Success = false, Interrupted = true, Message = UnescapeLine(msg) };
                     }
                     if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
                     {
-                        return new UnityEvalResult { OperationId = opId, Success = false, Message = pollResp };
+                        return new UnityEvalResult { OperationId = opId, Success = false, Message = UnescapeLine(pollResp) };
                     }
                     if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
                     {
@@ -419,7 +419,7 @@ public class UnityClient
         }
         if (initialResponse != null && (initialResponse.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || initialResponse.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase)))
         {
-            return new UnityExecuteResult { OperationId = opId, Success = false, Message = initialResponse };
+            return new UnityExecuteResult { OperationId = opId, Success = false, Message = UnescapeLine(initialResponse) };
         }
 
         try
@@ -454,21 +454,21 @@ public class UnityClient
                     if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
                     {
                         string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
-                        return new UnityExecuteResult { OperationId = opId, Success = true, Payload = payload };
+                        return new UnityExecuteResult { OperationId = opId, Success = true, Payload = UnescapeLine(payload) };
                     }
                     if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
                     {
                         string msg = pollResp.Length > 7 ? pollResp[7..].Trim() : "Method execution failed.";
-                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = msg };
+                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = UnescapeLine(msg) };
                     }
                     if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
                     {
                         string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Method execution interrupted.";
-                        return new UnityExecuteResult { OperationId = opId, Success = false, Interrupted = true, Message = msg };
+                        return new UnityExecuteResult { OperationId = opId, Success = false, Interrupted = true, Message = UnescapeLine(msg) };
                     }
                     if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
                     {
-                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = pollResp };
+                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = UnescapeLine(pollResp) };
                     }
                     if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
                     {
@@ -696,16 +696,16 @@ public class UnityClient
                             return res;
                         }
 
-                        return new UnityTestRunResult { RunId = opId, Success = false, Message = pollResp };
+                        return new UnityTestRunResult { RunId = opId, Success = false, Message = UnescapeLine(pollResp) };
                     }
                     if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
                     {
                         string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Test run interrupted.";
-                        return new UnityTestRunResult { RunId = opId, Success = false, ResultState = "Interrupted", Message = msg };
+                        return new UnityTestRunResult { RunId = opId, Success = false, ResultState = "Interrupted", Message = UnescapeLine(msg) };
                     }
                     if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
                     {
-                        return new UnityTestRunResult { RunId = opId, Success = false, Message = pollResp };
+                        return new UnityTestRunResult { RunId = opId, Success = false, Message = UnescapeLine(pollResp) };
                     }
                     if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
                     {
@@ -817,6 +817,12 @@ public class UnityClient
             .Replace("\r", "\\r")
             .Replace("\n", "\\n")
             .Replace("\t", "\\t");
+    }
+
+    private static string UnescapeLine(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        return text.Replace("\\r", "\r").Replace("\\n", "\n");
     }
 
     private string ReadCompilationErrors()

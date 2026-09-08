@@ -8,8 +8,7 @@ namespace UnityCliRunner
 
         public void Handle(string payload, StreamWriter writer)
         {
-            string operationId = payload?.Trim();
-            RunTestsHandler.CancelActiveTestRun(operationId, writer);
+            CancelOperationHandler.CancelActiveOperation(payload, writer);
         }
     }
 }

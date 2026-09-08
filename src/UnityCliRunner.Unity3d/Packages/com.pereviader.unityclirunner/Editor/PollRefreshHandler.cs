@@ -19,7 +19,7 @@ namespace UnityCliRunner
             string operationId = payload?.Trim();
             if (!string.IsNullOrEmpty(operationId) && UnityCliCompilationTracker.TryReadRefreshResult(operationId, out var result))
             {
-                if (result.interrupted) return $"INTERRUPTION {result.message}";
+                if (result.interrupted) return $"INTERRUPTION {PollHelper.EscapeLine(result.message)}";
                 return result.success ? "READY" : "COMPILATION_ERROR";
             }
             var operation = UnityCliOperationStore.ReadThreadSafeSnapshot();

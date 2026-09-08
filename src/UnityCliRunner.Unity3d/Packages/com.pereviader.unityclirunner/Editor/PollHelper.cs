@@ -6,6 +6,12 @@ namespace UnityCliRunner
 {
     internal static class PollHelper
     {
+        public static string EscapeLine(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            return text.Replace("\r", "\\r").Replace("\n", "\\n");
+        }
+
         public static void PollOperationResult<TResult>(
             string operationId,
             string resultFilePath,
@@ -38,13 +44,13 @@ namespace UnityCliRunner
                 }
                 catch (Exception ex)
                 {
-                    writer.WriteLine($"ERROR: {ex.Message}");
+                    writer.WriteLine($"ERROR: {EscapeLine(ex.Message)}");
                     return;
                 }
             }
 
             // 2. Active running state for this operation
-            if (File.Exists(runningFilePath))
+            if (!string.IsNullOrEmpty(runningFilePath) && File.Exists(runningFilePath))
             {
                 bool matches = false;
                 if (isRunningMatch != null)

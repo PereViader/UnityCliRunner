@@ -24,11 +24,11 @@ namespace UnityCliRunner
                     }
                     else if (res.resultState == "Interrupted")
                     {
-                        w.WriteLine($"INTERRUPTION {res.message}");
+                        w.WriteLine($"INTERRUPTION {PollHelper.EscapeLine(res.message)}");
                     }
                     else if (!string.IsNullOrEmpty(res.message))
                     {
-                        w.WriteLine($"FAILURE {res.message}");
+                        w.WriteLine($"FAILURE {PollHelper.EscapeLine(res.message)}");
                     }
                     else
                     {

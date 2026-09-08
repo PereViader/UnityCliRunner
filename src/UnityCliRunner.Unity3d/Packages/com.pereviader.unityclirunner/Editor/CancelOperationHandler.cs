@@ -16,6 +16,7 @@ namespace UnityCliRunner
 
         public static void CancelActiveOperation(string operationId, StreamWriter writer)
         {
+            operationId = operationId?.Trim();
             var operation = UnityCliOperationStore.ReadThreadSafeSnapshot() ?? UnityCliOperationStore.Read();
             if (operation == null)
             {

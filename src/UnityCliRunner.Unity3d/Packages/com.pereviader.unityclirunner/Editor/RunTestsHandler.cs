@@ -456,57 +456,24 @@ namespace UnityCliRunner
                 activeRunId = runningState?.runId ?? operation?.operationId;
             }
 
-            if (!string.IsNullOrEmpty(s_CurrentTestJobGuid))
+            string jobGuid = s_CurrentTestJobGuid;
+            if (!string.IsNullOrEmpty(jobGuid))
             {
-                try
+                UnityCliDispatcher.Enqueue(() =>
                 {
-                    TestRunnerApi.CancelTestRun(s_CurrentTestJobGuid);
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"UnityCliRunner: Exception while calling TestRunnerApi.CancelTestRun: {ex.Message}");
-                }
+                    try
+                    {
+                        TestRunnerApi.CancelTestRun(jobGuid);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"UnityCliRunner: Exception while calling TestRunnerApi.CancelTestRun: {ex.Message}");
+                    }
+                });
             }
-
-            TryCancelAnyActiveRunner();
 
             WriteCancelledResult(activeRunId);
             writer.WriteLine("CANCELLED");
-        }
-
-        private static bool TryCancelAnyActiveRunner()
-        {
-            try
-            {
-                var holderProp = typeof(TestRunnerApi).GetProperty("m_testJobDataHolder", BindingFlags.NonPublic | BindingFlags.Static);
-                var holder = holderProp?.GetValue(null);
-                var getAllRunnersMethod = holder?.GetType().GetMethod("GetAllRunners", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                var runners = (System.Collections.IEnumerable)getAllRunnersMethod?.Invoke(holder, null);
-                bool anyCancelled = false;
-                if (runners != null)
-                {
-                    foreach (var r in runners)
-                    {
-                        var isRunningMethod = r.GetType().GetMethod("IsRunningJob", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                        bool isRunning = isRunningMethod != null && (bool)isRunningMethod.Invoke(r, null);
-                        if (isRunning)
-                        {
-                            var cancelMethod = r.GetType().GetMethod("CancelRun", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (cancelMethod != null)
-                            {
-                                var res = cancelMethod.Invoke(r, null);
-                                if (res is bool b && b) anyCancelled = true;
-                            }
-                        }
-                    }
-                }
-                return anyCancelled;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"UnityCliRunner: Failed to cancel runners via reflection: {ex.Message}");
-                return false;
-            }
         }
 
         internal static void WriteCancelledResult(string targetRunId = null)

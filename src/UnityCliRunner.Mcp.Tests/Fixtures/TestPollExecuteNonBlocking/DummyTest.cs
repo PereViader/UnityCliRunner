@@ -27,10 +27,33 @@ namespace Tests
             }
 
             string currentOpId = "";
-            string runningFile = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_running.txt");
-            if (File.Exists(runningFile))
+            string opFile = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_cli_operation.json");
+            if (File.Exists(opFile))
             {
-                currentOpId = File.ReadAllText(runningFile).Trim();
+                try
+                {
+                    string text = File.ReadAllText(opFile);
+                    int idx = text.IndexOf("\"operationId\":", System.StringComparison.OrdinalIgnoreCase);
+                    if (idx >= 0)
+                    {
+                        int start = text.IndexOf('"', idx + 14) + 1;
+                        int end = text.IndexOf('"', start);
+                        if (start > 0 && end > start)
+                        {
+                            currentOpId = text.Substring(start, end - start);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrEmpty(currentOpId))
+            {
+                string runningFile = Path.Combine(Directory.GetCurrentDirectory(), "Temp", "unity_execute_running.txt");
+                if (File.Exists(runningFile))
+                {
+                    currentOpId = File.ReadAllText(runningFile).Trim();
+                }
             }
 
             string pollExecuteResponse = null;

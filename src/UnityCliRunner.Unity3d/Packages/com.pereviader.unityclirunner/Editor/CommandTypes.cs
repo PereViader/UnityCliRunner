@@ -84,7 +84,7 @@ namespace UnityCliRunner
     }
 
     [Serializable]
-    public class UnityExecuteResult
+    public class UnityOperationResult
     {
         public string operationId;
         public bool success;
@@ -96,14 +96,12 @@ namespace UnityCliRunner
     }
 
     [Serializable]
-    public class UnityEvalResult
+    public class UnityExecuteResult : UnityOperationResult
     {
-        public string operationId;
-        public bool success;
-        public bool interrupted;
-        public string message;
-        public double duration;
-        public string payload;
-        public List<ConsoleLogEntry> logs;
+    }
+
+    [Serializable]
+    public class UnityEvalResult : UnityOperationResult
+    {
     }
 }

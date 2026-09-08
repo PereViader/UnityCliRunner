@@ -57,7 +57,7 @@ namespace UnityCliRunner
             UnityCliDispatcher.EnsureInitialized();
             RoslynCompilerHelper.EnsureInitialized();
 
-            RecoverOperationAfterEditorRestart();
+            RecoverOperationsOnDomainLoad();
 
             // Register callbacks for tests
             RunTestsHandler.RegisterCallbacks();
@@ -72,33 +72,46 @@ namespace UnityCliRunner
             EditorApplication.quitting += OnEditorQuitting;
         }
 
-        private static void RecoverOperationAfterEditorRestart()
+        private static void RecoverOperationsOnDomainLoad()
         {
             var operation = UnityCliOperationStore.Read();
-            if (operation == null || operation.editorSessionId == UnityCliOperationStore.EditorSessionId)
+            if (operation == null)
             {
                 return;
             }
 
-            const string message = "Unity editor restarted before the operation completed.";
-            switch (operation.kind)
+            if (operation.editorSessionId != UnityCliOperationStore.EditorSessionId)
             {
-                case OperationKinds.Test:
-                    RunTestsHandler.WriteInterruptedResult(message);
-                    break;
-                case OperationKinds.Execute:
-                    ExecuteMethodHandler.MarkInterrupted(message);
-                    break;
-                case OperationKinds.Eval:
-                    EvalHandler.MarkInterrupted(message);
-                    break;
-                case OperationKinds.Refresh:
-                case OperationKinds.Recompile:
-                    UnityCliCompilationTracker.WriteInterruptedRefreshResult(operation.operationId, message);
-                    break;
-                default:
-                    UnityCliOperationStore.Complete(operation.operationId);
-                    break;
+                const string message = "Unity editor restarted before the operation completed.";
+                switch (operation.kind)
+                {
+                    case OperationKinds.Test:
+                        RunTestsHandler.WriteInterruptedResult(message);
+                        break;
+                    case OperationKinds.Execute:
+                        ExecuteMethodHandler.MarkInterrupted(message);
+                        break;
+                    case OperationKinds.Eval:
+                        EvalHandler.MarkInterrupted(message);
+                        break;
+                    case OperationKinds.Refresh:
+                    case OperationKinds.Recompile:
+                        UnityCliCompilationTracker.WriteInterruptedRefreshResult(operation.operationId, message);
+                        break;
+                    default:
+                        UnityCliOperationStore.Complete(operation.operationId);
+                        break;
+                }
+                return;
+            }
+
+            if (operation.kind == OperationKinds.Execute)
+            {
+                ExecuteMethodHandler.MarkInterrupted("Operation was interrupted by Unity domain reload.");
+            }
+            else if (operation.kind == OperationKinds.Eval)
+            {
+                EvalHandler.MarkInterrupted("Operation was interrupted by Unity domain reload.");
             }
         }
 
