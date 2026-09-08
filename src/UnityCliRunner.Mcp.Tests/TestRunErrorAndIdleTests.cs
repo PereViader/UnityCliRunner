@@ -1,0 +1,291 @@
+using System;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace UnityCliRunner.Mcp.Tests;
+
+public class TestRunErrorAndIdleTests
+{
+    private static (UnityClient client, UnityProcessManager procManager, TcpListener listener, string tempDir, Task serverTask) StartMockServer(
+        Func<string, string?> handleCommand,
+        CancellationToken cancellationToken)
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_test_err_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        File.WriteAllText(Path.Combine(unityTemp, "unity_cli_port.txt"), port.ToString());
+        File.WriteAllText(Path.Combine(unityTemp, "unity_cli_process.pid"), Environment.ProcessId.ToString());
+
+        var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+        var client = new UnityClient(procManager, NullLogger<UnityClient>.Instance);
+
+        var serverTask = Task.Run(async () =>
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                TcpClient tcp;
+                try { tcp = await listener.AcceptTcpClientAsync(cancellationToken); }
+                catch { break; }
+
+                using (tcp)
+                using (var stream = tcp.GetStream())
+                using (var reader = new StreamReader(stream, Encoding.UTF8))
+                using (var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
+                {
+                    string? line = await reader.ReadLineAsync(cancellationToken);
+                    if (line == null) continue;
+
+                    if (line == "PING")
+                    {
+                        await writer.WriteLineAsync("PONG");
+                    }
+                    else if (line.StartsWith("POLL_REFRESH"))
+                    {
+                        await writer.WriteLineAsync("READY");
+                    }
+                    else if (line.StartsWith("REFRESH"))
+                    {
+                        await writer.WriteLineAsync("REFRESHING");
+                    }
+                    else
+                    {
+                        string? resp = handleCommand(line);
+                        if (resp != null)
+                        {
+                            await writer.WriteLineAsync(resp);
+                        }
+                    }
+                }
+            }
+        }, cancellationToken);
+
+        return (client, procManager, listener, tempDir, serverTask);
+    }
+
+    [Fact]
+    public async Task UnityClient_RunTestsAsync_WhenInitialResponseIsError_ReturnsImmediatelyWithoutHanging()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("RUN_TESTS"))
+            {
+                return "ERROR: Missing or invalid operation id";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.RunTestsAsync(null, null, "editmode", null, cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("ERROR: Missing or invalid operation id", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_RunTestsAsync_WhenInitialResponseIsFailure_ReturnsImmediatelyWithoutHanging()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("RUN_TESTS"))
+            {
+                return "FAILURE: Runner failed to start";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.RunTestsAsync(null, null, "editmode", null, cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("FAILURE: Runner failed to start", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_RunTestsAsync_WhenPollResponseIsIdle_TerminatesImmediatelyWithFailure()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("RUN_TESTS"))
+            {
+                return "RUNNING";
+            }
+            if (cmd.StartsWith("POLL_TESTS"))
+            {
+                return "IDLE";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.RunTestsAsync(null, null, "editmode", null, cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("no longer recognized by the Editor (Editor is idle)", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_RunTestsAsync_WhenPollResponseIsError_TerminatesImmediatelyWithFailure()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("RUN_TESTS"))
+            {
+                return "RUNNING";
+            }
+            if (cmd.StartsWith("POLL_TESTS"))
+            {
+                return "ERROR: Something went wrong";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.RunTestsAsync(null, null, "editmode", null, cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("ERROR: Something went wrong", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_RunTestsAsync_WhenPollResponseIsBusy_TerminatesImmediatelyWithFailure()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("RUN_TESTS"))
+            {
+                return "RUNNING";
+            }
+            if (cmd.StartsWith("POLL_TESTS"))
+            {
+                return "BUSY execute foreign-op";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.RunTestsAsync(null, null, "editmode", null, cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("Lost ownership of test run: BUSY execute foreign-op", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_EvalAsync_WhenPollResponseIsIdle_TerminatesWithFailure()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("EVAL"))
+            {
+                return "RUNNING";
+            }
+            if (cmd.StartsWith("POLL_EVAL"))
+            {
+                return "IDLE";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.EvalAsync("1 + 1", cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("no longer recognized by the Editor (Editor is idle)", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_ExecuteMethodAsync_WhenPollResponseIsIdle_TerminatesWithFailure()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("EXECUTE_METHOD"))
+            {
+                return "RUNNING";
+            }
+            if (cmd.StartsWith("POLL_EXECUTE"))
+            {
+                return "IDLE";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.ExecuteMethodAsync("Namespace.Class.Method", null, cts.Token);
+
+            Assert.False(result.Success);
+            Assert.Contains("no longer recognized by the Editor (Editor is idle)", result.Message);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+}

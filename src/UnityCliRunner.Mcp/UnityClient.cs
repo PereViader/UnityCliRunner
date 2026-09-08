@@ -296,6 +296,10 @@ public class UnityClient
         {
             return new UnityEvalResult { OperationId = opId, Success = false, Message = $"Unity is busy: {initialResponse}" };
         }
+        if (initialResponse != null && (initialResponse.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || initialResponse.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new UnityEvalResult { OperationId = opId, Success = false, Message = initialResponse };
+        }
 
         try
         {
@@ -341,6 +345,28 @@ public class UnityClient
                     {
                         string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Evaluation interrupted.";
                         return new UnityEvalResult { OperationId = opId, Success = false, Interrupted = true, Message = msg };
+                    }
+                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new UnityEvalResult { OperationId = opId, Success = false, Message = pollResp };
+                    }
+                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new UnityEvalResult
+                        {
+                            OperationId = opId,
+                            Success = false,
+                            Message = "Evaluation is no longer recognized by the Editor (Editor is idle)."
+                        };
+                    }
+                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new UnityEvalResult
+                        {
+                            OperationId = opId,
+                            Success = false,
+                            Message = $"Lost ownership of evaluation: {pollResp}"
+                        };
                     }
                 }
 
@@ -440,6 +466,34 @@ public class UnityClient
                         string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Method execution interrupted.";
                         return new UnityExecuteResult { OperationId = opId, Success = false, Interrupted = true, Message = msg };
                     }
+                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = pollResp };
+                    }
+                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var res = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
+                        if (res != null) return res;
+
+                        return new UnityExecuteResult
+                        {
+                            OperationId = opId,
+                            Success = false,
+                            Message = "Method execution is no longer recognized by the Editor (Editor is idle)."
+                        };
+                    }
+                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var res = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
+                        if (res != null) return res;
+
+                        return new UnityExecuteResult
+                        {
+                            OperationId = opId,
+                            Success = false,
+                            Message = $"Lost ownership of method execution: {pollResp}"
+                        };
+                    }
                 }
 
                 await Task.Delay(500, cancellationToken);
@@ -528,6 +582,21 @@ public class UnityClient
         if (initialResponse != null && initialResponse.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
         {
             return new UnityTestRunResult { RunId = opId, Success = false, Message = $"Unity is busy: {initialResponse}" };
+        }
+        if (initialResponse != null && (initialResponse.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || initialResponse.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new UnityTestRunResult { RunId = opId, Success = false, Message = initialResponse };
+        }
+        if (initialResponse != null && initialResponse.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
+        {
+            var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
+            if (res != null)
+            {
+                ReportFinalProgress(progress, res);
+                return res;
+            }
+
+            return new UnityTestRunResult { RunId = opId, Success = true, Message = initialResponse };
         }
 
         int lastCompleted = -1;
@@ -633,6 +702,42 @@ public class UnityClient
                     {
                         string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Test run interrupted.";
                         return new UnityTestRunResult { RunId = opId, Success = false, ResultState = "Interrupted", Message = msg };
+                    }
+                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new UnityTestRunResult { RunId = opId, Success = false, Message = pollResp };
+                    }
+                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
+                        if (res != null)
+                        {
+                            ReportFinalProgress(progress, res);
+                            return res;
+                        }
+
+                        return new UnityTestRunResult
+                        {
+                            RunId = opId,
+                            Success = false,
+                            Message = "Test run is no longer recognized by the Editor (Editor is idle)."
+                        };
+                    }
+                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
+                        if (res != null)
+                        {
+                            ReportFinalProgress(progress, res);
+                            return res;
+                        }
+
+                        return new UnityTestRunResult
+                        {
+                            RunId = opId,
+                            Success = false,
+                            Message = $"Lost ownership of test run: {pollResp}"
+                        };
                     }
                 }
 
