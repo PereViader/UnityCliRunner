@@ -17,15 +17,20 @@ if [ -d "$BUILD_DIR" ]; then
 fi
 mkdir -p "$BUILD_DIR"
 
-# 2. Build and publish the cross-platform .NET MCP Server into MCP~
-echo "Publishing UnityCliRunner.Mcp server to package MCP~ folder..."
-mkdir -p "$PACKAGE_SRC/MCP~"
-dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net10.0 -o "$PACKAGE_SRC/MCP~"
-
-# 3. Copy the contents of the package source into the build folder
+# 2. Copy the contents of the package source into the build folder (excluding MCP~)
 echo "Copying package contents..."
-# cp -R with trailing '/.' copies all contents of source, including hidden files/directories
-cp -R "$PACKAGE_SRC/." "$BUILD_DIR/"
+shopt -s dotglob nullglob
+for item in "$PACKAGE_SRC"/*; do
+  if [ "$(basename "$item")" != "MCP~" ]; then
+    cp -R "$item" "$BUILD_DIR/"
+  fi
+done
+shopt -u dotglob nullglob
+
+# 3. Build and publish the cross-platform .NET MCP Server directly into build MCP~
+echo "Publishing UnityCliRunner.Mcp server to $BUILD_DIR/MCP~..."
+mkdir -p "$BUILD_DIR/MCP~"
+dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net10.0 -o "$BUILD_DIR/MCP~"
 
 # 4. Update version in package.json from .env.shared
 if [ -f ".env.shared" ]; then
@@ -53,5 +58,10 @@ if [ ! -f "$BUILD_DIR/MCP~/UnityCliRunner.Mcp.dll" ]; then
   echo "Error: UnityCliRunner.Mcp.dll was not found in $BUILD_DIR/MCP~/" >&2
   exit 1
 fi
+
+# 6. Optionally sync newly built binaries to $PACKAGE_SRC/MCP~ if not locked
+echo "Attempting to sync newly built binaries to $PACKAGE_SRC/MCP~..."
+mkdir -p "$PACKAGE_SRC/MCP~"
+cp -R "$BUILD_DIR/MCP~/." "$PACKAGE_SRC/MCP~/" 2>/dev/null || echo "Notice: Could not sync binaries to $PACKAGE_SRC/MCP~ (files may be in use by a running MCP server). Build output in $BUILD_DIR is intact."
 
 echo "=== Build completed successfully! ==="

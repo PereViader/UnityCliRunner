@@ -19,6 +19,18 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Verify build package synchronization
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
+          bash ./build.sh
+          diff -ru src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner/Editor build/Editor
+          if [ -n "$(git status --porcelain build/Editor)" ]; then
+            echo "::error::build/Editor is out of sync with repository source. Run 'bash ./build.sh' and commit changes."
+            git status --porcelain build/Editor
+            git diff build/Editor
+            exit 1
+          fi
+
       - name: Activate Unity License
         id: activate_unity
         env:
