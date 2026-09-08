@@ -149,4 +149,67 @@ public class EvalTests
         Assert.True(result.IsError);
         Assert.Contains("test-eval-error", result.Text);
     }
+
+    [Fact]
+    public async Task TestEvalAsync_TopLevelAwait_ReturnsValue()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "await System.Threading.Tasks.Task.Delay(50); return 42;" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("42", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalAsync_TopLevelAwait_Yield()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "await System.Threading.Tasks.Task.Yield(); return \"async-ok\";" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("async-ok", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalAsync_ReturnsTaskGeneric()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "System.Threading.Tasks.Task.FromResult(\"hello-task\")" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("hello-task", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalAsync_VoidDelay()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "await System.Threading.Tasks.Task.Delay(50);" });
+
+        Assert.False(result.IsError, result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalAsync_CapturesLogsAcrossFrames()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "UnityEngine.Debug.Log(\"before-await\"); await System.Threading.Tasks.Task.Delay(50); UnityEngine.Debug.Log(\"after-await\"); return \"done\";";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("before-await", result.Text);
+        Assert.Contains("after-await", result.Text);
+        Assert.Contains("done", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalAsync_ExceptionInAsyncContinuation()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "await System.Threading.Tasks.Task.Delay(20); throw new System.InvalidOperationException(\"delayed-fail\");";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.True(result.IsError);
+        Assert.Contains("delayed-fail", result.Text);
+    }
 }
