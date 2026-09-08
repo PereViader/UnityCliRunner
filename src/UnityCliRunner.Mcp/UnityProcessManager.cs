@@ -16,6 +16,7 @@ namespace UnityCliRunner.Mcp;
 public class UnityProcessManager
 {
     private readonly ILogger<UnityProcessManager> _logger;
+    private int? _launchedPid;
     private static readonly Regex s_CompileErrorRegex = new(
         @"^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:",
         RegexOptions.Multiline | RegexOptions.Compiled);
@@ -71,7 +72,7 @@ public class UnityProcessManager
     /// Detects Unity process liveness (checking Temp/unity_cli_process.pid, Temp/UnityLockfile, and system processes)
     /// on Windows, macOS, and Linux.
     /// </summary>
-    public bool IsUnityRunning(out int? processId)
+    public virtual bool IsUnityRunning(out int? processId)
     {
         processId = null;
 
@@ -310,7 +311,52 @@ public class UnityProcessManager
         return null;
     }
 
-    private string? GetProjectEditorVersion()
+    public virtual string GetUnityMode(int? pid = null)
+    {
+        if (!pid.HasValue && !IsUnityRunning(out pid))
+        {
+            return "Unknown";
+        }
+
+        if (_launchedPid.HasValue && _launchedPid.Value == pid)
+        {
+            return "Batchmode";
+        }
+
+        if (File.Exists(PidFile))
+        {
+            try
+            {
+                string pidText = ReadFileWithRetry(PidFile).Trim();
+                if (int.TryParse(pidText, out int filePid) && filePid == pid)
+                {
+                    return "Batchmode";
+                }
+            }
+            catch { }
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && pid.HasValue)
+        {
+            try
+            {
+                string cmdlinePath = $"/proc/{pid.Value}/cmdline";
+                if (File.Exists(cmdlinePath))
+                {
+                    string cmdline = File.ReadAllText(cmdlinePath);
+                    if (cmdline.Contains("batchmode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return "Batchmode";
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return "GUI";
+    }
+
+    public string? GetProjectEditorVersion()
     {
         string versionFilePath = Path.Combine(ProjectRoot, "ProjectSettings", "ProjectVersion.txt");
         if (!File.Exists(versionFilePath))
@@ -452,6 +498,7 @@ public class UnityProcessManager
             throw new InvalidOperationException($"Failed to launch Unity process at '{unityExe}': {ex.Message}", ex);
         }
 
+        _launchedPid = proc.Id;
         try
         {
             File.WriteAllText(PidFile, proc.Id.ToString());
@@ -695,7 +742,7 @@ public class UnityProcessManager
         return reader.ReadToEnd();
     }
 
-    public async Task<bool> StopUnityAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<bool> StopUnityAsync(CancellationToken cancellationToken = default)
     {
         try
         {

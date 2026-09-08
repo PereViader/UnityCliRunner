@@ -32,7 +32,7 @@ public class UnityClient
     /// <summary>
     /// Returns current Editor connection state: Ready, Not Running, Compiling, Running Unreachable, Busy.
     /// </summary>
-    public async Task<string> GetStatusAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<string> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         if (!_processManager.IsUnityRunning(out _))
         {
@@ -67,9 +67,16 @@ public class UnityClient
             }
 
             var op = TryReadJsonFile<UnityCliOperationState>(_processManager.OperationFile, _ => true);
-            if (op != null && !string.IsNullOrEmpty(op.Kind))
+            if (op != null)
             {
-                return FormatBusyStatus(op);
+                if (op.Status == "Compiling" || op.Status == "Reloading" || op.Status == "Refreshing" || op.Status == "Recompiling")
+                {
+                    return "Compiling";
+                }
+                if (!string.IsNullOrEmpty(op.Kind))
+                {
+                    return FormatBusyStatus(op);
+                }
             }
 
             return "Ready";
@@ -122,7 +129,7 @@ public class UnityClient
     /// Refreshes AssetDatabase, waits for compilation, and returns diagnostics.
     /// If isRecompile is true, triggers clean script recompilation.
     /// </summary>
-    public async Task<UnityRefreshResult> RefreshAsync(
+    public virtual async Task<UnityRefreshResult> RefreshAsync(
         bool isRecompile = false,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
@@ -390,7 +397,7 @@ public class UnityClient
     /// <summary>
     /// Evaluates dynamic C# snippet in-memory against active Editor/Play Mode.
     /// </summary>
-    public async Task<UnityEvalResult> EvalAsync(string code, CancellationToken cancellationToken = default)
+    public virtual async Task<UnityEvalResult> EvalAsync(string code, CancellationToken cancellationToken = default)
     {
         await _processManager.EnsureUnityRunningAsync(cancellationToken);
 
@@ -499,7 +506,7 @@ public class UnityClient
     /// <summary>
     /// Invokes static C# method with arguments in Unity Editor.
     /// </summary>
-    public async Task<UnityExecuteResult> ExecuteMethodAsync(
+    public virtual async Task<UnityExecuteResult> ExecuteMethodAsync(
         string methodName,
         string[]? args,
         IProgress<ProgressNotificationValue>? progress = null,
@@ -684,7 +691,7 @@ public class UnityClient
         CancellationToken cancellationToken = default) =>
         RunTestsAsync(filter, category, mode, false, progress, cancellationToken);
 
-    public async Task<UnityTestRunResult> RunTestsAsync(
+    public virtual async Task<UnityTestRunResult> RunTestsAsync(
         string? filter,
         string? category,
         string? mode,

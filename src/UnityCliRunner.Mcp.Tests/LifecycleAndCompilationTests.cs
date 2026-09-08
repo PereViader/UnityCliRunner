@@ -39,7 +39,7 @@ public class LifecycleAndCompilationTests
         var result = await client.CallToolAsync("unity_refresh");
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("Unity is ready!", result.Text);
+        Assert.Contains("AssetDatabase refresh completed with 0 errors.", result.Text);
     }
 
     [Fact]
@@ -51,7 +51,7 @@ public class LifecycleAndCompilationTests
         var result = await client.CallToolAsync("unity_recompile");
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("Unity is ready!", result.Text);
+        Assert.Contains("Clean script recompilation completed with 0 errors.", result.Text);
     }
 
     [Fact]

@@ -26,12 +26,39 @@ public class UnityTools
     public async Task<CallToolResult> UnityStatusAsync(CancellationToken cancellationToken = default)
     {
         string status = await _client.GetStatusAsync(cancellationToken);
-        string text = status == "Not Running"
-            ? "Status: Not Running (will auto-start on demand)"
-            : $"Status: {status}";
+        if (status == "Not Running")
+        {
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = "Status: Not Running (will auto-start on demand)" }],
+                IsError = false
+            };
+        }
+
+        if (status == "Ready")
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Status: Ready");
+            string? editorVersion = _processManager.GetProjectEditorVersion();
+            sb.AppendLine($"Editor Version: {editorVersion ?? "Unknown"}");
+            sb.AppendLine($"Project Root: {_processManager.ProjectRoot}");
+            _processManager.IsUnityRunning(out int? pid);
+            sb.AppendLine($"PID: {(pid.HasValue ? pid.Value.ToString() : "Unknown")}");
+            string mode = _processManager.GetUnityMode(pid);
+            sb.AppendLine($"Mode: {mode}");
+            int port = _processManager.ReadPortFile();
+            sb.AppendLine($"Port: {(port > 0 ? port.ToString() : "Unknown")}");
+
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
+                IsError = false
+            };
+        }
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = text }],
+            Content = [new TextContentBlock { Text = $"Status: {status}" }],
             IsError = false
         };
     }
@@ -44,14 +71,19 @@ public class UnityTools
     {
         var result = await _client.RefreshAsync(isRecompile: false, progress, cancellationToken);
         var sb = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(result.Message))
-        {
-            sb.AppendLine(result.Message);
-        }
 
         if (result.Success)
         {
-            sb.Append("Unity is ready!");
+            if (string.IsNullOrWhiteSpace(result.Message) || result.Message == "AssetDatabase refresh completed successfully.")
+            {
+                sb.Append("AssetDatabase refresh completed with 0 errors.");
+            }
+            else
+            {
+                sb.AppendLine(result.Message.TrimEnd());
+                sb.Append("AssetDatabase refresh completed with 0 errors.");
+            }
+
             return new CallToolResult
             {
                 Content = [new TextContentBlock { Text = sb.ToString() }],
@@ -61,16 +93,30 @@ public class UnityTools
 
         if (result.Interrupted)
         {
-            sb.Append("Unity compilation interrupted by domain reload or restart.");
+            string msg = !string.IsNullOrWhiteSpace(result.Message)
+                ? result.Message
+                : "Unity compilation interrupted by domain reload or restart.";
+            sb.Append(msg);
+        }
+        else if (result.Message?.Contains("busy", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            sb.Append(result.Message);
         }
         else
         {
-            sb.Append("Error: Unity compilation failed.");
+            if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                sb.AppendLine(result.Message.TrimEnd());
+            }
+            if (result.Message == null || !result.Message.Contains("Error: Unity compilation failed"))
+            {
+                sb.Append("Error: Unity compilation failed.");
+            }
         }
 
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString() }],
+            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
             IsError = true
         };
     }
@@ -83,14 +129,19 @@ public class UnityTools
     {
         var result = await _client.RefreshAsync(isRecompile: true, progress, cancellationToken);
         var sb = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(result.Message))
-        {
-            sb.AppendLine(result.Message);
-        }
 
         if (result.Success)
         {
-            sb.Append("Unity is ready!");
+            if (string.IsNullOrWhiteSpace(result.Message) || result.Message == "AssetDatabase refresh completed successfully.")
+            {
+                sb.Append("Clean script recompilation completed with 0 errors.");
+            }
+            else
+            {
+                sb.AppendLine(result.Message.TrimEnd());
+                sb.Append("Clean script recompilation completed with 0 errors.");
+            }
+
             return new CallToolResult
             {
                 Content = [new TextContentBlock { Text = sb.ToString() }],
@@ -100,16 +151,30 @@ public class UnityTools
 
         if (result.Interrupted)
         {
-            sb.Append("Unity recompilation interrupted by domain reload or restart.");
+            string msg = !string.IsNullOrWhiteSpace(result.Message)
+                ? result.Message
+                : "Unity recompilation interrupted by domain reload or restart.";
+            sb.Append(msg);
+        }
+        else if (result.Message?.Contains("busy", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            sb.Append(result.Message);
         }
         else
         {
-            sb.Append("Error: Unity recompilation failed.");
+            if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                sb.AppendLine(result.Message.TrimEnd());
+            }
+            if (result.Message == null || !result.Message.Contains("Error: Unity recompilation failed"))
+            {
+                sb.Append("Error: Unity recompilation failed.");
+            }
         }
 
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString() }],
+            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
             IsError = true
         };
     }
@@ -148,9 +213,16 @@ public class UnityTools
             {
                 sb.Append(result.Payload);
             }
+
+            string text = sb.ToString().TrimEnd();
+            if (string.IsNullOrEmpty(text))
+            {
+                text = "(Evaluation succeeded with no output)";
+            }
+
             return new CallToolResult
             {
-                Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
+                Content = [new TextContentBlock { Text = text }],
                 IsError = false
             };
         }
@@ -207,13 +279,16 @@ public class UnityTools
         {
             if (!string.IsNullOrEmpty(result.Payload))
             {
-                sb.AppendLine(result.Payload);
+                sb.Append(result.Payload);
             }
-            sb.AppendLine("Unity Response: SUCCESS");
-            sb.Append("Method execution succeeded.");
+            else
+            {
+                sb.Append("Method execution succeeded.");
+            }
+
             return new CallToolResult
             {
-                Content = [new TextContentBlock { Text = sb.ToString() }],
+                Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
                 IsError = false
             };
         }
@@ -224,13 +299,16 @@ public class UnityTools
         }
         else
         {
-            sb.AppendLine(result.Message);
+            if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                sb.AppendLine(result.Message);
+            }
             sb.Append("Method execution failed.");
         }
 
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString() }],
+            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
             IsError = true
         };
     }
@@ -261,6 +339,14 @@ public class UnityTools
                 sb.AppendLine($"Tests Passed: {result.PassCount} passed, {result.SkipCount} skipped.");
             }
         }
+        else if (result.ResultState == "CompileError")
+        {
+            sb.AppendLine("Test execution aborted: Script compilation failed.");
+            if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                sb.AppendLine(result.Message);
+            }
+        }
         else if (result.ResultState == "Interrupted")
         {
             sb.AppendLine($"Test run interrupted: {result.Message}");
@@ -278,8 +364,11 @@ public class UnityTools
         {
             sb.AppendLine();
             sb.AppendLine("Failures:");
-            foreach (var fail in result.FailedTests)
+            const int maxDetailedFailures = 25;
+            int countToReport = Math.Min(result.FailedTests.Count, maxDetailedFailures);
+            for (int i = 0; i < countToReport; i++)
             {
+                var fail = result.FailedTests[i];
                 sb.AppendLine($"• {fail.FullName ?? fail.Name} ({fail.Duration.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}s)");
                 if (!string.IsNullOrWhiteSpace(fail.Message))
                 {
@@ -289,6 +378,12 @@ public class UnityTools
                 {
                     sb.AppendLine($"  Stack trace:\n{fail.StackTrace}");
                 }
+            }
+
+            if (result.FailedTests.Count > maxDetailedFailures)
+            {
+                int remaining = result.FailedTests.Count - maxDetailedFailures;
+                sb.AppendLine($"... and {remaining} more failed test(s).");
             }
         }
 
@@ -303,6 +398,15 @@ public class UnityTools
     [Description("Safely stops the running Unity background instance. Do NOT call this automatically after operations; keep the instance warm for speed. Only use when explicitly requested by the user, to recover from a freeze/hang, or to release project locks so the user can open the Unity GUI.")]
     public async Task<CallToolResult> UnityStopAsync(CancellationToken cancellationToken = default)
     {
+        if (!_processManager.IsUnityRunning(out _))
+        {
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = "Unity background instance is not running." }],
+                IsError = false
+            };
+        }
+
         bool stopped = await _processManager.StopUnityAsync(cancellationToken);
         return new CallToolResult
         {
@@ -311,4 +415,3 @@ public class UnityTools
         };
     }
 }
-

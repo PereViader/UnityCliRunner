@@ -99,7 +99,7 @@ public class ExecuteMethodTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("4", result.Text);
-        Assert.Contains("Method execution succeeded.", result.Text);
+        Assert.DoesNotContain("Method execution succeeded.", result.Text);
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public class ExecuteMethodTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("hello-from-async-method", result.Text);
-        Assert.Contains("Method execution succeeded.", result.Text);
+        Assert.DoesNotContain("Method execution succeeded.", result.Text);
     }
 
     [Fact]
@@ -290,7 +290,7 @@ public class ExecuteMethodTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("quick-cancellable", result.Text);
-        Assert.Contains("Method execution succeeded.", result.Text);
+        Assert.DoesNotContain("Method execution succeeded.", result.Text);
     }
 
     [Fact]
@@ -307,6 +307,6 @@ public class ExecuteMethodTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("with-ct: foo", result.Text);
-        Assert.Contains("Method execution succeeded.", result.Text);
+        Assert.DoesNotContain("Method execution succeeded.", result.Text);
     }
 }
