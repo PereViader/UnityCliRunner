@@ -286,7 +286,7 @@ public class UnityClient
         string command = $"EVAL {opId} {escapedCode}";
 
         _logger.LogInformation("Sending EVAL operation {OpId}...", opId);
-        string? initialResponse = await SendCommandAsync(command, 30, cancellationToken);
+        string? initialResponse = await SendCommandAsync(command, 10, cancellationToken);
 
         // Check if result already available
         var immediateResult = TryReadJsonFile<UnityEvalResult>(_processManager.EvalResultFile, r => r.OperationId == opId);

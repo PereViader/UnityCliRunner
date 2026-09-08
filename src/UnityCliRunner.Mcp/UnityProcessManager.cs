@@ -387,7 +387,7 @@ public class UnityProcessManager
     }
 
     /// <summary>
-    /// Auto-starts Unity in headless batchmode if not already running, and waits up to 90 seconds for socket readiness.
+    /// Auto-starts Unity in headless batchmode if not already running, and waits for socket readiness.
     /// </summary>
     public async Task EnsureUnityRunningAsync(CancellationToken cancellationToken = default)
     {
@@ -400,7 +400,7 @@ public class UnityProcessManager
             }
 
             _logger.LogInformation("Unity is running (PID {Pid}) but socket is not ready yet. Waiting for readiness...", existingPid);
-            await WaitForSocketReadinessAsync(null, 90, cancellationToken);
+            await WaitForSocketReadinessAsync(null, cancellationToken);
             return;
         }
 
@@ -461,42 +461,70 @@ public class UnityProcessManager
             _logger.LogWarning(ex, "Failed to write PID to {PidFile}", PidFile);
         }
 
-        _logger.LogInformation("Unity process started with PID {Pid}. Waiting up to 90s for socket server...", proc.Id);
-        await WaitForSocketReadinessAsync(proc, 90, cancellationToken, initialLogOffset);
+        _logger.LogInformation("Unity process started with PID {Pid}. Waiting for socket server...", proc.Id);
+        await WaitForSocketReadinessAsync(proc, cancellationToken, initialLogOffset);
     }
 
-    internal async Task WaitForSocketReadinessAsync(Process? startedProcess, int timeoutSeconds, CancellationToken cancellationToken, long initialLogOffset = 0)
+    internal async Task WaitForSocketReadinessAsync(Process? startedProcess, CancellationToken cancellationToken, long initialLogOffset = 0)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
-
-        while (DateTime.UtcNow < deadline)
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // 1. Check if the started process exited unexpectedly
-            if (startedProcess is { HasExited: true })
+            // 1. Check if the process exited unexpectedly (deterministic check)
+            if (startedProcess != null)
             {
-                if (File.Exists(LogFile))
+                if (startedProcess.HasExited)
                 {
-                    string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
-                    if (s_CompileErrorRegex.IsMatch(logText))
+                    if (File.Exists(LogFile))
                     {
-                        var errorLines = ExtractUniqueCompilationLines(logText);
-                        try
+                        string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
+                        if (s_CompileErrorRegex.IsMatch(logText))
                         {
-                            Directory.CreateDirectory(TempDir);
-                            File.WriteAllLines(CompilationErrorsFile, errorLines);
+                            var errorLines = ExtractUniqueCompilationLines(logText);
+                            try
+                            {
+                                Directory.CreateDirectory(TempDir);
+                                File.WriteAllLines(CompilationErrorsFile, errorLines);
+                            }
+                            catch { }
+                            throw new UnityCompilationException(
+                                string.Join(Environment.NewLine, errorLines),
+                                errorLines);
                         }
-                        catch { }
-                        throw new UnityCompilationException(
-                            string.Join(Environment.NewLine, errorLines),
-                            errorLines);
                     }
-                }
 
-                string logSnippet = GetLogSnippet(initialLogOffset);
-                throw new InvalidOperationException(
-                    $"Unity background process exited unexpectedly with exit code {startedProcess.ExitCode}.\n{logSnippet}");
+                    string logSnippet = GetLogSnippet(initialLogOffset);
+                    throw new InvalidOperationException(
+                        $"Unity background process exited unexpectedly with exit code {startedProcess.ExitCode}.\n{logSnippet}");
+                }
+            }
+            else
+            {
+                if (!IsUnityRunning(out _))
+                {
+                    if (File.Exists(LogFile))
+                    {
+                        string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
+                        if (s_CompileErrorRegex.IsMatch(logText))
+                        {
+                            var errorLines = ExtractUniqueCompilationLines(logText);
+                            try
+                            {
+                                Directory.CreateDirectory(TempDir);
+                                File.WriteAllLines(CompilationErrorsFile, errorLines);
+                            }
+                            catch { }
+                            throw new UnityCompilationException(
+                                string.Join(Environment.NewLine, errorLines),
+                                errorLines);
+                        }
+                    }
+
+                    string logSnippet = GetLogSnippet(initialLogOffset);
+                    throw new InvalidOperationException(
+                        $"Unity background process is not running.\n{logSnippet}");
+                }
             }
 
             // 2. Monitor unity_background_log.txt for compilation errors during startup
@@ -542,13 +570,6 @@ public class UnityProcessManager
 
             await Task.Delay(1000, cancellationToken);
         }
-
-        if (startedProcess != null && !startedProcess.HasExited)
-        {
-            try { startedProcess.Kill(true); } catch { }
-        }
-
-        throw new TimeoutException($"Timed out waiting for Unity background instance to be ready ({timeoutSeconds}s).");
     }
 
     public async Task<bool> IsSocketReadyAsync(int timeoutSeconds = 2, CancellationToken cancellationToken = default)
@@ -709,7 +730,7 @@ public class UnityProcessManager
                 {
                     var proc = Process.GetProcessById(pid.Value);
                     proc.Kill(true);
-                    proc.WaitForExit(2000);
+                    proc.WaitForExit();
                 }
                 catch { }
             }

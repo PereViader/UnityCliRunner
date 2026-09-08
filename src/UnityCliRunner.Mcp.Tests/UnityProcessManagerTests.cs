@@ -299,7 +299,7 @@ public class UnityProcessManagerTests
             var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
 
             // Should succeed without throwing UnityCompilationException because historical error is before offset
-            await procManager.WaitForSocketReadinessAsync(proc, 5, cts.Token, initialOffset);
+            await procManager.WaitForSocketReadinessAsync(proc, cts.Token, initialOffset);
         }
         finally
         {
@@ -334,7 +334,7 @@ public class UnityProcessManagerTests
 
             var ex = await Assert.ThrowsAsync<UnityCompilationException>(async () =>
             {
-                await procManager.WaitForSocketReadinessAsync(proc, 5, cts.Token, initialOffset);
+                await procManager.WaitForSocketReadinessAsync(proc, cts.Token, initialOffset);
             });
 
             Assert.Contains("NewBroken.cs", ex.Message);
@@ -343,6 +343,56 @@ public class UnityProcessManagerTests
         finally
         {
             try { if (!proc.HasExited) proc.Kill(true); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task WaitForSocketReadinessAsync_WhenStartedProcessExitsUnexpectedly_ThrowsInvalidOperationExceptionImmediately()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_proc_exit_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "Temp"));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var proc = StartDummyProcess();
+        proc.Kill(true);
+        proc.WaitForExit();
+
+        try
+        {
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                await procManager.WaitForSocketReadinessAsync(proc, cts.Token);
+            });
+
+            Assert.Contains("exited unexpectedly", ex.Message);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task WaitForSocketReadinessAsync_WhenNullProcessAndNotRunning_ThrowsInvalidOperationExceptionImmediately()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_null_proc_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "Temp"));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                await procManager.WaitForSocketReadinessAsync(null, cts.Token);
+            });
+
+            Assert.Contains("is not running", ex.Message);
+        }
+        finally
+        {
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
