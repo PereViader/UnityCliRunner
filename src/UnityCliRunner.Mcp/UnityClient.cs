@@ -112,13 +112,30 @@ public class UnityClient
         }
     }
 
+    public Task<UnityRefreshResult> RefreshAsync(bool isRecompile, CancellationToken cancellationToken) =>
+        RefreshAsync(isRecompile, null, cancellationToken);
+
+    public Task<UnityRefreshResult> RefreshAsync(CancellationToken cancellationToken) =>
+        RefreshAsync(false, null, cancellationToken);
+
     /// <summary>
     /// Refreshes AssetDatabase, waits for compilation, and returns diagnostics.
     /// If isRecompile is true, triggers clean script recompilation.
     /// </summary>
-    public async Task<UnityRefreshResult> RefreshAsync(bool isRecompile = false, CancellationToken cancellationToken = default)
+    public async Task<UnityRefreshResult> RefreshAsync(
+        bool isRecompile = false,
+        IProgress<ProgressNotificationValue>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         string opId = Guid.NewGuid().ToString("N");
+
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 0,
+            Total = 100,
+            Message = "Checking Unity Editor connection..."
+        });
+
         try
         {
             await _processManager.EnsureUnityRunningAsync(cancellationToken);
@@ -149,6 +166,15 @@ public class UnityClient
             };
         }
 
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 10,
+            Total = 100,
+            Message = isRecompile
+                ? "Triggering clean script recompilation..."
+                : "Triggering AssetDatabase refresh..."
+        });
+
         // Send refresh/recompile command
         string? initialResponse = await SendCommandAsync(triggerCommand, 10, cancellationToken);
         string expectedAck = isRecompile ? "RECOMPILING" : "REFRESHING";
@@ -163,6 +189,8 @@ public class UnityClient
             };
         }
 
+        int compileProgress = 30;
+
         try
         {
             // Poll until completion with domain reload resilience
@@ -174,7 +202,27 @@ public class UnityClient
                 var cachedResult = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId);
                 if (cachedResult != null)
                 {
+                    progress?.Report(new ProgressNotificationValue
+                    {
+                        Progress = 90,
+                        Total = 100,
+                        Message = "Compilation finished, waiting for Editor to settle..."
+                    });
+
                     EnrichRefreshResultWithDiagnostics(cachedResult);
+
+                    if (cachedResult.Success)
+                    {
+                        progress?.Report(new ProgressNotificationValue
+                        {
+                            Progress = 100,
+                            Total = 100,
+                            Message = isRecompile
+                                ? "Clean script recompilation completed."
+                                : "AssetDatabase refresh completed."
+                        });
+                    }
+
                     return cachedResult;
                 }
 
@@ -186,7 +234,27 @@ public class UnityClient
                     var finalCheck = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId);
                     if (finalCheck != null)
                     {
+                        progress?.Report(new ProgressNotificationValue
+                        {
+                            Progress = 90,
+                            Total = 100,
+                            Message = "Compilation finished, waiting for Editor to settle..."
+                        });
+
                         EnrichRefreshResultWithDiagnostics(finalCheck);
+
+                        if (finalCheck.Success)
+                        {
+                            progress?.Report(new ProgressNotificationValue
+                            {
+                                Progress = 100,
+                                Total = 100,
+                                Message = isRecompile
+                                    ? "Clean script recompilation completed."
+                                    : "AssetDatabase refresh completed."
+                            });
+                        }
+
                         return finalCheck;
                     }
 
@@ -239,6 +307,13 @@ public class UnityClient
 
                     if (pollResp == "READY")
                     {
+                        progress?.Report(new ProgressNotificationValue
+                        {
+                            Progress = 90,
+                            Total = 100,
+                            Message = "Compilation finished, waiting for Editor to settle..."
+                        });
+
                         var result = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId)
                             ?? new UnityRefreshResult
                             {
@@ -248,11 +323,31 @@ public class UnityClient
                             };
 
                         EnrichRefreshResultWithDiagnostics(result);
+
+                        if (result.Success)
+                        {
+                            progress?.Report(new ProgressNotificationValue
+                            {
+                                Progress = 100,
+                                Total = 100,
+                                Message = isRecompile
+                                    ? "Clean script recompilation completed."
+                                    : "AssetDatabase refresh completed."
+                            });
+                        }
+
                         return result;
                     }
 
                     if (pollResp == "COMPILATION_ERROR")
                     {
+                        progress?.Report(new ProgressNotificationValue
+                        {
+                            Progress = 90,
+                            Total = 100,
+                            Message = "Compilation finished, waiting for Editor to settle..."
+                        });
+
                         // Allow brief moment for diagnostics file to settle
                         await Task.Delay(200, cancellationToken);
                         string diag = ReadCompilationErrors();
@@ -262,6 +357,24 @@ public class UnityClient
                             Success = false,
                             Message = !string.IsNullOrWhiteSpace(diag) ? diag : "Unity script compilation failed."
                         };
+                    }
+                }
+
+                bool isCompiling = (pollResp == "COMPILING" || pollResp == "UPDATING") ||
+                    (opState != null && (opState.Status == "Compiling" || opState.Status == "Reloading" || opState.Status == "Refreshing" || opState.Status == "Recompiling" || opState.Status == "WaitingForUnity"));
+
+                if (isCompiling)
+                {
+                    progress?.Report(new ProgressNotificationValue
+                    {
+                        Progress = compileProgress,
+                        Total = 100,
+                        Message = "Compiling script assemblies..."
+                    });
+
+                    if (compileProgress < 80)
+                    {
+                        compileProgress = Math.Min(80, compileProgress + 10);
                     }
                 }
 
@@ -380,12 +493,37 @@ public class UnityClient
         }
     }
 
+    public Task<UnityExecuteResult> ExecuteMethodAsync(string methodName, string[]? args, CancellationToken cancellationToken) =>
+        ExecuteMethodAsync(methodName, args, null, cancellationToken);
+
     /// <summary>
     /// Invokes static C# method with arguments in Unity Editor.
     /// </summary>
-    public async Task<UnityExecuteResult> ExecuteMethodAsync(string methodName, string[]? args, CancellationToken cancellationToken = default)
+    public async Task<UnityExecuteResult> ExecuteMethodAsync(
+        string methodName,
+        string[]? args,
+        IProgress<ProgressNotificationValue>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        var refreshResult = await RefreshAsync(isRecompile: false, cancellationToken);
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 0,
+            Total = 100,
+            Message = "Refreshing AssetDatabase prior to execution..."
+        });
+
+        IProgress<ProgressNotificationValue>? refreshProgress = progress == null ? null : new ProgressRelay(p =>
+        {
+            int scaled = (int)Math.Round((p.Progress / (double)(p.Total ?? 100)) * 40);
+            progress.Report(new ProgressNotificationValue
+            {
+                Progress = scaled,
+                Total = 100,
+                Message = "Refreshing AssetDatabase prior to execution..."
+            });
+        });
+
+        var refreshResult = await RefreshAsync(isRecompile: false, refreshProgress, cancellationToken);
         if (!refreshResult.Success)
         {
             return new UnityExecuteResult
@@ -395,6 +533,13 @@ public class UnityClient
                 Message = refreshResult.Message
             };
         }
+
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 50,
+            Total = 100,
+            Message = $"Executing static method {methodName}..."
+        });
 
         string opId = Guid.NewGuid().ToString("N");
         var sb = new StringBuilder($"EXECUTE_METHOD {opId} {methodName}");
@@ -411,7 +556,11 @@ public class UnityClient
         string? initialResponse = await SendCommandAsync(sb.ToString(), 10, cancellationToken);
 
         var immediateResult = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-        if (immediateResult != null) return immediateResult;
+        if (immediateResult != null)
+        {
+            if (immediateResult.Success) ReportExecuteCompleted(progress);
+            return immediateResult;
+        }
 
         if (initialResponse != null && initialResponse.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
         {
@@ -429,13 +578,21 @@ public class UnityClient
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var result = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                if (result != null) return result;
+                if (result != null)
+                {
+                    if (result.Success) ReportExecuteCompleted(progress);
+                    return result;
+                }
 
                 if (!_processManager.IsUnityRunning(out _))
                 {
                     await Task.Delay(300, cancellationToken);
                     var final = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                    if (final != null) return final;
+                    if (final != null)
+                    {
+                        if (final.Success) ReportExecuteCompleted(progress);
+                        return final;
+                    }
 
                     return new UnityExecuteResult
                     {
@@ -449,10 +606,15 @@ public class UnityClient
                 if (pollResp != null)
                 {
                     var fileRes = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                    if (fileRes != null) return fileRes;
+                    if (fileRes != null)
+                    {
+                        if (fileRes.Success) ReportExecuteCompleted(progress);
+                        return fileRes;
+                    }
 
                     if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
                     {
+                        ReportExecuteCompleted(progress);
                         string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
                         return new UnityExecuteResult { OperationId = opId, Success = true, Payload = UnescapeLine(payload) };
                     }
@@ -473,7 +635,11 @@ public class UnityClient
                     if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
                     {
                         var res = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                        if (res != null) return res;
+                        if (res != null)
+                        {
+                            if (res.Success) ReportExecuteCompleted(progress);
+                            return res;
+                        }
 
                         return new UnityExecuteResult
                         {
@@ -485,7 +651,11 @@ public class UnityClient
                     if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
                     {
                         var res = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                        if (res != null) return res;
+                        if (res != null)
+                        {
+                            if (res.Success) ReportExecuteCompleted(progress);
+                            return res;
+                        }
 
                         return new UnityExecuteResult
                         {
@@ -868,5 +1038,27 @@ public class UnityClient
         }
 
         return null;
+    }
+
+    private static void ReportExecuteCompleted(IProgress<ProgressNotificationValue>? progress)
+    {
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 100,
+            Total = 100,
+            Message = "Method execution completed."
+        });
+    }
+
+    private sealed class ProgressRelay : IProgress<ProgressNotificationValue>
+    {
+        private readonly Action<ProgressNotificationValue> _handler;
+
+        public ProgressRelay(Action<ProgressNotificationValue> handler)
+        {
+            _handler = handler;
+        }
+
+        public void Report(ProgressNotificationValue value) => _handler(value);
     }
 }

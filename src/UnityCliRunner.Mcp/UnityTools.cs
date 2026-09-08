@@ -38,9 +38,11 @@ public class UnityTools
 
     [McpServerTool(Name = "unity_refresh")]
     [Description("Refreshes the Unity AssetDatabase, triggers script compilation, waits for completion, and returns diagnostics.")]
-    public async Task<CallToolResult> UnityRefreshAsync(CancellationToken cancellationToken = default)
+    public async Task<CallToolResult> UnityRefreshAsync(
+        IProgress<ProgressNotificationValue>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        var result = await _client.RefreshAsync(isRecompile: false, cancellationToken);
+        var result = await _client.RefreshAsync(isRecompile: false, progress, cancellationToken);
         var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(result.Message))
         {
@@ -75,9 +77,11 @@ public class UnityTools
 
     [McpServerTool(Name = "unity_recompile")]
     [Description("Forces a clean script recompilation in the Unity Editor, waits for completion, and returns compilation diagnostics.")]
-    public async Task<CallToolResult> UnityRecompileAsync(CancellationToken cancellationToken = default)
+    public async Task<CallToolResult> UnityRecompileAsync(
+        IProgress<ProgressNotificationValue>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        var result = await _client.RefreshAsync(isRecompile: true, cancellationToken);
+        var result = await _client.RefreshAsync(isRecompile: true, progress, cancellationToken);
         var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(result.Message))
         {
@@ -174,9 +178,10 @@ public class UnityTools
     public async Task<CallToolResult> UnityExecuteMethodAsync(
         [Description("Fully qualified method name in format 'Namespace.Type.Method' or 'Type.Method'.")] string methodName,
         [Description("Optional array of string arguments passed to the method.")] string[]? args = null,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _client.ExecuteMethodAsync(methodName, args, cancellationToken);
+        var result = await _client.ExecuteMethodAsync(methodName, args, progress, cancellationToken);
         var sb = new StringBuilder();
 
         if (result.Logs.Count > 0)
