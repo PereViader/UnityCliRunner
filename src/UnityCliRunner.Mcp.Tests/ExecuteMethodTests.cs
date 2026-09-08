@@ -243,4 +243,37 @@ public class ExecuteMethodTests
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Standard log message from execute", result.Text);
     }
+
+    [Fact]
+    public async Task TestExecuteAsyncReturnsValue_AwaitsTaskAndReturnsResult()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestExecuteAsyncReturnsValue");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_execute_method", new
+        {
+            methodName = "Tests.DummyExecuteClass.AsyncMethod"
+        });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("hello-from-async-method", result.Text);
+        Assert.Contains("Method execution succeeded.", result.Text);
+    }
+
+    [Fact]
+    public async Task TestExecuteAsyncVoid_AwaitsTaskCompletion()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestExecuteAsyncVoid");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_execute_method", new
+        {
+            methodName = "Tests.DummyExecuteClass.AsyncVoidMethod"
+        });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("AsyncVoidMethod start", result.Text);
+        Assert.Contains("AsyncVoidMethod end", result.Text);
+        Assert.Contains("Method execution succeeded.", result.Text);
+    }
 }
