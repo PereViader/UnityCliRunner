@@ -69,6 +69,24 @@ public class LifecycleAndCompilationTests
     }
 
     [Fact]
+    public async Task TestPollExecuteNonBlocking_PollsExecuteStateWithoutBlocking()
+    {
+        await using var _ = await _fixture.UseFixtureAsync("TestPollExecuteNonBlocking");
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+
+        var result = await client.CallToolAsync("unity_execute_method", new
+        {
+            methodName = "Tests.DummyExecuteClass.PollHandlersWhileBusy"
+        });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("OK|EXECUTE:RUNNING", result.Text);
+        Assert.Contains("BUSY_EXECUTE:BUSY execute", result.Text);
+        Assert.Contains("EVAL:BUSY execute", result.Text);
+        Assert.Contains("TESTS:BUSY execute", result.Text);
+    }
+
+    [Fact]
     public async Task TestBusyDetectionBeforeRefresh_RejectsConcurrentMutatingOperations()
     {
         await using var _ = await _fixture.UseFixtureAsync("TestBusyDetectionBeforeRefresh");

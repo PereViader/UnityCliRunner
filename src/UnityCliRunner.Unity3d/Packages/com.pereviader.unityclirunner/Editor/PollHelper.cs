@@ -32,6 +32,10 @@ namespace UnityCliRunner
                         }
                     }
                 }
+                catch (IOException)
+                {
+                    // File is temporarily being written or replaced; fall through to running check
+                }
                 catch (Exception ex)
                 {
                     writer.WriteLine($"ERROR: {ex.Message}");
@@ -49,8 +53,15 @@ namespace UnityCliRunner
                 }
                 else
                 {
-                    string runningOperationId = File.ReadAllText(runningFilePath).Trim();
-                    matches = string.IsNullOrEmpty(operationId) || runningOperationId == operationId;
+                    try
+                    {
+                        string runningOperationId = File.ReadAllText(runningFilePath).Trim();
+                        matches = string.IsNullOrEmpty(operationId) || runningOperationId == operationId;
+                    }
+                    catch (IOException)
+                    {
+                        matches = false;
+                    }
                 }
 
                 if (matches)
@@ -61,12 +72,16 @@ namespace UnityCliRunner
             }
 
             // 3. Fallback to operation store for busy vs idle state
-            var operation = UnityCliOperationStore.Read();
+            var operation = UnityCliOperationStore.ReadThreadSafeSnapshot();
             if (operation != null)
             {
-                if (operation.operationId != operationId)
+                if (!string.IsNullOrEmpty(operationId) && operation.operationId != operationId)
                 {
                     writer.WriteLine($"BUSY {operation.kind} {operation.operationId}");
+                }
+                else if (operation.status == OperationStatus.Interrupted)
+                {
+                    writer.WriteLine("INTERRUPTION Unity editor restarted before the operation completed.");
                 }
                 else
                 {

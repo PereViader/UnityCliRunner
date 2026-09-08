@@ -4,7 +4,7 @@ namespace UnityCliRunner
 {
     internal class PollExecuteHandler : ICommandHandler
     {
-        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.MainThread;
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.WorkerThread;
 
         public void Handle(string payload, StreamWriter writer)
         {
