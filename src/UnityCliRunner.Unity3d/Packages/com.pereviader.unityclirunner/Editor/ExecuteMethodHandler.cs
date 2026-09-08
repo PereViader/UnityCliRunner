@@ -12,6 +12,30 @@ namespace UnityCliRunner
     internal class ExecuteMethodHandler : ICommandHandler
     {
         private static ConsoleLogCapture s_ActiveLogCapture;
+        private static readonly object s_CtsLock = new object();
+        private static CancellationTokenSource s_ActiveCts;
+        private static string s_ActiveOperationId;
+        private static bool s_ActiveMethodHasCancellationToken;
+
+        public static bool CancelActiveExecute(string operationId)
+        {
+            lock (s_CtsLock)
+            {
+                if (s_ActiveCts != null && s_ActiveMethodHasCancellationToken && (string.IsNullOrEmpty(operationId) || s_ActiveOperationId == operationId))
+                {
+                    try
+                    {
+                        s_ActiveCts.Cancel();
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"UnityCliRunner: Failed to cancel active execute method: {ex.Message}");
+                    }
+                }
+            }
+            return false;
+        }
 
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
 
@@ -90,16 +114,50 @@ namespace UnityCliRunner
                 return;
             }
 
-            writer.WriteLine("RUNNING");
-            writer.Flush();
-
             if (begin == BeginOperationResult.AlreadyStarted)
             {
+                writer.WriteLine("RUNNING");
                 return;
             }
 
-            WriteExecuteRunningState(operationId);
-            ExecuteMethod(operationId, targetMethod, methodParamsList.ToArray());
+            bool hasCt = false;
+            foreach (var p in targetMethod.GetParameters())
+            {
+                if (p.ParameterType == typeof(CancellationToken))
+                {
+                    hasCt = true;
+                    break;
+                }
+            }
+
+            CancellationTokenSource cts;
+            lock (s_CtsLock)
+            {
+                s_ActiveCts?.Dispose();
+                s_ActiveCts = new CancellationTokenSource();
+                s_ActiveOperationId = operationId;
+                s_ActiveMethodHasCancellationToken = hasCt;
+                cts = s_ActiveCts;
+            }
+
+            writer.WriteLine("RUNNING");
+            writer.Flush();
+
+            try
+            {
+                WriteExecuteRunningState(operationId);
+                if (cts.IsCancellationRequested)
+                {
+                    FinishExecute(operationId, false, "Method execution was canceled.", 0, null, new List<ConsoleLogEntry>(), interrupted: true);
+                    return;
+                }
+                ExecuteMethod(operationId, targetMethod, methodParamsList.ToArray());
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Unhandled exception during ExecuteMethod: {ex}");
+                FinishExecute(operationId, false, ex.ToString(), 0, null, new List<ConsoleLogEntry>());
+            }
         }
 
         public static void WriteExecuteRunningState(string operationId)
@@ -134,28 +192,82 @@ namespace UnityCliRunner
                 var paramInfos = method.GetParameters();
                 int expectedCount = paramInfos.Length;
                 int providedCount = stringParams != null ? stringParams.Length : 0;
-                if (expectedCount != providedCount)
+
+                bool hasCt = false;
+                foreach (var p in paramInfos)
                 {
-                    throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects {expectedCount} parameters, but {providedCount} were provided.");
+                    if (p.ParameterType == typeof(CancellationToken))
+                    {
+                        hasCt = true;
+                        break;
+                    }
+                }
+
+                CancellationTokenSource cts;
+                lock (s_CtsLock)
+                {
+                    if (s_ActiveOperationId == operationId && s_ActiveCts != null)
+                    {
+                        cts = s_ActiveCts;
+                    }
+                    else
+                    {
+                        s_ActiveCts?.Dispose();
+                        s_ActiveCts = new CancellationTokenSource();
+                        s_ActiveOperationId = operationId;
+                        s_ActiveMethodHasCancellationToken = hasCt;
+                        cts = s_ActiveCts;
+                    }
                 }
 
                 object[] convertedParams = null;
                 if (expectedCount > 0)
                 {
                     convertedParams = new object[expectedCount];
+                    int stringParamIdx = 0;
                     for (int i = 0; i < expectedCount; i++)
                     {
-                        string rawArg = stringParams[i];
-                        Type paramType = paramInfos[i].ParameterType;
-                        try
+                        var p = paramInfos[i];
+                        if (p.ParameterType == typeof(CancellationToken))
                         {
-                            convertedParams[i] = CommandHelper.ConvertParameter(rawArg, paramType);
+                            convertedParams[i] = cts.Token;
                         }
-                        catch (Exception ex)
+                        else
                         {
-                            throw new ArgumentException($"Failed to convert parameter {i} ('{rawArg}') to type '{paramType.FullName}': {ex.Message}", ex);
+                            if (stringParamIdx >= providedCount)
+                            {
+                                throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects {expectedCount} parameters, but {providedCount} were provided.");
+                            }
+                            string rawArg = stringParams[stringParamIdx++];
+                            Type paramType = p.ParameterType;
+                            try
+                            {
+                                convertedParams[i] = CommandHelper.ConvertParameter(rawArg, paramType);
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new ArgumentException($"Failed to convert parameter {stringParamIdx - 1} ('{rawArg}') to type '{paramType.FullName}': {ex.Message}", ex);
+                            }
                         }
                     }
+
+                    if (stringParamIdx != providedCount)
+                    {
+                        throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects {stringParamIdx} non-cancellation arguments, but {providedCount} were provided.");
+                    }
+                }
+                else if (providedCount > 0)
+                {
+                    throw new ArgumentException($"Parameter count mismatch. Method '{method.DeclaringType.FullName}.{method.Name}' expects 0 parameters, but {providedCount} were provided.");
+                }
+
+                if (cts.IsCancellationRequested)
+                {
+                    stopwatch.Stop();
+                    var logs = logCapture.GetLogs();
+                    DisposeCapture(logCapture);
+                    FinishExecute(operationId, false, "Method execution was canceled.", stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: true);
+                    return;
                 }
 
                 result = method.Invoke(null, convertedParams);
@@ -165,10 +277,25 @@ namespace UnityCliRunner
                 stopwatch.Stop();
                 var inner = tie.InnerException != null ? tie.InnerException : tie;
                 string errorMsg = inner.ToString();
-                Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
                 var logs = logCapture.GetLogs();
                 DisposeCapture(logCapture);
+                if (inner is OperationCanceledException)
+                {
+                    Debug.LogWarning($"UnityCliRunner: Method execution was canceled: {inner.Message}");
+                    FinishExecute(operationId, false, "Method execution was canceled.", stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: true);
+                    return;
+                }
+                Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
                 FinishExecute(operationId, false, errorMsg, stopwatch.Elapsed.TotalSeconds, null, logs);
+                return;
+            }
+            catch (OperationCanceledException oce)
+            {
+                stopwatch.Stop();
+                Debug.LogWarning($"UnityCliRunner: Method execution was canceled: {oce.Message}");
+                var logs = logCapture.GetLogs();
+                DisposeCapture(logCapture);
+                FinishExecute(operationId, false, "Method execution was canceled.", stopwatch.Elapsed.TotalSeconds, null, logs, interrupted: true);
                 return;
             }
             catch (Exception ex)
@@ -183,7 +310,17 @@ namespace UnityCliRunner
             }
 
             // Check if result is an async Task or ValueTask
-            UnwrapAndFinish(result, operationId, method.ReturnType == typeof(void), stopwatch, logCapture);
+            try
+            {
+                UnwrapAndFinish(result, operationId, method.ReturnType == typeof(void), stopwatch, logCapture);
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                var logs = logCapture.GetLogs();
+                DisposeCapture(logCapture);
+                FinishExecute(operationId, false, ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs);
+            }
         }
 
         private static void UnwrapAndFinish(object rawResult, string operationId, bool isVoidMethod, System.Diagnostics.Stopwatch stopwatch, ConsoleLogCapture logCapture)
@@ -221,12 +358,32 @@ namespace UnityCliRunner
                 {
                     innerTask.ContinueWith(t => UnityCliDispatcher.Enqueue(() =>
                     {
-                        UnwrapCompletedTask(t, operationId, stopwatch, logCapture);
+                        try
+                        {
+                            UnwrapCompletedTask(t, operationId, stopwatch, logCapture);
+                        }
+                        catch (Exception ex)
+                        {
+                            stopwatch.Stop();
+                            var logs = logCapture.GetLogs();
+                            DisposeCapture(logCapture);
+                            FinishExecute(operationId, false, ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs);
+                        }
                     }));
                     return;
                 }
 
-                UnwrapCompletedTask(innerTask, operationId, stopwatch, logCapture);
+                try
+                {
+                    UnwrapCompletedTask(innerTask, operationId, stopwatch, logCapture);
+                }
+                catch (Exception ex)
+                {
+                    stopwatch.Stop();
+                    var logs = logCapture.GetLogs();
+                    DisposeCapture(logCapture);
+                    FinishExecute(operationId, false, ex.ToString(), stopwatch.Elapsed.TotalSeconds, null, logs);
+                }
                 return;
             }
 
@@ -235,7 +392,19 @@ namespace UnityCliRunner
             double duration = stopwatch.Elapsed.TotalSeconds;
             var finalLogs = logCapture.GetLogs();
             DisposeCapture(logCapture);
-            string payload = !isVoidMethod ? CommandHelper.FormatResult(rawResult, false, false) : null;
+            string payload = null;
+            if (!isVoidMethod)
+            {
+                try
+                {
+                    payload = CommandHelper.FormatResult(rawResult, false, false);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"UnityCliRunner: Failed to format result: {ex.Message}");
+                    payload = rawResult?.ToString();
+                }
+            }
             FinishExecute(operationId, true, "", duration, payload, finalLogs);
         }
 
@@ -250,6 +419,12 @@ namespace UnityCliRunner
                 var ex = innerTask.Exception != null
                     ? (innerTask.Exception.InnerExceptions.Count == 1 ? innerTask.Exception.InnerExceptions[0] : innerTask.Exception)
                     : new Exception("Unknown task failure");
+                if (ex is OperationCanceledException)
+                {
+                    Debug.LogWarning("UnityCliRunner: Method execution was canceled.");
+                    FinishExecute(operationId, false, "Method execution was canceled.", duration, null, logs, interrupted: true);
+                    return;
+                }
                 string errorMsg = ex.ToString();
                 Debug.LogError($"UnityCliRunner: Method execution failed: {errorMsg}");
                 FinishExecute(operationId, false, errorMsg, duration, null, logs);
@@ -262,8 +437,8 @@ namespace UnityCliRunner
                 double duration = stopwatch.Elapsed.TotalSeconds;
                 var logs = logCapture.GetLogs();
                 DisposeCapture(logCapture);
-                Debug.LogError("UnityCliRunner: Method execution was canceled.");
-                FinishExecute(operationId, false, "Method execution was canceled.", duration, null, logs);
+                Debug.LogWarning("UnityCliRunner: Method execution was canceled.");
+                FinishExecute(operationId, false, "Method execution was canceled.", duration, null, logs, interrupted: true);
                 return;
             }
 
@@ -307,8 +482,19 @@ namespace UnityCliRunner
             logCapture.Dispose();
         }
 
-        private static void FinishExecute(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs)
+        private static void FinishExecute(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs, bool interrupted = false)
         {
+            lock (s_CtsLock)
+            {
+                if (s_ActiveOperationId == operationId)
+                {
+                    s_ActiveCts?.Dispose();
+                    s_ActiveCts = null;
+                    s_ActiveOperationId = null;
+                    s_ActiveMethodHasCancellationToken = false;
+                }
+            }
+
             if (!UnityCliOperationStore.IsOwnedBy(operationId, OperationKinds.Execute))
             {
                 return;
@@ -320,6 +506,7 @@ namespace UnityCliRunner
                 {
                     operationId = operationId,
                     success = success,
+                    interrupted = interrupted,
                     message = message,
                     duration = duration,
                     payload = payload,
@@ -327,17 +514,34 @@ namespace UnityCliRunner
                 };
                 string json = JsonUtility.ToJson(runResult, true);
                 UnityCliOperationStore.WriteAtomic(resultsPath, json, operationId);
-                if (File.Exists(UnityCliPaths.ExecuteRunningFile)) File.Delete(UnityCliPaths.ExecuteRunningFile);
-                UnityCliOperationStore.Complete(operationId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to write execute result: {ex}");
             }
+            finally
+            {
+                if (File.Exists(UnityCliPaths.ExecuteRunningFile))
+                {
+                    try { File.Delete(UnityCliPaths.ExecuteRunningFile); } catch { }
+                }
+                UnityCliOperationStore.Complete(operationId);
+            }
         }
 
-        public static void MarkInterrupted(string message)
+        public static void MarkInterrupted(string message, string targetOperationId = null)
         {
+            lock (s_CtsLock)
+            {
+                if (string.IsNullOrEmpty(targetOperationId) || s_ActiveOperationId == targetOperationId)
+                {
+                    s_ActiveCts?.Dispose();
+                    s_ActiveCts = null;
+                    s_ActiveOperationId = null;
+                    s_ActiveMethodHasCancellationToken = false;
+                }
+            }
+
             if (s_ActiveLogCapture != null)
             {
                 s_ActiveLogCapture.Dispose();
@@ -347,7 +551,12 @@ namespace UnityCliRunner
             string runningPath = UnityCliPaths.ExecuteRunningFile;
             string resultsPath = UnityCliPaths.ExecuteResultFile;
             var operation = UnityCliOperationStore.Read();
-            if (operation == null || operation.kind != OperationKinds.Execute)
+            string opId = targetOperationId ?? operation?.operationId;
+            if (string.IsNullOrEmpty(opId))
+            {
+                return;
+            }
+            if (operation != null && operation.kind != OperationKinds.Execute && targetOperationId == null)
             {
                 return;
             }
@@ -356,20 +565,26 @@ namespace UnityCliRunner
             {
                 var result = new UnityExecuteResult
                 {
-                    operationId = operation.operationId,
+                    operationId = opId,
                     success = false,
                     interrupted = true,
                     message = message,
                     duration = 0,
                     payload = null
                 };
-                UnityCliOperationStore.WriteAtomic(resultsPath, JsonUtility.ToJson(result, true), operation.operationId);
-                if (File.Exists(runningPath)) File.Delete(runningPath);
-                UnityCliOperationStore.Complete(operation.operationId);
+                UnityCliOperationStore.WriteAtomic(resultsPath, JsonUtility.ToJson(result, true), opId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to persist interrupted method result: {ex}");
+            }
+            finally
+            {
+                if (File.Exists(runningPath))
+                {
+                    try { File.Delete(runningPath); } catch { }
+                }
+                UnityCliOperationStore.Complete(opId);
             }
         }
     }

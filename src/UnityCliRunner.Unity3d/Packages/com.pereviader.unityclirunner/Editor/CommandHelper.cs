@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using UnityEditor;
 using UnityEngine;
 
@@ -309,27 +310,51 @@ namespace UnityCliRunner
         public static MethodInfo FindStaticMethod(Type type, string methodName, int paramCount)
         {
             var methods = type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-            MethodInfo candidate = null;
-            int matchCount = 0;
+            var candidatesWithCt = new List<MethodInfo>();
+            var candidatesWithoutCt = new List<MethodInfo>();
+
             foreach (var m in methods)
             {
-                if (m.Name == methodName)
+                if (m.Name != methodName) continue;
+
+                var parameters = m.GetParameters();
+                int ctCount = 0;
+                foreach (var p in parameters)
                 {
-                    if (m.GetParameters().Length == paramCount)
+                    if (p.ParameterType == typeof(CancellationToken))
                     {
-                        candidate = m;
-                        matchCount++;
+                        ctCount++;
                     }
                 }
+
+                if (ctCount == 1 && parameters.Length - 1 == paramCount)
+                {
+                    candidatesWithCt.Add(m);
+                }
+                else if (ctCount == 0 && parameters.Length == paramCount)
+                {
+                    candidatesWithoutCt.Add(m);
+                }
             }
-            if (matchCount == 1)
+
+            if (candidatesWithCt.Count == 1)
             {
-                return candidate;
+                return candidatesWithCt[0];
             }
-            if (matchCount > 1)
+            if (candidatesWithCt.Count > 1)
+            {
+                throw new AmbiguousMatchException($"Ambiguous match: multiple static methods named '{methodName}' with {paramCount} arguments and CancellationToken found in type '{type.FullName}'.");
+            }
+
+            if (candidatesWithoutCt.Count == 1)
+            {
+                return candidatesWithoutCt[0];
+            }
+            if (candidatesWithoutCt.Count > 1)
             {
                 throw new AmbiguousMatchException($"Ambiguous match: multiple static methods named '{methodName}' with {paramCount} parameters found in type '{type.FullName}'.");
             }
+
             return null;
         }
 

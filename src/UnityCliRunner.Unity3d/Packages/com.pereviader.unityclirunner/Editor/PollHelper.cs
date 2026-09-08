@@ -62,9 +62,16 @@ namespace UnityCliRunner
 
             // 3. Fallback to operation store for busy vs idle state
             var operation = UnityCliOperationStore.Read();
-            if (operation != null && operation.operationId != operationId)
+            if (operation != null)
             {
-                writer.WriteLine($"BUSY {operation.kind} {operation.operationId}");
+                if (operation.operationId != operationId)
+                {
+                    writer.WriteLine($"BUSY {operation.kind} {operation.operationId}");
+                }
+                else
+                {
+                    writer.WriteLine("RUNNING");
+                }
             }
             else
             {

@@ -34,9 +34,32 @@ public class UnityProcessManager
     public string RefreshResultFile => Path.Combine(TempDir, "unity_refresh_result.json");
     public string EvalResultFile => Path.Combine(TempDir, "unity_eval_result.json");
     public string ExecuteResultFile => Path.Combine(TempDir, "unity_execute_result.json");
+    public string ExecuteRunningFile => Path.Combine(TempDir, "unity_execute_running.txt");
+    public string EvalRunningFile => Path.Combine(TempDir, "unity_eval_running.txt");
     public string TestRunningFile => Path.Combine(TempDir, "unity_test_running.txt");
     public string TestResultsFile => Path.Combine(TempDir, "unity_test_results.json");
     public string TestFailuresFile => Path.Combine(TempDir, "unity_test_failures.txt");
+
+    public void PurgeOperationState()
+    {
+        string[] files =
+        {
+            OperationFile,
+            ExecuteRunningFile,
+            EvalRunningFile,
+            TestRunningFile,
+            PidFile,
+            PortFile
+        };
+
+        foreach (var file in files)
+        {
+            if (File.Exists(file))
+            {
+                try { File.Delete(file); } catch { }
+            }
+        }
+    }
 
     public UnityProcessManager(string projectRoot, ILogger<UnityProcessManager> logger)
     {
@@ -625,45 +648,50 @@ public class UnityProcessManager
 
     public async Task<bool> StopUnityAsync(CancellationToken cancellationToken = default)
     {
-        if (!IsUnityRunning(out int? pid))
-        {
-            return true;
-        }
-
-        // Try sending EXIT to socket first
         try
         {
-            await ProbeSocketCommandAsync("EXIT", 2, cancellationToken);
-        }
-        catch { }
-
-        // Wait up to 5 seconds for process to exit
-        for (int i = 0; i < 25; i++)
-        {
-            if (!IsUnityRunning(out pid))
+            if (!IsUnityRunning(out int? pid))
             {
+                PurgeOperationState();
                 return true;
             }
-            await Task.Delay(200, cancellationToken);
-        }
 
-        // Force kill if still running
-        if (pid.HasValue && pid.Value > 0)
-        {
+            // Try sending EXIT to socket first
             try
             {
-                var proc = Process.GetProcessById(pid.Value);
-                proc.Kill(true);
-                proc.WaitForExit(2000);
+                await ProbeSocketCommandAsync("EXIT", 2, cancellationToken);
             }
             catch { }
-        }
 
-        if (File.Exists(PidFile))
+            // Wait up to 5 seconds for process to exit
+            for (int i = 0; i < 25; i++)
+            {
+                if (!IsUnityRunning(out pid))
+                {
+                    PurgeOperationState();
+                    return true;
+                }
+                await Task.Delay(200, cancellationToken);
+            }
+
+            // Force kill if still running
+            if (pid.HasValue && pid.Value > 0)
+            {
+                try
+                {
+                    var proc = Process.GetProcessById(pid.Value);
+                    proc.Kill(true);
+                    proc.WaitForExit(2000);
+                }
+                catch { }
+            }
+
+            PurgeOperationState();
+            return !IsUnityRunning(out _);
+        }
+        finally
         {
-            try { File.Delete(PidFile); } catch { }
+            PurgeOperationState();
         }
-
-        return !IsUnityRunning(out _);
     }
 }

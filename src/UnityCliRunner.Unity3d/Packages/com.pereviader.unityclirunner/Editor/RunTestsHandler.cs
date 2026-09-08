@@ -161,47 +161,55 @@ namespace UnityCliRunner
                 return;
             }
 
-            List<string> failedTests = null;
-            if (failedOnly)
+            try
             {
-                failedTests = GetPreviouslyFailedTestNames();
-                if (failedTests.Count == 0)
+                List<string> failedTests = null;
+                if (failedOnly)
                 {
-                    var emptyResult = new UnityTestRunResult
+                    failedTests = GetPreviouslyFailedTestNames();
+                    if (failedTests.Count == 0)
                     {
-                        runId = operationId,
-                        success = true,
-                        failCount = 0,
-                        passCount = 0,
-                        skipCount = 0,
-                        message = "No previously failed tests found.",
-                        resultState = "Passed",
-                        failedTests = new List<FailedTestInfo>()
-                    };
-                    WriteAtomic(ResultsFilePath, JsonUtility.ToJson(emptyResult, true), operationId);
-                    UnityCliOperationStore.Complete(operationId);
-                    writer.WriteLine("SUCCESS No previously failed tests found.");
+                        var emptyResult = new UnityTestRunResult
+                        {
+                            runId = operationId,
+                            success = true,
+                            failCount = 0,
+                            passCount = 0,
+                            skipCount = 0,
+                            message = "No previously failed tests found.",
+                            resultState = "Passed",
+                            failedTests = new List<FailedTestInfo>()
+                        };
+                        WriteAtomic(ResultsFilePath, JsonUtility.ToJson(emptyResult, true), operationId);
+                        UnityCliOperationStore.Complete(operationId);
+                        writer.WriteLine("SUCCESS No previously failed tests found.");
+                        writer.Flush();
+                        return;
+                    }
+                }
+
+                // Persist the complete run identity before acknowledging the command.
+                // The CLI can therefore recover if this socket is closed by a reload
+                // immediately after the command is dispatched.
+                string runId = WriteTestRunningState(operationId, mode, filter, category);
+                if (string.IsNullOrEmpty(runId))
+                {
+                    writer.WriteLine("ERROR: Could not persist test run state.");
                     writer.Flush();
+                    UnityCliOperationStore.Complete(operationId);
                     return;
                 }
-            }
 
-            // Persist the complete run identity before acknowledging the command.
-            // The CLI can therefore recover if this socket is closed by a reload
-            // immediately after the command is dispatched.
-            string runId = WriteTestRunningState(operationId, mode, filter, category);
-            if (string.IsNullOrEmpty(runId))
-            {
-                writer.WriteLine("ERROR: Could not persist test run state.");
+                writer.WriteLine("RUNNING");
                 writer.Flush();
-                UnityCliOperationStore.Complete(operationId);
-                return;
+
+                RunTests(mode, filter, category, runId, failedTests?.ToArray());
             }
-
-            writer.WriteLine("RUNNING");
-            writer.Flush();
-
-            RunTests(mode, filter, category, runId, failedTests?.ToArray());
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Unhandled exception during RunTests: {ex}");
+                WriteInterruptedResult("Failed to start test run: " + ex.Message, operationId);
+            }
         }
 
         private static List<string> GetPreviouslyFailedTestNames()
@@ -375,10 +383,10 @@ namespace UnityCliRunner
         }
 
 
-        internal static void WriteInterruptedResult(string message)
+        internal static void WriteInterruptedResult(string message, string targetRunId = null)
         {
             var state = ReadRunningState();
-            string runId = state?.runId ?? Guid.NewGuid().ToString("N");
+            string runId = targetRunId ?? state?.runId ?? Guid.NewGuid().ToString("N");
             var result = new UnityTestRunResult
             {
                 runId = runId,
@@ -391,12 +399,15 @@ namespace UnityCliRunner
             try
             {
                 WriteAtomic(ResultsFilePath, JsonUtility.ToJson(result, true), runId);
-                DeleteIfExists(RunningFilePath);
-                UnityCliOperationStore.Complete(runId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityCliRunner: Failed to persist interrupted test result. Type={ex.GetType().FullName}, StackTrace={ex.StackTrace}");
+            }
+            finally
+            {
+                DeleteIfExists(RunningFilePath);
+                UnityCliOperationStore.Complete(runId);
             }
         }
 
@@ -519,6 +530,13 @@ namespace UnityCliRunner
             try
             {
                 WriteAtomic(ResultsFilePath, JsonUtility.ToJson(result, true), runId);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityCliRunner: Failed to persist cancelled test result. Type={ex.GetType().FullName}, StackTrace={ex.StackTrace}");
+            }
+            finally
+            {
                 DeleteIfExists(RunningFilePath);
                 UnityCliOperationStore.Complete(runId);
                 s_CurrentTestJobGuid = null;
@@ -526,10 +544,6 @@ namespace UnityCliRunner
                 {
                     s_Callbacks.Reset();
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"UnityCliRunner: Failed to persist cancelled test result. Type={ex.GetType().FullName}, StackTrace={ex.StackTrace}");
             }
         }
 
