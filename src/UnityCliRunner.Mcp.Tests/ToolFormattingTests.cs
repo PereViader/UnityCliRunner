@@ -4,9 +4,13 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using System.ComponentModel;
+using System.Linq;
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 using Xunit;
 
 namespace UnityCliRunner.Mcp.Tests;
@@ -1190,5 +1194,53 @@ public class ToolFormattingTests
         Assert.Null(file);
         Assert.Null(line);
         Assert.Null(uri);
+    }
+
+    // ==========================================
+    // 7. Tool description regression tests
+    // ==========================================
+
+    [Theory]
+    [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Action tools auto-refresh before executing.")]
+    [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics. Auto-refreshes pending script changes first; do not call unity_refresh beforehand.")]
+    [InlineData("unity_recompile", "Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.")]
+    [InlineData("unity_eval", "Evaluates C# snippet in-memory (<80ms) without domain reload. Primary tool to query scene, GameObjects, and component state.")]
+    public void UnityTools_Methods_HaveExpectedRefinedDescriptions(string toolName, string expectedDescription)
+    {
+        var methods = typeof(UnityTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);
+        var targetMethod = methods.FirstOrDefault(m =>
+            m.GetCustomAttribute<McpServerToolAttribute>()?.Name == toolName);
+
+        Assert.NotNull(targetMethod);
+        var descAttr = targetMethod.GetCustomAttribute<DescriptionAttribute>();
+        Assert.NotNull(descAttr);
+        Assert.Equal(expectedDescription, descAttr.Description);
+    }
+
+    [Fact]
+    public void UnityTools_UnityEval_CodeParameter_HasAccurateDescription()
+    {
+        var evalMethod = typeof(UnityTools).GetMethod(nameof(UnityTools.UnityEvalAsync));
+        Assert.NotNull(evalMethod);
+        var codeParam = evalMethod.GetParameters().FirstOrDefault(p => p.Name == "code");
+        Assert.NotNull(codeParam);
+        var descAttr = codeParam.GetCustomAttribute<DescriptionAttribute>();
+        Assert.NotNull(descAttr);
+        Assert.Contains("Common imports", descAttr.Description);
+    }
+
+    [Fact]
+    public void UnityTools_AllTools_HaveNonEmptyDescriptions()
+    {
+        var methods = typeof(UnityTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);
+        var toolMethods = methods.Where(m => m.GetCustomAttribute<McpServerToolAttribute>() != null).ToList();
+
+        Assert.Equal(7, toolMethods.Count);
+        foreach (var method in toolMethods)
+        {
+            var descAttr = method.GetCustomAttribute<DescriptionAttribute>();
+            Assert.NotNull(descAttr);
+            Assert.False(string.IsNullOrWhiteSpace(descAttr.Description));
+        }
     }
 }

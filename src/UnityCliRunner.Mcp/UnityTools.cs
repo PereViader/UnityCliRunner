@@ -129,7 +129,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_refresh")]
-    [Description("Refreshes the Unity AssetDatabase, triggers script compilation, waits for completion, and returns diagnostics.")]
+    [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Action tools auto-refresh before executing.")]
     public async Task<CallToolResult> UnityRefreshAsync(
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
@@ -193,7 +193,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_recompile")]
-    [Description("Forces a clean script recompilation in the Unity Editor, waits for completion, and returns compilation diagnostics.")]
+    [Description("Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.")]
     public async Task<CallToolResult> UnityRecompileAsync(
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
@@ -257,7 +257,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_eval")]
-    [Description("Evaluates dynamic C# snippet in-memory (<80ms, no domain reload) against active Editor/Play Mode session. Primary data-gathering channel for inspecting Unity state.\nQuick patterns:\n- Active scene: SceneManager.GetActiveScene()\n- Find GameObjects: GameObject.FindObjectsByType<GameObject>(FindObjectsSortMode.None)\n- Find components: GameObject.FindObjectsByType<Camera>(FindObjectsSortMode.None)\n- Inspect hierarchy: Selection.activeTransform or GameObject.Find(\"Player\")?.transform\n- Serialized properties: new SerializedObject(Selection.activeObject).FindProperty(\"m_Name\")\n- Asset database: AssetDatabase.FindAssets(\"t:Prefab\")")]
+    [Description("Evaluates C# snippet in-memory (<80ms) without domain reload. Primary tool to query scene, GameObjects, and component state.")]
     public async Task<CallToolResult> UnityEvalAsync(
         [Description("C# expression, statement, or multi-statement snippet to evaluate in Unity Editor. Common imports (UnityEngine, UnityEditor, SceneManagement, UI, EventSystems, Animations, System.IO, Linq) are included by default.")] string code,
         CancellationToken cancellationToken = default)
@@ -423,7 +423,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_run_tests")]
-    [Description("Runs EditMode, PlayMode, or all tests in Unity (with optional rerun of previously failed tests) and returns pass/fail counts and failure diagnostics.")]
+    [Description("Runs EditMode/PlayMode tests with failure diagnostics. Auto-refreshes pending script changes first; do not call unity_refresh beforehand.")]
     public async Task<CallToolResult> UnityRunTestsAsync(
         [Description("Test filter string (wildcards and class/method names supported).")] string? filter = null,
         [Description("Test category filter.")] string? category = null,
