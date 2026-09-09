@@ -24,8 +24,13 @@ public class ToolFormattingTests
         public string Mode { get; set; } = "Batchmode";
         public bool StopSuccess { get; set; } = true;
 
+        public FakeUnityProcessManager(IUnityPathResolver pathResolver)
+            : base(pathResolver, NullLogger<UnityProcessManager>.Instance)
+        {
+        }
+
         public FakeUnityProcessManager(string projectRoot)
-            : base(projectRoot, NullLogger<UnityProcessManager>.Instance)
+            : this(new UnityPathResolver(projectRoot))
         {
         }
 
@@ -66,8 +71,13 @@ public class ToolFormattingTests
         public UnityExecuteResult ExecuteResultToReturn { get; set; } = new();
         public UnityTestRunResult TestRunResultToReturn { get; set; } = new();
 
+        public FakeUnityClient(UnityProcessManager pm, IUnityPathResolver pathResolver)
+            : base(pm, pathResolver, NullLogger<UnityClient>.Instance)
+        {
+        }
+
         public FakeUnityClient(UnityProcessManager pm)
-            : base(pm, NullLogger<UnityClient>.Instance)
+            : this(pm, pm.PathResolver)
         {
         }
 
@@ -106,9 +116,10 @@ public class ToolFormattingTests
         Directory.CreateDirectory(Path.Combine(tempDir, "Temp"));
         Directory.CreateDirectory(Path.Combine(tempDir, "ProjectSettings"));
 
-        var pm = new FakeUnityProcessManager(tempDir);
-        var client = new FakeUnityClient(pm);
-        var tools = new UnityTools(client, pm);
+        var pathResolver = new UnityPathResolver(tempDir);
+        var pm = new FakeUnityProcessManager(pathResolver);
+        var client = new FakeUnityClient(pm, pathResolver);
+        var tools = new UnityTools(client, pm, pathResolver);
 
         return (tempDir, pm, client, tools);
     }
@@ -1399,6 +1410,107 @@ public class ToolFormattingTests
         Assert.Null(file);
         Assert.Null(line);
         Assert.Null(uri);
+    }
+
+    [Fact]
+    public void ParseCompilerDiagnostics_ParsesErrorsAndWarningsCorrectly()
+    {
+        string text = @"Assets/Scripts/Player.cs(10,15): error CS0103: The name 'foo' does not exist in the current context
+Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned but its value is never used";
+
+        var diagnostics = UnityTools.ParseCompilerDiagnostics(text);
+
+        Assert.Equal(2, diagnostics.Count);
+
+        Assert.Equal("Assets/Scripts/Player.cs", diagnostics[0].File);
+        Assert.Equal(10, diagnostics[0].Line);
+        Assert.Equal(15, diagnostics[0].Column);
+        Assert.Equal("error", diagnostics[0].Severity);
+        Assert.Equal("CS0103", diagnostics[0].Code);
+        Assert.Equal("The name 'foo' does not exist in the current context", diagnostics[0].Message);
+
+        Assert.Equal("Assets/Scripts/Enemy.cs", diagnostics[1].File);
+        Assert.Equal(42, diagnostics[1].Line);
+        Assert.Equal(5, diagnostics[1].Column);
+        Assert.Equal("warning", diagnostics[1].Severity);
+        Assert.Equal("CS0219", diagnostics[1].Code);
+        Assert.Equal("The variable 'bar' is assigned but its value is never used", diagnostics[1].Message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("Compilation succeeded with no diagnostics.")]
+    public void ParseCompilerDiagnostics_WhenNoDiagnostics_ReturnsEmpty(string? text)
+    {
+        var diagnostics = DiagnosticFormatter.Default.ParseCompilerDiagnostics(text);
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public async Task DiagnosticFormatter_CustomImplementationCanBeInjectedIntoUnityTools()
+    {
+        var customFormatter = new TestCustomDiagnosticFormatter();
+        var (tempDir, pm, client, _) = CreateTestContext();
+        try
+        {
+            var customTools = new UnityTools(client, pm, pm.PathResolver, customFormatter);
+
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = true,
+                Message = "Dummy message"
+            };
+
+            var refreshResult = await customTools.UnityRefreshAsync();
+            Assert.True(customFormatter.ParseCompilerDiagnosticsCalled);
+
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = false,
+                FailedTests =
+                {
+                    new FailedTestInfo { Name = "Test1", StackTrace = "dummy stack trace" }
+                }
+            };
+
+            var testResult = await customTools.UnityRunTestsAsync();
+            Assert.True(customFormatter.ExtractSourceLocationCalled);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    private class TestCustomDiagnosticFormatter : IDiagnosticFormatter
+    {
+        public bool ExtractSourceLocationCalled { get; private set; }
+        public bool ParseCompilerDiagnosticsCalled { get; private set; }
+
+        public (string? filePath, int? lineNumber, string? fileUri) ExtractSourceLocation(string? stackTrace, string? projectRoot)
+        {
+            ExtractSourceLocationCalled = true;
+            return ("CustomFile.cs", 1, "file:///CustomFile.cs#L1");
+        }
+
+        public List<StructuredCompilerDiagnostic> ParseCompilerDiagnostics(string? diagnosticText)
+        {
+            ParseCompilerDiagnosticsCalled = true;
+            return new List<StructuredCompilerDiagnostic>
+            {
+                new StructuredCompilerDiagnostic
+                {
+                    File = "CustomFile.cs",
+                    Line = 1,
+                    Column = 1,
+                    Severity = "warning",
+                    Code = "CS9999",
+                    Message = "Custom diagnostic"
+                }
+            };
+        }
     }
 
     // ==========================================

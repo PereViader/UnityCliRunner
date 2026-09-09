@@ -15,6 +15,7 @@ namespace UnityCliRunner.Mcp;
 
 public class UnityProcessManager : IUnityProcessManager
 {
+    private readonly IUnityPathResolver _pathResolver;
     private readonly ILogger<UnityProcessManager> _logger;
     private int? _launchedPid;
     private static readonly Regex s_CompileErrorRegex = new(
@@ -25,27 +26,28 @@ public class UnityProcessManager : IUnityProcessManager
         @"^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:.*$",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
-    public string ProjectRoot { get; }
-    public string TempDir => Path.Combine(ProjectRoot, "Temp");
-    public string PidFile => Path.Combine(TempDir, "unity_cli_process.pid");
-    public string PortFile => Path.Combine(TempDir, "unity_cli_port.txt");
-    public string LogFile => Path.Combine(ProjectRoot, "unity_background_log.txt");
-    public string CompilationErrorsFile => Path.Combine(TempDir, "unity_compilation_errors.txt");
-    public string OperationFile => Path.Combine(TempDir, "unity_cli_operation.json");
-    public string RefreshResultFile => Path.Combine(TempDir, "unity_refresh_result.json");
-    public string EvalResultFile => Path.Combine(TempDir, "unity_eval_result.json");
-    public string ExecuteResultFile => Path.Combine(TempDir, "unity_execute_result.json");
-    public string TestRunningFile => Path.Combine(TempDir, "unity_test_running.txt");
-    public string TestResultsFile => Path.Combine(TempDir, "unity_test_results.json");
+    public IUnityPathResolver PathResolver => _pathResolver;
+    public string ProjectRoot => _pathResolver.ProjectRoot;
+    public string TempDir => _pathResolver.TempDir;
+    public string PidFile => _pathResolver.PidFile;
+    public string PortFile => _pathResolver.PortFile;
+    public string LogFile => _pathResolver.LogFile;
+    public string CompilationErrorsFile => _pathResolver.CompilationErrorsFile;
+    public string OperationFile => _pathResolver.OperationFile;
+    public string RefreshResultFile => _pathResolver.RefreshResultFile;
+    public string EvalResultFile => _pathResolver.EvalResultFile;
+    public string ExecuteResultFile => _pathResolver.ExecuteResultFile;
+    public string TestRunningFile => _pathResolver.TestRunningFile;
+    public string TestResultsFile => _pathResolver.TestResultsFile;
 
     public void PurgeOperationState()
     {
         string[] files =
         {
-            OperationFile,
-            TestRunningFile,
-            PidFile,
-            PortFile
+            _pathResolver.OperationFile,
+            _pathResolver.TestRunningFile,
+            _pathResolver.PidFile,
+            _pathResolver.PortFile
         };
 
         foreach (var file in files)
@@ -57,10 +59,15 @@ public class UnityProcessManager : IUnityProcessManager
         }
     }
 
-    public UnityProcessManager(string projectRoot, ILogger<UnityProcessManager> logger)
+    public UnityProcessManager(IUnityPathResolver pathResolver, ILogger<UnityProcessManager> logger)
     {
-        ProjectRoot = Path.GetFullPath(projectRoot);
+        _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
         _logger = logger;
+    }
+
+    public UnityProcessManager(string projectRoot, ILogger<UnityProcessManager> logger)
+        : this(new UnityPathResolver(projectRoot), logger)
+    {
     }
 
     /// <summary>
@@ -72,11 +79,11 @@ public class UnityProcessManager : IUnityProcessManager
         processId = null;
 
         // 1. Check Temp/unity_cli_process.pid
-        if (File.Exists(PidFile))
+        if (File.Exists(_pathResolver.PidFile))
         {
             try
             {
-                string pidText = ReadFileWithRetry(PidFile).Trim();
+                string pidText = ReadFileWithRetry(_pathResolver.PidFile).Trim();
                 if (int.TryParse(pidText, out int pid) && pid > 0)
                 {
                     if (IsProcessAlive(pid))
@@ -86,19 +93,19 @@ public class UnityProcessManager : IUnityProcessManager
                     }
                 }
                 // PID is dead, delete stale file
-                try { File.Delete(PidFile); } catch { }
+                try { File.Delete(_pathResolver.PidFile); } catch { }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Error reading pid file {PidFile}", PidFile);
+                _logger.LogDebug(ex, "Error reading pid file {PidFile}", _pathResolver.PidFile);
             }
         }
 
         // 2. Check Temp/UnityLockfile or Temp/UnityLockFile
-        string lockFilePath = Path.Combine(TempDir, "UnityLockfile");
+        string lockFilePath = Path.Combine(_pathResolver.TempDir, "UnityLockfile");
         if (!File.Exists(lockFilePath))
         {
-            lockFilePath = Path.Combine(TempDir, "UnityLockFile");
+            lockFilePath = Path.Combine(_pathResolver.TempDir, "UnityLockFile");
         }
 
         if (File.Exists(lockFilePath))
@@ -224,7 +231,7 @@ public class UnityProcessManager : IUnityProcessManager
             // Only return a PID if it can be deterministically proven to belong to this project.
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                string normalizedProject = ProjectRoot.TrimEnd('/', '\\');
+                string normalizedProject = _pathResolver.ProjectRoot.TrimEnd('/', '\\');
                 foreach (var proc in processes)
                 {
                     try
@@ -324,11 +331,11 @@ public class UnityProcessManager : IUnityProcessManager
             return "Batchmode";
         }
 
-        if (File.Exists(PidFile))
+        if (File.Exists(_pathResolver.PidFile))
         {
             try
             {
-                string pidText = ReadFileWithRetry(PidFile).Trim();
+                string pidText = ReadFileWithRetry(_pathResolver.PidFile).Trim();
                 if (int.TryParse(pidText, out int filePid) && filePid == pid)
                 {
                     return "Batchmode";
@@ -359,7 +366,7 @@ public class UnityProcessManager : IUnityProcessManager
 
     public string? GetProjectEditorVersion()
     {
-        string versionFilePath = Path.Combine(ProjectRoot, "ProjectSettings", "ProjectVersion.txt");
+        string versionFilePath = Path.Combine(_pathResolver.ProjectRoot, "ProjectSettings", "ProjectVersion.txt");
         if (!File.Exists(versionFilePath))
         {
             return null;
@@ -456,23 +463,23 @@ public class UnityProcessManager : IUnityProcessManager
         {
             string? version = GetProjectEditorVersion();
             throw new FileNotFoundException(
-                $"Unity executable not found for project at '{ProjectRoot}' (version: {version ?? "unknown"}). " +
+                $"Unity executable not found for project at '{_pathResolver.ProjectRoot}' (version: {version ?? "unknown"}). " +
                 "Set the UNITY_PATH or UNITY_EDITOR environment variable or install Unity via Unity Hub.");
         }
 
         _logger.LogInformation("Auto-starting Unity batchmode from '{UnityExe}'...", unityExe);
 
-        Directory.CreateDirectory(TempDir);
-        try { File.Delete(LogFile); } catch { }
-        try { File.Delete(PidFile); } catch { }
-        try { File.Delete(CompilationErrorsFile); } catch { }
+        Directory.CreateDirectory(_pathResolver.TempDir);
+        try { File.Delete(_pathResolver.LogFile); } catch { }
+        try { File.Delete(_pathResolver.PidFile); } catch { }
+        try { File.Delete(_pathResolver.CompilationErrorsFile); } catch { }
 
         long initialLogOffset = 0;
-        if (File.Exists(LogFile))
+        if (File.Exists(_pathResolver.LogFile))
         {
             try
             {
-                initialLogOffset = new FileInfo(LogFile).Length;
+                initialLogOffset = new FileInfo(_pathResolver.LogFile).Length;
             }
             catch
             {
@@ -483,8 +490,8 @@ public class UnityProcessManager : IUnityProcessManager
         var psi = new ProcessStartInfo
         {
             FileName = unityExe,
-            Arguments = $"-batchmode -nographics -projectPath \"{ProjectRoot}\" -logFile \"{LogFile}\"",
-            WorkingDirectory = ProjectRoot,
+            Arguments = $"-batchmode -nographics -projectPath \"{_pathResolver.ProjectRoot}\" -logFile \"{_pathResolver.LogFile}\"",
+            WorkingDirectory = _pathResolver.ProjectRoot,
             UseShellExecute = false,
             CreateNoWindow = true
         };
@@ -502,11 +509,11 @@ public class UnityProcessManager : IUnityProcessManager
         _launchedPid = proc.Id;
         try
         {
-            File.WriteAllText(PidFile, proc.Id.ToString());
+            File.WriteAllText(_pathResolver.PidFile, proc.Id.ToString());
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to write PID to {PidFile}", PidFile);
+            _logger.LogWarning(ex, "Failed to write PID to {PidFile}", _pathResolver.PidFile);
         }
 
         _logger.LogInformation("Unity process started with PID {Pid}. Waiting for socket server...", proc.Id);
@@ -535,16 +542,16 @@ public class UnityProcessManager : IUnityProcessManager
             {
                 if (startedProcess.HasExited)
                 {
-                    if (File.Exists(LogFile))
+                    if (File.Exists(_pathResolver.LogFile))
                     {
-                        string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
+                        string logText = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialLogOffset);
                         if (s_CompileErrorRegex.IsMatch(logText))
                         {
                             var errorLines = ExtractUniqueCompilationLines(logText);
                             try
                             {
-                                Directory.CreateDirectory(TempDir);
-                                File.WriteAllLines(CompilationErrorsFile, errorLines);
+                                Directory.CreateDirectory(_pathResolver.TempDir);
+                                File.WriteAllLines(_pathResolver.CompilationErrorsFile, errorLines);
                             }
                             catch { }
                             throw new UnityCompilationException(
@@ -562,16 +569,16 @@ public class UnityProcessManager : IUnityProcessManager
             {
                 if (!IsUnityRunning(out _))
                 {
-                    if (File.Exists(LogFile))
+                    if (File.Exists(_pathResolver.LogFile))
                     {
-                        string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
+                        string logText = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialLogOffset);
                         if (s_CompileErrorRegex.IsMatch(logText))
                         {
                             var errorLines = ExtractUniqueCompilationLines(logText);
                             try
                             {
-                                Directory.CreateDirectory(TempDir);
-                                File.WriteAllLines(CompilationErrorsFile, errorLines);
+                                Directory.CreateDirectory(_pathResolver.TempDir);
+                                File.WriteAllLines(_pathResolver.CompilationErrorsFile, errorLines);
                             }
                             catch { }
                             throw new UnityCompilationException(
@@ -587,17 +594,17 @@ public class UnityProcessManager : IUnityProcessManager
             }
 
             // 2. Monitor unity_background_log.txt for compilation errors during startup
-            if (startedProcess != null && File.Exists(LogFile))
+            if (startedProcess != null && File.Exists(_pathResolver.LogFile))
             {
-                string logText = ReadFileWithRetry(LogFile, fromOffset: initialLogOffset);
+                string logText = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialLogOffset);
                 if (s_CompileErrorRegex.IsMatch(logText))
                 {
                     _logger.LogError("Compilation errors detected in Unity background log during startup.");
                     var errorLines = ExtractUniqueCompilationLines(logText);
                     try
                     {
-                        Directory.CreateDirectory(TempDir);
-                        File.WriteAllLines(CompilationErrorsFile, errorLines);
+                        Directory.CreateDirectory(_pathResolver.TempDir);
+                        File.WriteAllLines(_pathResolver.CompilationErrorsFile, errorLines);
                     }
                     catch { }
 
@@ -618,7 +625,7 @@ public class UnityProcessManager : IUnityProcessManager
             }
 
             // 3. Check socket connection
-            if (File.Exists(PortFile))
+            if (File.Exists(_pathResolver.PortFile))
             {
                 if (await IsSocketReadyAsync(2, cancellationToken))
                 {
@@ -644,7 +651,7 @@ public class UnityProcessManager : IUnityProcessManager
 
     public async Task<string?> ProbeSocketCommandAsync(string command, int timeoutSeconds = 2, CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(PortFile))
+        if (!File.Exists(_pathResolver.PortFile))
         {
             return null;
         }
@@ -681,10 +688,10 @@ public class UnityProcessManager : IUnityProcessManager
 
     public int ReadPortFile()
     {
-        if (!File.Exists(PortFile)) return 0;
+        if (!File.Exists(_pathResolver.PortFile)) return 0;
         try
         {
-            string content = ReadFileWithRetry(PortFile).Trim();
+            string content = ReadFileWithRetry(_pathResolver.PortFile).Trim();
             return int.TryParse(content, out int port) ? port : 0;
         }
         catch
@@ -695,10 +702,10 @@ public class UnityProcessManager : IUnityProcessManager
 
     private string GetLogSnippet(long initialOffset = 0)
     {
-        if (!File.Exists(LogFile)) return "No Unity log file found.";
+        if (!File.Exists(_pathResolver.LogFile)) return "No Unity log file found.";
         try
         {
-            string text = ReadFileWithRetry(LogFile, fromOffset: initialOffset);
+            string text = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialOffset);
             var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             int start = Math.Max(0, lines.Length - 25);
             return "Last log lines:\n" + string.Join(Environment.NewLine, lines[start..]);

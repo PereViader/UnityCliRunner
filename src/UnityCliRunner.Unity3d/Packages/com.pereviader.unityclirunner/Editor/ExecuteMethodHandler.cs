@@ -25,6 +25,12 @@ namespace UnityCliRunner
                 return;
             }
 
+            if (UnityCliCompilationTracker.IsCompiling || UnityCliCompilationTracker.RefreshPending)
+            {
+                writer.WriteLine("BUSY compile");
+                return;
+            }
+
             if (string.IsNullOrEmpty(payload))
             {
                 writer.WriteLine("ERROR: Missing method name");

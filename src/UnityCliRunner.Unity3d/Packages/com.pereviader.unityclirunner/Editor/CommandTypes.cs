@@ -15,6 +15,7 @@ namespace UnityCliRunner
     internal static class OperationStatus
     {
         public const string Queued = "Queued";
+        public const string Running = "Running";
         public const string Executing = "Executing";
         public const string Compiling = "Compiling";
         public const string Refreshing = "Refreshing";
@@ -25,6 +26,7 @@ namespace UnityCliRunner
         public const string ShuttingDown = "ShuttingDown";
         public const string Interrupted = "Interrupted";
         public const string Cancelled = "Cancelled";
+        public const string Completed = "Completed";
     }
 
     [Serializable]
@@ -54,8 +56,16 @@ namespace UnityCliRunner
         public string currentTestName;
     }
 
+    public interface IOperationResult
+    {
+        string OperationId { get; set; }
+        bool Success { get; set; }
+        bool Interrupted { get; set; }
+        string Message { get; set; }
+    }
+
     [Serializable]
-    public class UnityTestRunResult
+    public class UnityTestRunResult : IOperationResult
     {
         public string runId;
         public bool success;
@@ -65,6 +75,11 @@ namespace UnityCliRunner
         public string message;
         public string resultState;
         public List<FailedTestInfo> failedTests;
+
+        public string OperationId { get => runId; set => runId = value; }
+        public bool Success { get => success; set => success = value; }
+        public bool Interrupted { get => resultState == "Interrupted"; set { if (value) resultState = "Interrupted"; } }
+        public string Message { get => message; set => message = value; }
     }
 
     [Serializable]
@@ -75,16 +90,21 @@ namespace UnityCliRunner
     }
 
     [Serializable]
-    public class UnityRefreshResult
+    public class UnityRefreshResult : IOperationResult
     {
         public string operationId;
         public bool success;
         public bool interrupted;
         public string message;
+
+        public string OperationId { get => operationId; set => operationId = value; }
+        public bool Success { get => success; set => success = value; }
+        public bool Interrupted { get => interrupted; set => interrupted = value; }
+        public string Message { get => message; set => message = value; }
     }
 
     [Serializable]
-    public class UnityOperationResult
+    public class UnityOperationResult : IOperationResult
     {
         public string operationId;
         public bool success;
@@ -93,6 +113,11 @@ namespace UnityCliRunner
         public double duration;
         public string payload;
         public List<ConsoleLogEntry> logs;
+
+        public string OperationId { get => operationId; set => operationId = value; }
+        public bool Success { get => success; set => success = value; }
+        public bool Interrupted { get => interrupted; set => interrupted = value; }
+        public string Message { get => message; set => message = value; }
     }
 
     [Serializable]

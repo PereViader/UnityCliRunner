@@ -98,10 +98,7 @@ namespace UnityCliRunner
         {
             s_IsCompiling = false;
             s_ScriptCompilationFailed = EditorUtility.scriptCompilationFailed;
-            if (!File.Exists(UnityCliPaths.DiagnosticsFile))
-            {
-                WriteActiveErrorsToFile();
-            }
+            WriteActiveErrorsToFile();
         }
 
         private static void OnAssemblyCompilationFinished(string assemblyPath, UnityEditor.Compilation.CompilerMessage[] messages)
@@ -281,10 +278,7 @@ namespace UnityCliRunner
                 return;
             }
 
-            if (!File.Exists(UnityCliPaths.DiagnosticsFile))
-            {
-                WriteActiveErrorsToFile();
-            }
+            WriteActiveErrorsToFile();
             var result = new UnityRefreshResult
             {
                 operationId = operation.operationId,

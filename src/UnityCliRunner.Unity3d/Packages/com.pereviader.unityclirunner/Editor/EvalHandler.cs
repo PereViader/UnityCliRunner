@@ -22,6 +22,18 @@ namespace UnityCliRunner
 
         public void Handle(string payload, StreamWriter writer)
         {
+            if (UnityCliCompilationTracker.ScriptCompilationFailed)
+            {
+                writer.WriteLine("FAILURE Compilation failed");
+                return;
+            }
+
+            if (UnityCliCompilationTracker.IsCompiling || UnityCliCompilationTracker.RefreshPending)
+            {
+                writer.WriteLine("BUSY compile");
+                return;
+            }
+
             string[] requestParts = (payload ?? "").Split(new[] { ' ' }, 2);
             if (requestParts.Length < 2 || string.IsNullOrWhiteSpace(requestParts[1]))
             {
@@ -30,7 +42,7 @@ namespace UnityCliRunner
             }
 
             string operationId = requestParts[0];
-            string rawCode = UnescapeCode(requestParts[1].Trim());
+            string rawCode = ProtocolCodec.UnescapeLine(requestParts[1].Trim());
             var begin = UnityCliOperationStore.TryBegin(operationId, OperationKinds.Eval, OperationStatus.Compiling, out var existing);
             if (begin == BeginOperationResult.Invalid)
             {
@@ -125,57 +137,6 @@ namespace UnityCliRunner
                 Debug.LogError($"UnityCliRunner: Unhandled exception during Eval: {ex}");
                 OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, false, ex.ToString(), 0, null, null);
             }
-        }
-
-        private static string UnescapeCode(string input)
-        {
-            if (string.IsNullOrEmpty(input)) return input;
-            var sb = new StringBuilder(input.Length);
-            bool isEscaped = false;
-            for (int i = 0; i < input.Length; i++)
-            {
-                char c = input[i];
-                if (isEscaped)
-                {
-                    switch (c)
-                    {
-                        case 'n': sb.Append('\n'); break;
-                        case 'r': sb.Append('\r'); break;
-                        case 't': sb.Append('\t'); break;
-                        case '\\': sb.Append('\\'); break;
-                        case '"': sb.Append('"'); break;
-                        default:
-                            sb.Append('\\');
-                            sb.Append(c);
-                            break;
-                    }
-                    isEscaped = false;
-                }
-                else if (c == '\\')
-                {
-                    if (i + 1 < input.Length)
-                    {
-                        char next = input[i + 1];
-                        if (next == 'n' || next == 'r' || next == 't' || next == '\\' || next == '"')
-                        {
-                            isEscaped = true;
-                        }
-                        else
-                        {
-                            sb.Append(c);
-                        }
-                    }
-                    else
-                    {
-                        sb.Append(c);
-                    }
-                }
-                else
-                {
-                    sb.Append(c);
-                }
-            }
-            return sb.ToString();
         }
 
         private static bool TryCompileSnippet(string rawCode, out byte[] assemblyBytes, out bool isVoidStatement, out List<string> errors)
@@ -284,20 +245,6 @@ namespace UnityCliRunner
             return sb.ToString();
         }
 
-        [Obsolete("Running state is now tracked exclusively in UnityCliOperationStore.")]
-        public static void WriteEvalRunningState(string operationId)
-        {
-        }
-
-        [Obsolete("Running state is now tracked exclusively in UnityCliOperationStore.")]
-        public static void ClearEvalRunningState()
-        {
-        }
-
-        public static void WriteEvalResult(string operationId, bool success, string message, double duration, string payload, List<ConsoleLogEntry> logs = null, bool interrupted = false)
-        {
-            OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityCliPaths.EvalResultFile, success, message, duration, payload, logs, interrupted);
-        }
 
         public static void MarkInterrupted(string message, string targetOperationId = null)
         {

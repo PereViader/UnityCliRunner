@@ -475,4 +475,47 @@ public class UnityProcessManagerTests
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public void UnityPathResolver_ResolvesExpectedPaths()
+    {
+        string projectRoot = Path.Combine(Path.GetTempPath(), "test_proj_paths");
+        var resolver = new UnityPathResolver(projectRoot);
+
+        Assert.Equal(Path.GetFullPath(projectRoot), resolver.ProjectRoot);
+        Assert.Equal(Path.Combine(resolver.ProjectRoot, "Temp"), resolver.TempDir);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_cli_operation.json"), resolver.OperationFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_compilation_errors.txt"), resolver.CompilationErrorsFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_cli_port.txt"), resolver.PortFile);
+        Assert.Equal(Path.Combine(resolver.ProjectRoot, "unity_background_log.txt"), resolver.LogFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_cli_process.pid"), resolver.PidFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_refresh_result.json"), resolver.RefreshResultFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_eval_result.json"), resolver.EvalResultFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_execute_result.json"), resolver.ExecuteResultFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_test_running.txt"), resolver.TestRunningFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_test_results.json"), resolver.TestResultsFile);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void UnityPathResolver_ThrowsOnNullOrEmpty(string? invalidRoot)
+    {
+        Assert.Throws<ArgumentException>(() => new UnityPathResolver(invalidRoot!));
+    }
+
+    [Fact]
+    public void UnityProcessManager_InjectsCustomPathResolver()
+    {
+        string projectRoot = Path.Combine(Path.GetTempPath(), "test_custom_pm_resolver");
+        var resolver = new UnityPathResolver(projectRoot);
+        var pm = new UnityProcessManager(resolver, NullLogger<UnityProcessManager>.Instance);
+
+        Assert.Same(resolver, pm.PathResolver);
+        Assert.Equal(resolver.ProjectRoot, pm.ProjectRoot);
+        Assert.Equal(resolver.OperationFile, pm.OperationFile);
+        Assert.Equal(resolver.TempDir, pm.TempDir);
+        Assert.Equal(resolver.PortFile, pm.PortFile);
+    }
 }

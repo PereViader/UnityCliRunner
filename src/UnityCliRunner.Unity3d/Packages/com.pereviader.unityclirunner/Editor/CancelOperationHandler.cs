@@ -32,46 +32,7 @@ namespace UnityCliRunner
                 return;
             }
 
-            switch (operation.kind)
-            {
-                case OperationKinds.Test:
-                    RunTestsHandler.CancelActiveTestRun(operation.operationId, writer);
-                    writer.Flush();
-                    return;
-
-                case OperationKinds.Execute:
-                    bool execCancelled = ExecuteMethodHandler.CancelActiveExecute(operation.operationId);
-                    if (execCancelled)
-                    {
-                        writer.WriteLine("CANCELLED");
-                    }
-                    else
-                    {
-                        writer.WriteLine("NOT_CANCELABLE");
-                    }
-                    writer.Flush();
-                    return;
-
-                case OperationKinds.Eval:
-                    bool evalCancelled = EvalHandler.CancelActiveEval(operation.operationId);
-                    if (evalCancelled)
-                    {
-                        writer.WriteLine("CANCELLED");
-                    }
-                    else
-                    {
-                        writer.WriteLine("NOT_CANCELABLE");
-                    }
-                    writer.Flush();
-                    return;
-
-                case OperationKinds.Refresh:
-                case OperationKinds.Recompile:
-                default:
-                    writer.WriteLine("NOT_CANCELABLE");
-                    writer.Flush();
-                    return;
-            }
+            OperationLifecycleRegistry.Cancel(operation, writer);
         }
     }
 }

@@ -30,7 +30,15 @@ public class ConsoleLogEntry
     public string LogType { get; set; } = "";
 }
 
-public class UnityRefreshResult
+public interface IOperationResult
+{
+    string OperationId { get; set; }
+    bool Success { get; set; }
+    bool Interrupted { get; set; }
+    string Message { get; set; }
+}
+
+public class UnityRefreshResult : IOperationResult
 {
     [JsonPropertyName("operationId")]
     public string OperationId { get; set; } = "";
@@ -45,13 +53,19 @@ public class UnityRefreshResult
     public string Message { get; set; } = "";
 }
 
-public class UnityTestRunResult
+public class UnityTestRunResult : IOperationResult
 {
     [JsonPropertyName("runId")]
     public string RunId { get; set; } = "";
 
+    [JsonIgnore]
+    public string OperationId { get => RunId; set => RunId = value; }
+
     [JsonPropertyName("success")]
     public bool Success { get; set; }
+
+    [JsonIgnore]
+    public bool Interrupted { get => ResultState == "Interrupted"; set { if (value) ResultState = "Interrupted"; } }
 
     [JsonPropertyName("failCount")]
     public int FailCount { get; set; }
@@ -115,7 +129,7 @@ public class UnityTestRunState
 }
 
 
-public class UnityOperationResult
+public class UnityOperationResult : IOperationResult
 {
     [JsonPropertyName("operationId")]
     public string OperationId { get; set; } = "";

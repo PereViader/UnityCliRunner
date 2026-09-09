@@ -56,6 +56,7 @@ namespace UnityCliRunner
             UnityCliCompilationTracker.EnsureInitialized();
             UnityCliDispatcher.EnsureInitialized();
             RoslynCompilerHelper.EnsureInitialized();
+            OperationLifecycleRegistry.EnsureInitialized();
 
             RecoverOperationsOnDomainLoad();
 
@@ -80,39 +81,8 @@ namespace UnityCliRunner
                 return;
             }
 
-            if (operation.editorSessionId != UnityCliOperationStore.EditorSessionId)
-            {
-                const string message = "Unity editor restarted before the operation completed.";
-                switch (operation.kind)
-                {
-                    case OperationKinds.Test:
-                        RunTestsHandler.WriteInterruptedResult(message);
-                        break;
-                    case OperationKinds.Execute:
-                        ExecuteMethodHandler.MarkInterrupted(message);
-                        break;
-                    case OperationKinds.Eval:
-                        EvalHandler.MarkInterrupted(message);
-                        break;
-                    case OperationKinds.Refresh:
-                    case OperationKinds.Recompile:
-                        UnityCliCompilationTracker.WriteInterruptedRefreshResult(operation.operationId, message);
-                        break;
-                    default:
-                        UnityCliOperationStore.Complete(operation.operationId);
-                        break;
-                }
-                return;
-            }
-
-            if (operation.kind == OperationKinds.Execute)
-            {
-                ExecuteMethodHandler.MarkInterrupted("Operation was interrupted by Unity domain reload.");
-            }
-            else if (operation.kind == OperationKinds.Eval)
-            {
-                EvalHandler.MarkInterrupted("Operation was interrupted by Unity domain reload.");
-            }
+            bool isRestart = operation.editorSessionId != UnityCliOperationStore.EditorSessionId;
+            OperationLifecycleRegistry.RecoverOnDomainLoad(operation, isRestart);
         }
 
         private static void StartServer()
@@ -148,13 +118,7 @@ namespace UnityCliRunner
         private static void OnEditorQuitting()
         {
             var operation = UnityCliOperationStore.Read();
-            if (operation != null)
-            {
-                UnityCliOperationStore.Update(operation.operationId, OperationStatus.ShuttingDown);
-            }
-            RunTestsHandler.MarkTransportInterruption(OperationStatus.ShuttingDown);
-            ExecuteMethodHandler.MarkInterrupted("Command interrupted by Unity editor shutdown.");
-            EvalHandler.MarkInterrupted("Command interrupted by Unity editor shutdown.");
+            OperationLifecycleRegistry.NotifyQuitting(operation);
             StopServer();
         }
 

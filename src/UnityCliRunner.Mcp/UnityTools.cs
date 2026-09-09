@@ -19,24 +19,24 @@ public class UnityTools
 {
     private readonly IUnityClient _client;
     private readonly IUnityProcessManager _processManager;
+    private readonly IUnityPathResolver _pathResolver;
+    private readonly IDiagnosticFormatter _diagnosticFormatter;
 
     private static readonly JsonSerializerOptions s_JsonOptions = new()
     {
         WriteIndented = true
     };
 
-    private static readonly Regex s_StackTraceRegex = new(
-        @"(?:(?:in|\bat\b|\()\s*)?(?<file>(?:[a-zA-Z]:[\\/]|/|[A-Za-z0-9_.\-]+[\\/])[^:\r\n()]+):(?:line\s+)?(?<line>\d+)\)?",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    private static readonly Regex s_CompilerDiagnosticRegex = new(
-        @"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s*(?<severity>error|warning)\s+(?<code>[A-Z0-9]+):\s*(?<msg>.+)$",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    public UnityTools(IUnityClient client, IUnityProcessManager processManager)
+    public UnityTools(
+        IUnityClient client,
+        IUnityProcessManager processManager,
+        IUnityPathResolver? pathResolver = null,
+        IDiagnosticFormatter? diagnosticFormatter = null)
     {
         _client = client;
         _processManager = processManager;
+        _pathResolver = pathResolver ?? processManager.PathResolver;
+        _diagnosticFormatter = diagnosticFormatter ?? DiagnosticFormatter.Default;
     }
 
     [McpServerTool(Name = "unity_status", ReadOnly = true)]
@@ -172,7 +172,7 @@ public class UnityTools
             }
         }
 
-        var diagnostics = ParseCompilerDiagnostics(result.Message);
+        var diagnostics = _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
         var structured = new StructuredRefreshResult
         {
             Success = result.Success,
@@ -236,7 +236,7 @@ public class UnityTools
             }
         }
 
-        var diagnostics = ParseCompilerDiagnostics(result.Message);
+        var diagnostics = _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
         var structured = new StructuredRefreshResult
         {
             Success = result.Success,
@@ -509,7 +509,7 @@ public class UnityTools
         for (int i = 0; i < result.FailedTests.Count; i++)
         {
             var fail = result.FailedTests[i];
-            var (filePath, lineNumber, fileUri) = ExtractSourceLocation(fail.StackTrace, _processManager.ProjectRoot);
+            var (filePath, lineNumber, fileUri) = _diagnosticFormatter.ExtractSourceLocation(fail.StackTrace, _processManager.ProjectRoot);
             structuredFailures.Add(new StructuredTestFailure
             {
                 Name = fail.Name,
@@ -586,79 +586,18 @@ public class UnityTools
     }
 
     internal static (string? filePath, int? lineNumber, string? fileUri) ExtractSourceLocation(string? stackTrace, string? projectRoot)
-    {
-        if (string.IsNullOrWhiteSpace(stackTrace))
-            return (null, null, null);
-
-        using var reader = new StringReader(stackTrace);
-        string? line;
-        while ((line = reader.ReadLine()) != null)
-        {
-            line = line.Trim();
-            if (line.Contains("<filename unknown>", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var match = s_StackTraceRegex.Match(line);
-            if (match.Success)
-            {
-                string rawFile = match.Groups["file"].Value.Trim();
-                if (int.TryParse(match.Groups["line"].Value, out int lineNum))
-                {
-                    string resolvedPath = rawFile;
-                    if (!Path.IsPathRooted(resolvedPath) && !string.IsNullOrEmpty(projectRoot))
-                    {
-                        resolvedPath = Path.Combine(projectRoot, resolvedPath);
-                    }
-
-                    string normalizedPath = resolvedPath.Replace('\\', '/');
-                    string fileUri = normalizedPath.StartsWith('/')
-                        ? $"file://{normalizedPath}#L{lineNum}"
-                        : $"file:///{normalizedPath}#L{lineNum}";
-
-                    return (rawFile, lineNum, fileUri);
-                }
-            }
-        }
-
-        return (null, null, null);
-    }
+        => DiagnosticFormatter.Default.ExtractSourceLocation(stackTrace, projectRoot);
 
     internal static List<StructuredCompilerDiagnostic> ParseCompilerDiagnostics(string? diagnosticText)
-    {
-        var diagnostics = new List<StructuredCompilerDiagnostic>();
-        if (string.IsNullOrWhiteSpace(diagnosticText))
-            return diagnostics;
-
-        using var reader = new StringReader(diagnosticText);
-        string? line;
-        while ((line = reader.ReadLine()) != null)
-        {
-            var match = s_CompilerDiagnosticRegex.Match(line.Trim());
-            if (match.Success)
-            {
-                diagnostics.Add(new StructuredCompilerDiagnostic
-                {
-                    File = match.Groups["file"].Value,
-                    Line = int.Parse(match.Groups["line"].Value),
-                    Column = int.Parse(match.Groups["col"].Value),
-                    Severity = match.Groups["severity"].Value.ToLowerInvariant(),
-                    Code = match.Groups["code"].Value,
-                    Message = match.Groups["msg"].Value.Trim(),
-                    Assembly = null
-                });
-            }
-        }
-
-        return diagnostics;
-    }
+        => DiagnosticFormatter.Default.ParseCompilerDiagnostics(diagnosticText);
 
     private string? ExtractActiveOperation(string status)
     {
-        if (File.Exists(_processManager.OperationFile))
+        if (File.Exists(_pathResolver.OperationFile))
         {
             try
             {
-                string json = UnityProcessManager.ReadFileWithRetry(_processManager.OperationFile, maxRetries: 2, delayMs: 20);
+                string json = UnityProcessManager.ReadFileWithRetry(_pathResolver.OperationFile, maxRetries: 2, delayMs: 20);
                 if (!string.IsNullOrWhiteSpace(json))
                 {
                     var op = JsonSerializer.Deserialize<UnityCliOperationState>(json);

@@ -44,7 +44,6 @@ namespace UnityCliRunner
             try
             {
                 Debug.Log("UnityCliRunner: Triggering force recompilation via CompilationPipeline.RequestScriptCompilation()");
-                UnityCliCompilationTracker.DeleteDiagnosticsFile();
                 UnityCliCompilationTracker.ClearActiveEntries();
                 UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(UnityEditor.Compilation.RequestScriptCompilationOptions.CleanBuildCache);
             }

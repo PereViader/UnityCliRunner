@@ -8,8 +8,7 @@ namespace UnityCliRunner
     {
         public static string EscapeLine(string text)
         {
-            if (string.IsNullOrEmpty(text)) return text;
-            return text.Replace("\r", "\\r").Replace("\n", "\\n");
+            return ProtocolCodec.EscapeLine(text);
         }
 
         public static void WriteOperationResultResponse(UnityOperationResult res, StreamWriter writer)
@@ -75,28 +74,29 @@ namespace UnityCliRunner
             }
 
             // 2. Active running state for this operation
-            if (!string.IsNullOrEmpty(runningFilePath) && File.Exists(runningFilePath))
+            if (isRunningMatch != null)
+            {
+                if (isRunningMatch(runningFilePath, operationId))
+                {
+                    writer.WriteLine("RUNNING");
+                    return;
+                }
+            }
+            else if (!string.IsNullOrEmpty(runningFilePath) && File.Exists(runningFilePath))
             {
                 bool matches = false;
-                if (isRunningMatch != null)
+                try
                 {
-                    matches = isRunningMatch(runningFilePath, operationId);
+                    string runningOperationId = CommandHelper.ReadFileWithRetry(runningFilePath, maxRetries: 3, delayMs: 10).Trim();
+                    matches = string.IsNullOrEmpty(operationId) || runningOperationId == operationId;
                 }
-                else
+                catch (IOException)
                 {
-                    try
-                    {
-                        string runningOperationId = CommandHelper.ReadFileWithRetry(runningFilePath, maxRetries: 3, delayMs: 10).Trim();
-                        matches = string.IsNullOrEmpty(operationId) || runningOperationId == operationId;
-                    }
-                    catch (IOException)
-                    {
-                        matches = false;
-                    }
-                    catch (Exception)
-                    {
-                        matches = false;
-                    }
+                    matches = false;
+                }
+                catch (Exception)
+                {
+                    matches = false;
                 }
 
                 if (matches)

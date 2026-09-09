@@ -36,7 +36,7 @@ namespace UnityCliRunner
         internal static void MarkTransportInterruption(string status)
         {
             var state = ReadRunningState();
-            if (state == null)
+            if (state == null || string.IsNullOrEmpty(state.runId) || !UnityCliOperationStore.IsOwnedBy(state.runId, OperationKinds.Test))
             {
                 return;
             }
@@ -256,6 +256,11 @@ namespace UnityCliRunner
 
         private static string WriteTestRunningState(string runId, TestMode mode, string filter, string category)
         {
+            if (string.IsNullOrEmpty(runId) || !UnityCliOperationStore.IsOwnedBy(runId, OperationKinds.Test))
+            {
+                return null;
+            }
+
             try
             {
                 if (!Directory.Exists(TempDirectory))
@@ -269,7 +274,7 @@ namespace UnityCliRunner
                     mode = mode.ToString(),
                     filter = filter ?? "",
                     category = category ?? "",
-                    status = "Queued",
+                    status = OperationStatus.Queued,
                     startedUtc = DateTime.UtcNow.ToString("o"),
                     totalTests = 0,
                     completedTests = 0,
@@ -313,7 +318,8 @@ namespace UnityCliRunner
                     categoryNames = !string.IsNullOrEmpty(categoryText) ? new[] { categoryText } : null
                 };
 
-                UpdateTestRunStatus(runId, "Executing");
+                UpdateTestRunStatus(runId, OperationStatus.Running);
+                UnityCliOperationStore.Update(runId, OperationStatus.Executing);
                 s_Callbacks.BindRun(runId);
 
                 var settings = new ExecutionSettings(filter);
@@ -372,6 +378,11 @@ namespace UnityCliRunner
 
         internal static void UpdateTestRunStatus(string runId, string status)
         {
+            if (string.IsNullOrEmpty(runId) || !UnityCliOperationStore.IsOwnedBy(runId, OperationKinds.Test))
+            {
+                return;
+            }
+
             var state = ReadRunningState();
             if (state == null || state.runId != runId)
             {
@@ -395,6 +406,11 @@ namespace UnityCliRunner
 
         internal static void UpdateTestRunProgress(string runId, int totalTests, int completedTests, int passCount, int failCount, int skipCount, string currentTestName, string status = null)
         {
+            if (string.IsNullOrEmpty(runId) || !UnityCliOperationStore.IsOwnedBy(runId, OperationKinds.Test))
+            {
+                return;
+            }
+
             var state = ReadRunningState();
             if (state == null || state.runId != runId)
             {
@@ -433,13 +449,18 @@ namespace UnityCliRunner
         internal static void WriteInterruptedResult(string message, string targetRunId = null)
         {
             var state = ReadRunningState();
-            string runId = targetRunId ?? state?.runId ?? Guid.NewGuid().ToString("N");
+            string runId = targetRunId ?? state?.runId;
+            if (string.IsNullOrEmpty(runId) || !UnityCliOperationStore.IsOwnedBy(runId, OperationKinds.Test))
+            {
+                return;
+            }
+
             var result = new UnityTestRunResult
             {
                 runId = runId,
                 success = false,
                 message = message,
-                resultState = "Interrupted",
+                resultState = OperationStatus.Interrupted,
                 failedTests = new List<FailedTestInfo>()
             };
 
@@ -527,10 +548,10 @@ namespace UnityCliRunner
         internal static void WriteCancelledResult(string targetRunId = null)
         {
             var state = ReadRunningState();
-            string runId = targetRunId;
-            if (string.IsNullOrEmpty(runId))
+            string runId = targetRunId ?? state?.runId;
+            if (string.IsNullOrEmpty(runId) || !UnityCliOperationStore.IsOwnedBy(runId, OperationKinds.Test))
             {
-                runId = state?.runId ?? Guid.NewGuid().ToString("N");
+                return;
             }
 
             var result = new UnityTestRunResult
@@ -538,7 +559,7 @@ namespace UnityCliRunner
                 runId = runId,
                 success = false,
                 message = "Test run was cancelled or interrupted.",
-                resultState = "Cancelled",
+                resultState = OperationStatus.Cancelled,
                 failedTests = new List<FailedTestInfo>()
             };
 
@@ -565,18 +586,45 @@ namespace UnityCliRunner
 
         internal static bool DeleteRunningStateIfOwned(string runId)
         {
+            if (string.IsNullOrEmpty(runId))
+            {
+                return false;
+            }
+
             try
             {
                 var state = ReadRunningState();
-                if (state != null && (string.IsNullOrEmpty(runId) || state.runId == runId))
+                if (state != null && state.runId == runId)
                 {
                     lock (s_RunStateLock)
                     {
-                        s_CachedRunState = null;
+                        if (s_CachedRunState != null && s_CachedRunState.runId == runId)
+                        {
+                            s_CachedRunState = null;
+                        }
                     }
+
                     if (File.Exists(RunningFilePath))
                     {
-                        File.Delete(RunningFilePath);
+                        for (int i = 0; i < 5; i++)
+                        {
+                            try
+                            {
+                                if (File.Exists(RunningFilePath))
+                                {
+                                    File.Delete(RunningFilePath);
+                                }
+                                break;
+                            }
+                            catch (IOException) when (i < 4)
+                            {
+                                System.Threading.Thread.Sleep(10);
+                            }
+                            catch (UnauthorizedAccessException) when (i < 4)
+                            {
+                                System.Threading.Thread.Sleep(10);
+                            }
+                        }
                     }
                     return true;
                 }

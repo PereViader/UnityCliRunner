@@ -217,6 +217,7 @@ namespace UnityCliRunner
             try
             {
                 File.WriteAllText(tempPath, content, new UTF8Encoding(false));
+                Exception lastException = null;
                 for (int i = 0; i < 5; i++)
                 {
                     try
@@ -231,15 +232,25 @@ namespace UnityCliRunner
                         }
                         return;
                     }
-                    catch (IOException) when (i < 4)
+                    catch (IOException ex)
                     {
-                        System.Threading.Thread.Sleep(10);
+                        lastException = ex;
+                        if (i < 4)
+                        {
+                            System.Threading.Thread.Sleep(10);
+                        }
                     }
-                    catch (UnauthorizedAccessException) when (i < 4)
+                    catch (UnauthorizedAccessException ex)
                     {
-                        System.Threading.Thread.Sleep(10);
+                        lastException = ex;
+                        if (i < 4)
+                        {
+                            System.Threading.Thread.Sleep(10);
+                        }
                     }
                 }
+
+                throw new IOException($"Failed to atomically write '{path}' after 5 attempts.", lastException);
             }
             finally
             {

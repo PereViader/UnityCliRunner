@@ -56,13 +56,10 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-builder.Services.AddSingleton<IUnityProcessManager>(sp =>
-{
-    var logger = sp.GetRequiredService<ILogger<UnityProcessManager>>();
-    return new UnityProcessManager(resolvedProjectRoot, logger);
-});
-
+builder.Services.AddSingleton<IUnityPathResolver>(new UnityPathResolver(resolvedProjectRoot));
+builder.Services.AddSingleton<IUnityProcessManager, UnityProcessManager>();
 builder.Services.AddSingleton<IUnityClient, UnityClient>();
+builder.Services.AddSingleton<IDiagnosticFormatter, DiagnosticFormatter>();
 builder.Services.AddSingleton<UnityTools>();
 
 builder.Services

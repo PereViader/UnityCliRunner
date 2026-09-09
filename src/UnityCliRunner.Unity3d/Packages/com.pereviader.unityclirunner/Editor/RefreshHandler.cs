@@ -39,7 +39,6 @@ namespace UnityCliRunner
             }
 
             UnityCliCompilationTracker.ResetRefreshResultCache();
-            UnityCliCompilationTracker.DeleteDiagnosticsFile();
             UnityCliCompilationTracker.ClearCapturedDiagnostics();
 
             UnityCliCompilationTracker.RefreshPending = true;
