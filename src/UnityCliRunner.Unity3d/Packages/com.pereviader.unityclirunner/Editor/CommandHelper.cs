@@ -463,5 +463,34 @@ namespace UnityCliRunner
             return string.Equals(value, "AssetImport", StringComparison.OrdinalIgnoreCase)
                 || value.StartsWith("AssetImportWorker", StringComparison.OrdinalIgnoreCase);
         }
+
+        public static string ReadFileWithRetry(string path, int maxRetries = 5, int delayMs = 10)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var reader = new StreamReader(fs, Encoding.UTF8))
+                    {
+                        return reader.ReadToEnd();
+                    }
+                }
+                catch (IOException) when (i < maxRetries - 1)
+                {
+                    Thread.Sleep(delayMs);
+                }
+                catch (UnauthorizedAccessException) when (i < maxRetries - 1)
+                {
+                    Thread.Sleep(delayMs);
+                }
+            }
+
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(fs, Encoding.UTF8))
+            {
+                return reader.ReadToEnd();
+            }
+        }
     }
 }

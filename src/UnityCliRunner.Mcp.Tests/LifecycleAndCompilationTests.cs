@@ -398,9 +398,10 @@ public class LifecycleAndCompilationTests
     {
         await using var _ = await _fixture.UseFixtureAsync("TestExecuteCancellable");
         var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
-        DeleteFileWithRetry(pm.OperationFile);
-
         var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
+        await client.RefreshAsync();
+
+        DeleteFileWithRetry(pm.OperationFile);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
 

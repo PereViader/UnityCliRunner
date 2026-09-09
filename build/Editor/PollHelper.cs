@@ -49,15 +49,18 @@ namespace UnityCliRunner
             {
                 try
                 {
-                    string content = File.ReadAllText(resultFilePath);
-                    var res = JsonUtility.FromJson<TResult>(content);
-                    if (res != null)
+                    string content = CommandHelper.ReadFileWithRetry(resultFilePath, maxRetries: 3, delayMs: 10);
+                    if (!string.IsNullOrEmpty(content))
                     {
-                        string resultOpId = getResultOperationId != null ? getResultOperationId(res) : null;
-                        if (string.IsNullOrEmpty(operationId) || resultOpId == operationId)
+                        var res = JsonUtility.FromJson<TResult>(content);
+                        if (res != null)
                         {
-                            writeResultResponse(res, writer);
-                            return;
+                            string resultOpId = getResultOperationId != null ? getResultOperationId(res) : null;
+                            if (string.IsNullOrEmpty(operationId) || resultOpId == operationId)
+                            {
+                                writeResultResponse(res, writer);
+                                return;
+                            }
                         }
                     }
                 }
@@ -65,10 +68,9 @@ namespace UnityCliRunner
                 {
                     // File is temporarily being written or replaced; fall through to running check
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    writer.WriteLine($"ERROR: {EscapeLine(ex.Message)}");
-                    return;
+                    // Transient read or deserialization error during reload/transition; fall through to running check
                 }
             }
 
@@ -84,10 +86,14 @@ namespace UnityCliRunner
                 {
                     try
                     {
-                        string runningOperationId = File.ReadAllText(runningFilePath).Trim();
+                        string runningOperationId = CommandHelper.ReadFileWithRetry(runningFilePath, maxRetries: 3, delayMs: 10).Trim();
                         matches = string.IsNullOrEmpty(operationId) || runningOperationId == operationId;
                     }
                     catch (IOException)
+                    {
+                        matches = false;
+                    }
+                    catch (Exception)
                     {
                         matches = false;
                     }

@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 
 namespace UnityCliRunner.Mcp;
 
-public class UnityProcessManager
+public class UnityProcessManager : IUnityProcessManager
 {
     private readonly ILogger<UnityProcessManager> _logger;
     private int? _launchedPid;
@@ -511,6 +511,17 @@ public class UnityProcessManager
 
         _logger.LogInformation("Unity process started with PID {Pid}. Waiting for socket server...", proc.Id);
         await WaitForSocketReadinessAsync(proc, cancellationToken, initialLogOffset);
+    }
+
+    public virtual async Task<bool> StartUnityAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureUnityRunningAsync(cancellationToken);
+        return IsUnityRunning(out _);
+    }
+
+    public virtual async Task<bool> WaitForHealthyAsync(CancellationToken cancellationToken = default)
+    {
+        return await IsSocketReadyAsync(2, cancellationToken);
     }
 
     internal async Task WaitForSocketReadinessAsync(Process? startedProcess, CancellationToken cancellationToken, long initialLogOffset = 0)

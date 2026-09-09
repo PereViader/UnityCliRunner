@@ -261,4 +261,15 @@ public class EvalTests
         Assert.False(result.IsError, result.Text);
         Assert.Contains("ScriptableObject (ScriptableObject) [name:", result.Text);
     }
+
+    [Fact]
+    public async Task TestEvalIndentedReturn_ReturnsValue()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "bool condition = true;\nif (condition)\n{\n    return \"indented-result\";\n}\nelse\n{\n    return \"fallback\";\n}";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("indented-result", result.Text);
+    }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using UnityEngine;
 
@@ -10,6 +11,8 @@ namespace UnityCliRunner
 {
     internal class EvalHandler : ICommandHandler
     {
+        private static readonly Regex ExplicitReturnRegex = new Regex(@"(?m)(?:^\s*|[;{}:)]|\belse\s+)\s*return\b", RegexOptions.Compiled);
+
         public static bool CancelActiveEval(string operationId)
         {
             return OperationExecutionEngine.TryCancel(operationId);
@@ -181,10 +184,7 @@ namespace UnityCliRunner
             isVoidStatement = false;
             errors = new List<string>();
 
-            bool hasExplicitReturn = rawCode.StartsWith("return ", StringComparison.Ordinal) ||
-                                     rawCode.Contains("\nreturn ") ||
-                                     rawCode.Contains(";return ") ||
-                                     rawCode.Contains("; return ");
+            bool hasExplicitReturn = !string.IsNullOrEmpty(rawCode) && ExplicitReturnRegex.IsMatch(rawCode);
 
             if (hasExplicitReturn)
             {

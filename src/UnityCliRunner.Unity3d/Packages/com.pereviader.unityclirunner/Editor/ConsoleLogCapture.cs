@@ -9,7 +9,7 @@ namespace UnityCliRunner
         private const int MaxEntries = 2000;
         private readonly object m_Lock = new object();
         private readonly List<ConsoleLogEntry> m_Logs = new List<ConsoleLogEntry>();
-        private bool m_Disposed = false;
+        private volatile bool m_Disposed = false;
         private bool m_LimitReached = false;
 
         public ConsoleLogCapture()

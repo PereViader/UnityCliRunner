@@ -11,9 +11,9 @@ using ModelContextProtocol;
 
 namespace UnityCliRunner.Mcp;
 
-public class UnityClient
+public class UnityClient : IUnityClient
 {
-    private readonly UnityProcessManager _processManager;
+    private readonly IUnityProcessManager _processManager;
     private readonly ILogger<UnityClient> _logger;
 
     private static readonly JsonSerializerOptions s_JsonOptions = new()
@@ -23,7 +23,7 @@ public class UnityClient
         AllowTrailingCommas = true
     };
 
-    public UnityClient(UnityProcessManager processManager, ILogger<UnityClient> logger)
+    public UnityClient(IUnityProcessManager processManager, ILogger<UnityClient> logger)
     {
         _processManager = processManager;
         _logger = logger;

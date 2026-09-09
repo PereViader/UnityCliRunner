@@ -17,8 +17,8 @@ namespace UnityCliRunner.Mcp;
 [McpServerToolType]
 public class UnityTools
 {
-    private readonly UnityClient _client;
-    private readonly UnityProcessManager _processManager;
+    private readonly IUnityClient _client;
+    private readonly IUnityProcessManager _processManager;
 
     private static readonly JsonSerializerOptions s_JsonOptions = new()
     {
@@ -33,7 +33,7 @@ public class UnityTools
         @"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s*(?<severity>error|warning)\s+(?<code>[A-Z0-9]+):\s*(?<msg>.+)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public UnityTools(UnityClient client, UnityProcessManager processManager)
+    public UnityTools(IUnityClient client, IUnityProcessManager processManager)
     {
         _client = client;
         _processManager = processManager;
@@ -394,15 +394,8 @@ public class UnityTools
             {
                 sb.Append("Method execution succeeded.");
             }
-
-            return new CallToolResult
-            {
-                Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-                IsError = false
-            };
         }
-
-        if (result.Interrupted)
+        else if (result.Interrupted)
         {
             sb.Append($"Method execution interrupted: {result.Message}");
         }
@@ -415,10 +408,24 @@ public class UnityTools
             sb.Append("Method execution failed.");
         }
 
+        var structured = new StructuredExecuteResult
+        {
+            Success = result.Success,
+            Interrupted = result.Interrupted,
+            Message = result.Message ?? "",
+            Duration = result.Duration,
+            Payload = result.Payload,
+            Logs = result.Logs ?? new()
+        };
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            IsError = true
+            Content =
+            [
+                new TextContentBlock { Text = sb.ToString().TrimEnd() },
+                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
+            ],
+            IsError = !result.Success
         };
     }
 

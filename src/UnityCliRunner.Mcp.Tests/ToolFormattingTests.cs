@@ -45,6 +45,17 @@ public class ToolFormattingTests
             }
             return Task.FromResult(StopSuccess);
         }
+
+        public override Task<bool> StartUnityAsync(CancellationToken cancellationToken = default)
+        {
+            Running = true;
+            return Task.FromResult(true);
+        }
+
+        public override Task<bool> WaitForHealthyAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(true);
+        }
     }
 
     private sealed class FakeUnityClient : UnityClient
@@ -460,6 +471,200 @@ public class ToolFormattingTests
 
             Assert.False(result.IsError);
             Assert.Equal("Method execution succeeded.", GetResultText(result));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityExecuteMethod_SuccessWithPayload_StructuredJsonInContentBlock1()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.ExecuteResultToReturn = new UnityExecuteResult
+            {
+                Success = true,
+                Payload = "{\"id\":42,\"status\":\"ok\"}",
+                Duration = 0.12,
+                Logs = []
+            };
+
+            var result = await tools.UnityExecuteMethodAsync("MyNamespace.MyClass.GetJson");
+
+            Assert.False(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+            Assert.Equal("{\"id\":42,\"status\":\"ok\"}", GetResultText(result));
+
+            var jsonBlock = Assert.IsType<TextContentBlock>(result.Content[1]);
+            var structured = JsonSerializer.Deserialize<StructuredExecuteResult>(jsonBlock.Text);
+
+            Assert.NotNull(structured);
+            Assert.True(structured.Success);
+            Assert.False(structured.Interrupted);
+            Assert.Equal("{\"id\":42,\"status\":\"ok\"}", structured.Payload);
+            Assert.Equal(0.12, structured.Duration);
+            Assert.Empty(structured.Logs);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityExecuteMethod_SuccessWithoutPayload_StructuredJsonInContentBlock1()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.ExecuteResultToReturn = new UnityExecuteResult
+            {
+                Success = true,
+                Payload = null,
+                Duration = 0.05,
+                Logs = []
+            };
+
+            var result = await tools.UnityExecuteMethodAsync("MyNamespace.MyClass.VoidMethod");
+
+            Assert.False(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+            Assert.Equal("Method execution succeeded.", GetResultText(result));
+
+            var jsonBlock = Assert.IsType<TextContentBlock>(result.Content[1]);
+            var structured = JsonSerializer.Deserialize<StructuredExecuteResult>(jsonBlock.Text);
+
+            Assert.NotNull(structured);
+            Assert.True(structured.Success);
+            Assert.False(structured.Interrupted);
+            Assert.Null(structured.Payload);
+            Assert.Equal(0.05, structured.Duration);
+            Assert.Empty(structured.Logs);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityExecuteMethod_Failure_SetsIsErrorAndStructuredSuccessFalse()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.ExecuteResultToReturn = new UnityExecuteResult
+            {
+                Success = false,
+                Message = "Method 'NonExistent' not found.",
+                Duration = 0.02,
+                Logs = []
+            };
+
+            var result = await tools.UnityExecuteMethodAsync("MyNamespace.MyClass.NonExistent");
+
+            Assert.True(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+            string text = GetResultText(result);
+            Assert.Contains("Method 'NonExistent' not found.", text);
+            Assert.Contains("Method execution failed.", text);
+
+            var jsonBlock = Assert.IsType<TextContentBlock>(result.Content[1]);
+            var structured = JsonSerializer.Deserialize<StructuredExecuteResult>(jsonBlock.Text);
+
+            Assert.NotNull(structured);
+            Assert.False(structured.Success);
+            Assert.False(structured.Interrupted);
+            Assert.Equal("Method 'NonExistent' not found.", structured.Message);
+            Assert.Equal(0.02, structured.Duration);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityExecuteMethod_Interrupted_SetsIsErrorAndStructuredInterruptedTrue()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.ExecuteResultToReturn = new UnityExecuteResult
+            {
+                Success = false,
+                Interrupted = true,
+                Message = "Compilation started during execution.",
+                Duration = 0.03,
+                Logs = []
+            };
+
+            var result = await tools.UnityExecuteMethodAsync("MyNamespace.MyClass.LongTask");
+
+            Assert.True(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+            string text = GetResultText(result);
+            Assert.Contains("Method execution interrupted: Compilation started during execution.", text);
+
+            var jsonBlock = Assert.IsType<TextContentBlock>(result.Content[1]);
+            var structured = JsonSerializer.Deserialize<StructuredExecuteResult>(jsonBlock.Text);
+
+            Assert.NotNull(structured);
+            Assert.False(structured.Success);
+            Assert.True(structured.Interrupted);
+            Assert.Equal("Compilation started during execution.", structured.Message);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityExecuteMethod_WithLogs_FormatsLogsInBothBlocks()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.ExecuteResultToReturn = new UnityExecuteResult
+            {
+                Success = true,
+                Payload = "done",
+                Duration = 0.1,
+                Logs =
+                [
+                    new ConsoleLogEntry { LogType = "Log", Message = "Info log message" },
+                    new ConsoleLogEntry { LogType = "Warning", Message = "Warning log message" },
+                    new ConsoleLogEntry { LogType = "Error", Message = "Error log message" }
+                ]
+            };
+
+            var result = await tools.UnityExecuteMethodAsync("MyNamespace.MyClass.DoWork");
+
+            Assert.False(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+
+            string text = GetResultText(result);
+            Assert.Contains("Info log message", text);
+            Assert.Contains("[Warning] Warning log message", text);
+            Assert.Contains("[Error] Error log message", text);
+            Assert.Contains("done", text);
+
+            var jsonBlock = Assert.IsType<TextContentBlock>(result.Content[1]);
+            var structured = JsonSerializer.Deserialize<StructuredExecuteResult>(jsonBlock.Text);
+
+            Assert.NotNull(structured);
+            Assert.True(structured.Success);
+            Assert.Equal(3, structured.Logs.Count);
+            Assert.Equal("Log", structured.Logs[0].LogType);
+            Assert.Equal("Info log message", structured.Logs[0].Message);
+            Assert.Equal("Warning", structured.Logs[1].LogType);
+            Assert.Equal("Warning log message", structured.Logs[1].Message);
+            Assert.Equal("Error", structured.Logs[2].LogType);
+            Assert.Equal("Error log message", structured.Logs[2].Message);
         }
         finally
         {

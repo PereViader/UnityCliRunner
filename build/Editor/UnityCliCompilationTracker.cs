@@ -336,7 +336,7 @@ namespace UnityCliRunner
             {
                 string path = UnityCliPaths.RefreshResultFile;
                 s_LastRefreshResult = File.Exists(path)
-                    ? JsonUtility.FromJson<UnityRefreshResult>(File.ReadAllText(path))
+                    ? JsonUtility.FromJson<UnityRefreshResult>(CommandHelper.ReadFileWithRetry(path, maxRetries: 3, delayMs: 10))
                     : null;
             }
             catch (Exception ex)
