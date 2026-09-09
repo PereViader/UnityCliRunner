@@ -165,21 +165,21 @@ public class LifecycleAndCompilationTests
             var pm = new UnityProcessManager(tempProject, NullLogger<UnityProcessManager>.Instance);
 
             await File.WriteAllTextAsync(pm.OperationFile, "{\"operationId\":\"test\"}");
-            await File.WriteAllTextAsync(pm.ExecuteRunningFile, "{\"operationId\":\"test\"}");
-            await File.WriteAllTextAsync(pm.EvalRunningFile, "{\"operationId\":\"test\"}");
             await File.WriteAllTextAsync(pm.TestRunningFile, "{\"operationId\":\"test\"}");
+            await File.WriteAllTextAsync(pm.PidFile, "12345");
+            await File.WriteAllTextAsync(pm.PortFile, "50000");
 
             Assert.True(File.Exists(pm.OperationFile));
-            Assert.True(File.Exists(pm.ExecuteRunningFile));
-            Assert.True(File.Exists(pm.EvalRunningFile));
             Assert.True(File.Exists(pm.TestRunningFile));
+            Assert.True(File.Exists(pm.PidFile));
+            Assert.True(File.Exists(pm.PortFile));
 
             pm.PurgeOperationState();
 
             Assert.False(File.Exists(pm.OperationFile), "OperationFile was not purged");
-            Assert.False(File.Exists(pm.ExecuteRunningFile), "ExecuteRunningFile was not purged");
-            Assert.False(File.Exists(pm.EvalRunningFile), "EvalRunningFile was not purged");
             Assert.False(File.Exists(pm.TestRunningFile), "TestRunningFile was not purged");
+            Assert.False(File.Exists(pm.PidFile), "PidFile was not purged");
+            Assert.False(File.Exists(pm.PortFile), "PortFile was not purged");
         }
         finally
         {

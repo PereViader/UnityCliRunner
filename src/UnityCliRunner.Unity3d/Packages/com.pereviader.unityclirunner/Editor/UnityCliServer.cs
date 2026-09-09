@@ -142,8 +142,6 @@ namespace UnityCliRunner
             }
             UnityCliCompilationTracker.WriteActiveErrorsToFile();
             RunTestsHandler.MarkTransportInterruption(OperationStatus.Reloading);
-            ExecuteMethodHandler.MarkInterrupted("Command interrupted by Unity recompilation outside the Unity CLI workflow.");
-            EvalHandler.MarkInterrupted("Command interrupted by Unity recompilation outside the Unity CLI workflow.");
             StopServer();
         }
 

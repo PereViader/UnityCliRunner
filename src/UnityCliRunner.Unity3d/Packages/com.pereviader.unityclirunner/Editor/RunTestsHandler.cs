@@ -22,7 +22,6 @@ namespace UnityCliRunner
         internal static string TempDirectory => UnityCliPaths.TempDir;
         internal static string RunningFilePath => UnityCliPaths.TestRunningFile;
         internal static string ResultsFilePath => UnityCliPaths.TestResultsFile;
-        internal static string FailuresFilePath => UnityCliPaths.TestFailuresFile;
 
         internal static void MarkTransportInterruption(string status)
         {
@@ -406,7 +405,7 @@ namespace UnityCliRunner
             }
             finally
             {
-                DeleteIfExists(RunningFilePath);
+                DeleteRunningStateIfOwned(runId);
                 UnityCliOperationStore.Complete(runId);
             }
         }
@@ -504,7 +503,7 @@ namespace UnityCliRunner
             }
             finally
             {
-                DeleteIfExists(RunningFilePath);
+                DeleteRunningStateIfOwned(runId);
                 UnityCliOperationStore.Complete(runId);
                 s_CurrentTestJobGuid = null;
                 if (s_Callbacks != null)
@@ -514,11 +513,25 @@ namespace UnityCliRunner
             }
         }
 
-        private static void DeleteIfExists(string path)
+        internal static bool DeleteRunningStateIfOwned(string runId)
         {
-            if (File.Exists(path))
+            try
             {
-                File.Delete(path);
+                var state = ReadRunningState();
+                if (state != null && (string.IsNullOrEmpty(runId) || state.runId == runId))
+                {
+                    if (File.Exists(RunningFilePath))
+                    {
+                        File.Delete(RunningFilePath);
+                    }
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"UnityCliRunner: Failed to delete running state: {ex.Message}");
+                return false;
             }
         }
 
@@ -658,7 +671,6 @@ namespace UnityCliRunner
             {
                 string runningPath = RunTestsHandler.RunningFilePath;
                 string resultsPath = RunTestsHandler.ResultsFilePath;
-                string failuresPath = RunTestsHandler.FailuresFilePath;
                 var state = RunTestsHandler.ReadRunningState();
                 runId = m_RunId ?? state?.runId;
 
@@ -691,16 +703,6 @@ namespace UnityCliRunner
 
                 Debug.Log($"UnityCliRunner: Finalizing test run. Success: {success}, ResultState: {resultState}, Message: {message}");
 
-                if (File.Exists(failuresPath))
-                {
-                    File.Delete(failuresPath);
-                }
-
-                if (m_FailedTests.Count > 0)
-                {
-                    RunTestsHandler.WriteAtomic(failuresPath, FormatFailures(m_FailedTests), runId);
-                }
-
                 var runResult = new UnityTestRunResult
                 {
                     runId = runId ?? Guid.NewGuid().ToString("N"),
@@ -715,10 +717,7 @@ namespace UnityCliRunner
 
                 string json = JsonUtility.ToJson(runResult, true);
                 RunTestsHandler.WriteAtomic(resultsPath, json, runResult.runId);
-                if (File.Exists(runningPath))
-                {
-                    File.Delete(runningPath);
-                }
+                RunTestsHandler.DeleteRunningStateIfOwned(runResult.runId);
                 UnityCliOperationStore.Complete(runResult.runId);
                 m_RunId = null;
                 RunTestsHandler.s_CurrentTestJobGuid = null;
@@ -728,35 +727,6 @@ namespace UnityCliRunner
             {
                 Debug.LogError($"UnityCliRunner: Exception in FinalizeTestRun: {ex}");
             }
-        }
-
-        private static string FormatFailures(List<FailedTestInfo> failedTests)
-        {
-            var sb = new StringBuilder();
-            foreach (var test in failedTests)
-            {
-                int durationMs = (int)Math.Round(test.duration * 1000);
-                string durationStr = durationMs < 1 ? "< 1 ms" : $"{durationMs} ms";
-                sb.AppendLine($"  \u001b[31mFailed\u001b[0m {test.fullName} [{durationStr}]");
-                sb.AppendLine("  Error Message:");
-                if (!string.IsNullOrEmpty(test.message))
-                {
-                    foreach (var line in test.message.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
-                    {
-                        sb.AppendLine($"   {line}");
-                    }
-                }
-                sb.AppendLine("  Stack Trace:");
-                if (!string.IsNullOrEmpty(test.stackTrace))
-                {
-                    foreach (var line in test.stackTrace.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None))
-                    {
-                        sb.AppendLine($"   {line}");
-                    }
-                }
-                sb.AppendLine();
-            }
-            return sb.ToString();
         }
 
         public void TestStarted(ITestAdaptor test)

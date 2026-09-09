@@ -198,16 +198,87 @@ public class UnityClient
 
         int compileProgress = 30;
 
-        try
+        var spec = new OperationPollingSpec<UnityRefreshResult>
         {
-            // Poll until completion with domain reload resilience
-            while (true)
+            OperationId = opId,
+            Kind = null,
+            ShouldCancelOnAborted = false,
+            OperationDisplayName = "refresh/compilation",
+            ResultFilePath = _processManager.RefreshResultFile,
+            IsMatch = r => r.OperationId == opId,
+            PollCommand = $"POLL_REFRESH {opId}",
+            PollTimeoutSeconds = 2,
+            OnResultFound = r =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(new ProgressNotificationValue
+                {
+                    Progress = 90,
+                    Total = 100,
+                    Message = "Compilation finished, waiting for Editor to settle..."
+                });
 
-                // 1. Authoritative check: Temp/unity_refresh_result.json
-                var cachedResult = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId);
-                if (cachedResult != null)
+                EnrichRefreshResultWithDiagnostics(r);
+
+                if (r.Success)
+                {
+                    progress?.Report(new ProgressNotificationValue
+                    {
+                        Progress = 100,
+                        Total = 100,
+                        Message = isRecompile
+                            ? "Clean script recompilation completed."
+                            : "AssetDatabase refresh completed."
+                    });
+                }
+
+                return r;
+            },
+            CreateProcessExitedResult = id => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = "Unity background process exited unexpectedly during refresh/compilation."
+            },
+            CreateInterruptedResult = (id, msg) => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = false,
+                Interrupted = true,
+                Message = msg
+            },
+            CreateErrorResult = (id, msg) => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = msg
+            },
+            CreateFailureResult = (id, msg, _) => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = msg
+            },
+            CreateSuccessResult = (id, _, fullResponse) => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = true,
+                Message = fullResponse
+            },
+            CreateBusyResult = (id, pollResp) => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = $"Lost ownership of refresh operation: {pollResp}"
+            },
+            CreateIdleResult = id => new UnityRefreshResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = "Refresh operation is no longer recognized by the Editor (Editor is idle)."
+            },
+            CustomResponseHandler = async (pollResp, ct) =>
+            {
+                if (pollResp == "READY")
                 {
                     progress?.Report(new ProgressNotificationValue
                     {
@@ -216,9 +287,17 @@ public class UnityClient
                         Message = "Compilation finished, waiting for Editor to settle..."
                     });
 
-                    EnrichRefreshResultWithDiagnostics(cachedResult);
+                    var result = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId)
+                        ?? new UnityRefreshResult
+                        {
+                            OperationId = opId,
+                            Success = true,
+                            Message = "AssetDatabase refresh completed successfully."
+                        };
 
-                    if (cachedResult.Success)
+                    EnrichRefreshResultWithDiagnostics(result);
+
+                    if (result.Success)
                     {
                         progress?.Report(new ProgressNotificationValue
                         {
@@ -230,143 +309,34 @@ public class UnityClient
                         });
                     }
 
-                    return cachedResult;
+                    return result;
                 }
 
-                // 2. Check if Unity process is still alive
-                if (!_processManager.IsUnityRunning(out _))
+                if (pollResp == "COMPILATION_ERROR")
                 {
-                    // Brief grace period in case result was written as process exited
-                    await Task.Delay(300, cancellationToken);
-                    var finalCheck = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId);
-                    if (finalCheck != null)
+                    progress?.Report(new ProgressNotificationValue
                     {
-                        progress?.Report(new ProgressNotificationValue
-                        {
-                            Progress = 90,
-                            Total = 100,
-                            Message = "Compilation finished, waiting for Editor to settle..."
-                        });
+                        Progress = 90,
+                        Total = 100,
+                        Message = "Compilation finished, waiting for Editor to settle..."
+                    });
 
-                        EnrichRefreshResultWithDiagnostics(finalCheck);
-
-                        if (finalCheck.Success)
-                        {
-                            progress?.Report(new ProgressNotificationValue
-                            {
-                                Progress = 100,
-                                Total = 100,
-                                Message = isRecompile
-                                    ? "Clean script recompilation completed."
-                                    : "AssetDatabase refresh completed."
-                            });
-                        }
-
-                        return finalCheck;
-                    }
-
+                    // Allow brief moment for diagnostics file to settle
+                    await Task.Delay(200, ct);
+                    string diag = ReadCompilationErrors();
                     return new UnityRefreshResult
                     {
                         OperationId = opId,
                         Success = false,
-                        Message = "Unity background process exited unexpectedly during refresh/compilation."
+                        Message = !string.IsNullOrWhiteSpace(diag) ? diag : "Unity script compilation failed."
                     };
                 }
 
-                // 3. Check operation store
+                return null;
+            },
+            OnAfterPoll = (pollResp, ct) =>
+            {
                 var opState = TryReadJsonFile<UnityCliOperationState>(_processManager.OperationFile, o => o.OperationId == opId);
-                if (opState != null && opState.Status == "Interrupted")
-                {
-                    return new UnityRefreshResult
-                    {
-                        OperationId = opId,
-                        Success = false,
-                        Interrupted = true,
-                        Message = "Unity operation was interrupted by domain reload or editor restart."
-                    };
-                }
-
-                // 4. Poll socket
-                string? pollResp = await SendCommandAsync($"POLL_REFRESH {opId}", 2, cancellationToken);
-                if (pollResp != null)
-                {
-                    if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Operation interrupted.";
-                        return new UnityRefreshResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Interrupted = true,
-                            Message = UnescapeLine(msg)
-                        };
-                    }
-
-                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new UnityRefreshResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Message = $"Lost ownership of refresh operation: {pollResp}"
-                        };
-                    }
-
-                    if (pollResp == "READY")
-                    {
-                        progress?.Report(new ProgressNotificationValue
-                        {
-                            Progress = 90,
-                            Total = 100,
-                            Message = "Compilation finished, waiting for Editor to settle..."
-                        });
-
-                        var result = TryReadJsonFile<UnityRefreshResult>(_processManager.RefreshResultFile, r => r.OperationId == opId)
-                            ?? new UnityRefreshResult
-                            {
-                                OperationId = opId,
-                                Success = true,
-                                Message = "AssetDatabase refresh completed successfully."
-                            };
-
-                        EnrichRefreshResultWithDiagnostics(result);
-
-                        if (result.Success)
-                        {
-                            progress?.Report(new ProgressNotificationValue
-                            {
-                                Progress = 100,
-                                Total = 100,
-                                Message = isRecompile
-                                    ? "Clean script recompilation completed."
-                                    : "AssetDatabase refresh completed."
-                            });
-                        }
-
-                        return result;
-                    }
-
-                    if (pollResp == "COMPILATION_ERROR")
-                    {
-                        progress?.Report(new ProgressNotificationValue
-                        {
-                            Progress = 90,
-                            Total = 100,
-                            Message = "Compilation finished, waiting for Editor to settle..."
-                        });
-
-                        // Allow brief moment for diagnostics file to settle
-                        await Task.Delay(200, cancellationToken);
-                        string diag = ReadCompilationErrors();
-                        return new UnityRefreshResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Message = !string.IsNullOrWhiteSpace(diag) ? diag : "Unity script compilation failed."
-                        };
-                    }
-                }
-
                 bool isCompiling = (pollResp == "COMPILING" || pollResp == "UPDATING") ||
                     (opState != null && (opState.Status == "Compiling" || opState.Status == "Reloading" || opState.Status == "Refreshing" || opState.Status == "Recompiling" || opState.Status == "WaitingForUnity"));
 
@@ -385,13 +355,11 @@ public class UnityClient
                     }
                 }
 
-                await Task.Delay(500, cancellationToken);
+                return Task.CompletedTask;
             }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
+        };
+
+        return await PollOperationUntilTerminalAsync(spec, cancellationToken);
     }
 
     /// <summary>
@@ -421,83 +389,13 @@ public class UnityClient
             return new UnityEvalResult { OperationId = opId, Success = false, Message = UnescapeLine(initialResponse) };
         }
 
-        try
-        {
-            // Poll until completion
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var result = TryReadJsonFile<UnityEvalResult>(_processManager.EvalResultFile, r => r.OperationId == opId);
-                if (result != null) return result;
-
-                if (!_processManager.IsUnityRunning(out _))
-                {
-                    await Task.Delay(300, cancellationToken);
-                    var final = TryReadJsonFile<UnityEvalResult>(_processManager.EvalResultFile, r => r.OperationId == opId);
-                    if (final != null) return final;
-
-                    return new UnityEvalResult
-                    {
-                        OperationId = opId,
-                        Success = false,
-                        Message = "Unity background process exited unexpectedly during evaluation."
-                    };
-                }
-
-                string? pollResp = await SendCommandAsync($"POLL_EVAL {opId}", 5, cancellationToken);
-                if (pollResp != null)
-                {
-                    var fileRes = TryReadJsonFile<UnityEvalResult>(_processManager.EvalResultFile, r => r.OperationId == opId);
-                    if (fileRes != null) return fileRes;
-
-                    if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
-                        return new UnityEvalResult { OperationId = opId, Success = true, Payload = UnescapeLine(payload) };
-                    }
-                    if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string msg = pollResp.Length > 7 ? pollResp[7..].Trim() : "Evaluation failed.";
-                        return new UnityEvalResult { OperationId = opId, Success = false, Message = UnescapeLine(msg) };
-                    }
-                    if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Evaluation interrupted.";
-                        return new UnityEvalResult { OperationId = opId, Success = false, Interrupted = true, Message = UnescapeLine(msg) };
-                    }
-                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new UnityEvalResult { OperationId = opId, Success = false, Message = UnescapeLine(pollResp) };
-                    }
-                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new UnityEvalResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Message = "Evaluation is no longer recognized by the Editor (Editor is idle)."
-                        };
-                    }
-                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new UnityEvalResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Message = $"Lost ownership of evaluation: {pollResp}"
-                        };
-                    }
-                }
-
-                await Task.Delay(500, cancellationToken);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            await CancelOperationAsync(opId, "eval");
-            throw;
-        }
+        return await PollOperationResultAsync<UnityEvalResult>(
+            opId: opId,
+            kind: "eval",
+            operationDisplayName: "evaluation",
+            resultFilePath: _processManager.EvalResultFile,
+            pollCommand: $"POLL_EVAL {opId}",
+            cancellationToken: cancellationToken);
     }
 
     public Task<UnityExecuteResult> ExecuteMethodAsync(string methodName, string[]? args, CancellationToken cancellationToken) =>
@@ -578,109 +476,18 @@ public class UnityClient
             return new UnityExecuteResult { OperationId = opId, Success = false, Message = UnescapeLine(initialResponse) };
         }
 
-        try
-        {
-            while (true)
+        return await PollOperationResultAsync<UnityExecuteResult>(
+            opId: opId,
+            kind: "execute",
+            operationDisplayName: "method execution",
+            resultFilePath: _processManager.ExecuteResultFile,
+            pollCommand: $"POLL_EXECUTE {opId}",
+            onResultFound: res =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var result = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                if (result != null)
-                {
-                    if (result.Success) ReportExecuteCompleted(progress);
-                    return result;
-                }
-
-                if (!_processManager.IsUnityRunning(out _))
-                {
-                    await Task.Delay(300, cancellationToken);
-                    var final = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                    if (final != null)
-                    {
-                        if (final.Success) ReportExecuteCompleted(progress);
-                        return final;
-                    }
-
-                    return new UnityExecuteResult
-                    {
-                        OperationId = opId,
-                        Success = false,
-                        Message = "Unity background process exited unexpectedly during method execution."
-                    };
-                }
-
-                string? pollResp = await SendCommandAsync($"POLL_EXECUTE {opId}", 5, cancellationToken);
-                if (pollResp != null)
-                {
-                    var fileRes = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                    if (fileRes != null)
-                    {
-                        if (fileRes.Success) ReportExecuteCompleted(progress);
-                        return fileRes;
-                    }
-
-                    if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
-                    {
-                        ReportExecuteCompleted(progress);
-                        string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
-                        return new UnityExecuteResult { OperationId = opId, Success = true, Payload = UnescapeLine(payload) };
-                    }
-                    if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string msg = pollResp.Length > 7 ? pollResp[7..].Trim() : "Method execution failed.";
-                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = UnescapeLine(msg) };
-                    }
-                    if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Method execution interrupted.";
-                        return new UnityExecuteResult { OperationId = opId, Success = false, Interrupted = true, Message = UnescapeLine(msg) };
-                    }
-                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new UnityExecuteResult { OperationId = opId, Success = false, Message = UnescapeLine(pollResp) };
-                    }
-                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var res = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                        if (res != null)
-                        {
-                            if (res.Success) ReportExecuteCompleted(progress);
-                            return res;
-                        }
-
-                        return new UnityExecuteResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Message = "Method execution is no longer recognized by the Editor (Editor is idle)."
-                        };
-                    }
-                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var res = TryReadJsonFile<UnityExecuteResult>(_processManager.ExecuteResultFile, r => r.OperationId == opId);
-                        if (res != null)
-                        {
-                            if (res.Success) ReportExecuteCompleted(progress);
-                            return res;
-                        }
-
-                        return new UnityExecuteResult
-                        {
-                            OperationId = opId,
-                            Success = false,
-                            Message = $"Lost ownership of method execution: {pollResp}"
-                        };
-                    }
-                }
-
-                await Task.Delay(500, cancellationToken);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            await CancelOperationAsync(opId, "execute");
-            throw;
-        }
+                if (res.Success) ReportExecuteCompleted(progress);
+                return res;
+            },
+            cancellationToken: cancellationToken);
     }
 
     public Task<UnityTestRunResult> RunTestsAsync(
@@ -745,7 +552,6 @@ public class UnityClient
             Message = $"Initializing {testMode} test run..."
         });
 
-
         _logger.LogInformation("Sending RUN_TESTS operation {OpId} (mode: {Mode})...", opId, testMode);
         string? initialResponse = await SendCommandAsync(sb.ToString(), 10, cancellationToken);
 
@@ -780,12 +586,22 @@ public class UnityClient
         string? lastTestName = null;
         string? lastStatus = null;
 
-        try
+        var spec = new OperationPollingSpec<UnityTestRunResult>
         {
-            while (true)
+            OperationId = opId,
+            Kind = "test",
+            OperationDisplayName = "test run",
+            ResultFilePath = _processManager.TestResultsFile,
+            IsMatch = r => r.RunId == opId,
+            PollCommand = $"POLL_TESTS {opId}",
+            PollTimeoutSeconds = 5,
+            OnResultFound = res =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
+                ReportFinalProgress(progress, res);
+                return res;
+            },
+            OnPollTick = _ =>
+            {
                 var runningState = TryReadJsonFile<UnityTestRunState>(_processManager.TestRunningFile, s => s.RunId == opId);
                 if (runningState != null && progress != null)
                 {
@@ -824,108 +640,297 @@ public class UnityClient
                         });
                     }
                 }
+                return Task.CompletedTask;
+            },
+            CreateProcessExitedResult = id => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = false,
+                Message = "Unity background process exited unexpectedly during test run."
+            },
+            CreateInterruptedResult = (id, msg) => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = false,
+                ResultState = "Interrupted",
+                Message = msg
+            },
+            CreateErrorResult = (id, msg) => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = false,
+                Message = msg
+            },
+            CreateFailureResult = (id, _, fullResponse) => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = false,
+                Message = fullResponse
+            },
+            CreateSuccessResult = (id, _, fullResponse) => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = true,
+                Message = fullResponse
+            },
+            CreateBusyResult = (id, pollResp) => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = false,
+                Message = $"Lost ownership of test run: {pollResp}"
+            },
+            CreateIdleResult = id => new UnityTestRunResult
+            {
+                RunId = id,
+                Success = false,
+                Message = "Test run is no longer recognized by the Editor (Editor is idle)."
+            }
+        };
 
-                var result = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
+        return await PollOperationUntilTerminalAsync(spec, cancellationToken);
+    }
+
+    private sealed class OperationPollingSpec<TResult> where TResult : class
+    {
+        public required string OperationId { get; init; }
+        public string? Kind { get; init; }
+        public string OperationDisplayName { get; init; } = "operation";
+        public required string ResultFilePath { get; init; }
+        public required Func<TResult, bool> IsMatch { get; init; }
+        public required string PollCommand { get; init; }
+        public int PollTimeoutSeconds { get; init; } = 5;
+        public int PollIntervalMs { get; init; } = 500;
+        public bool CheckOperationStoreForInterruption { get; init; } = true;
+        public bool ShouldCancelOnAborted { get; init; } = true;
+
+        public Func<TResult, TResult>? OnResultFound { get; init; }
+        public Func<CancellationToken, Task>? OnPollTick { get; init; }
+        public Func<string?, CancellationToken, Task>? OnAfterPoll { get; init; }
+        public Func<string, CancellationToken, Task<TResult?>>? CustomResponseHandler { get; init; }
+
+        public required Func<string, TResult> CreateProcessExitedResult { get; init; }
+        public required Func<string, string, TResult> CreateInterruptedResult { get; init; }
+        public required Func<string, string, TResult> CreateErrorResult { get; init; }
+        public required Func<string, string, string, TResult> CreateFailureResult { get; init; }
+        public required Func<string, string, string, TResult> CreateSuccessResult { get; init; }
+        public required Func<string, string, TResult> CreateBusyResult { get; init; }
+        public required Func<string, TResult> CreateIdleResult { get; init; }
+    }
+
+    private async Task<TResult> PollOperationUntilTerminalAsync<TResult>(
+        OperationPollingSpec<TResult> spec,
+        CancellationToken cancellationToken) where TResult : class
+    {
+        try
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // 1. Poll tick (e.g. running state progress updates)
+                if (spec.OnPollTick != null)
+                {
+                    await spec.OnPollTick(cancellationToken);
+                }
+
+                // 2. Authoritative check: terminal result file
+                var result = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
                 if (result != null)
                 {
-                    ReportFinalProgress(progress, result);
-                    return result;
+                    return spec.OnResultFound != null ? spec.OnResultFound(result) : result;
                 }
 
+                // 3. Process liveness check
                 if (!_processManager.IsUnityRunning(out _))
                 {
+                    // Brief grace period in case result was written as process exited
                     await Task.Delay(300, cancellationToken);
-                    var final = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                    if (final != null)
+                    var finalCheck = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
+                    if (finalCheck != null)
                     {
-                        ReportFinalProgress(progress, final);
-                        return final;
+                        return spec.OnResultFound != null ? spec.OnResultFound(finalCheck) : finalCheck;
                     }
 
-                    return new UnityTestRunResult
-                    {
-                        RunId = opId,
-                        Success = false,
-                        Message = "Unity background process exited unexpectedly during test run."
-                    };
+                    return spec.CreateProcessExitedResult(spec.OperationId);
                 }
 
-                string? pollResp = await SendCommandAsync($"POLL_TESTS {opId}", 5, cancellationToken);
+                // 4. Operation store check for interruption
+                if (spec.CheckOperationStoreForInterruption)
+                {
+                    var opState = TryReadJsonFile<UnityCliOperationState>(_processManager.OperationFile, o => o.OperationId == spec.OperationId);
+                    if (opState != null && opState.Status == "Interrupted")
+                    {
+                        return spec.CreateInterruptedResult(spec.OperationId, "Unity operation was interrupted by domain reload or editor restart.");
+                    }
+                }
+
+                // 5. Poll socket
+                string? pollResp = await SendCommandAsync(spec.PollCommand, spec.PollTimeoutSeconds, cancellationToken);
                 if (pollResp != null)
                 {
-                    if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
+                    if (spec.CustomResponseHandler != null)
                     {
-                        var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                        if (res != null)
+                        var custom = await spec.CustomResponseHandler(pollResp, cancellationToken);
+                        if (custom != null)
                         {
-                            ReportFinalProgress(progress, res);
-                            return res;
+                            return custom;
                         }
-
-                        return new UnityTestRunResult { RunId = opId, Success = true, Message = pollResp };
                     }
-                    if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                        if (res != null)
-                        {
-                            ReportFinalProgress(progress, res);
-                            return res;
-                        }
 
-                        return new UnityTestRunResult { RunId = opId, Success = false, Message = UnescapeLine(pollResp) };
-                    }
                     if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
                     {
-                        string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Test run interrupted.";
-                        return new UnityTestRunResult { RunId = opId, Success = false, ResultState = "Interrupted", Message = UnescapeLine(msg) };
+                        string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Operation interrupted.";
+                        return spec.CreateInterruptedResult(spec.OperationId, UnescapeLine(msg));
                     }
-                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new UnityTestRunResult { RunId = opId, Success = false, Message = UnescapeLine(pollResp) };
-                    }
-                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                        if (res != null)
-                        {
-                            ReportFinalProgress(progress, res);
-                            return res;
-                        }
 
-                        return new UnityTestRunResult
-                        {
-                            RunId = opId,
-                            Success = false,
-                            Message = "Test run is no longer recognized by the Editor (Editor is idle)."
-                        };
-                    }
                     if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
                     {
-                        var res = TryReadJsonFile<UnityTestRunResult>(_processManager.TestResultsFile, r => r.RunId == opId);
-                        if (res != null)
+                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
+                        if (fileRes != null)
                         {
-                            ReportFinalProgress(progress, res);
-                            return res;
+                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
                         }
 
-                        return new UnityTestRunResult
+                        return spec.CreateBusyResult(spec.OperationId, pollResp);
+                    }
+
+                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Always re-check terminal result file before declaring idle failure (Rule 26 & Issue #71)
+                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
+                        if (fileRes != null)
                         {
-                            RunId = opId,
-                            Success = false,
-                            Message = $"Lost ownership of test run: {pollResp}"
-                        };
+                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
+                        }
+
+                        return spec.CreateIdleResult(spec.OperationId);
+                    }
+
+                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
+                        if (fileRes != null)
+                        {
+                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
+                        }
+
+                        return spec.CreateErrorResult(spec.OperationId, UnescapeLine(pollResp));
+                    }
+
+                    if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
+                        if (fileRes != null)
+                        {
+                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
+                        }
+
+                        string msg = pollResp.Length > 7 ? pollResp[7..].Trim() : "Operation failed.";
+                        return spec.CreateFailureResult(spec.OperationId, UnescapeLine(msg), UnescapeLine(pollResp));
+                    }
+
+                    if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
+                        if (fileRes != null)
+                        {
+                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
+                        }
+
+                        string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
+                        return spec.CreateSuccessResult(spec.OperationId, UnescapeLine(payload), pollResp);
                     }
                 }
 
-                await Task.Delay(500, cancellationToken);
+                // 6. After poll hook (e.g. refresh compilation progress)
+                if (spec.OnAfterPoll != null)
+                {
+                    await spec.OnAfterPoll(pollResp, cancellationToken);
+                }
+
+                await Task.Delay(spec.PollIntervalMs, cancellationToken);
             }
         }
         catch (OperationCanceledException)
         {
-            await CancelOperationAsync(opId, "test");
+            if (spec.ShouldCancelOnAborted && !string.IsNullOrEmpty(spec.Kind))
+            {
+                await CancelOperationAsync(spec.OperationId, spec.Kind);
+            }
             throw;
         }
+    }
+
+    private Task<TResult> PollOperationResultAsync<TResult>(
+        string opId,
+        string kind,
+        string operationDisplayName,
+        string resultFilePath,
+        string pollCommand,
+        Func<TResult, TResult>? onResultFound = null,
+        CancellationToken cancellationToken = default) where TResult : UnityOperationResult, new()
+    {
+        string capitalizedDisplayName = char.ToUpperInvariant(operationDisplayName[0]) + operationDisplayName[1..];
+        var spec = new OperationPollingSpec<TResult>
+        {
+            OperationId = opId,
+            Kind = kind,
+            OperationDisplayName = operationDisplayName,
+            ResultFilePath = resultFilePath,
+            IsMatch = r => r.OperationId == opId,
+            PollCommand = pollCommand,
+            PollTimeoutSeconds = 5,
+            OnResultFound = onResultFound,
+            CreateProcessExitedResult = id => new TResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = $"Unity background process exited unexpectedly during {operationDisplayName}."
+            },
+            CreateInterruptedResult = (id, msg) => new TResult
+            {
+                OperationId = id,
+                Success = false,
+                Interrupted = true,
+                Message = msg
+            },
+            CreateErrorResult = (id, msg) => new TResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = msg
+            },
+            CreateFailureResult = (id, msg, _) => new TResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = string.IsNullOrWhiteSpace(msg) ? $"{capitalizedDisplayName} failed." : msg
+            },
+            CreateSuccessResult = (id, payload, _) =>
+            {
+                var r = new TResult
+                {
+                    OperationId = id,
+                    Success = true,
+                    Payload = payload
+                };
+                return onResultFound != null ? onResultFound(r) : r;
+            },
+            CreateBusyResult = (id, pollResp) => new TResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = $"Lost ownership of {operationDisplayName}: {pollResp}"
+            },
+            CreateIdleResult = id => new TResult
+            {
+                OperationId = id,
+                Success = false,
+                Message = $"{capitalizedDisplayName} is no longer recognized by the Editor (Editor is idle)."
+            }
+        };
+
+        return PollOperationUntilTerminalAsync(spec, cancellationToken);
     }
 
     private static void ReportFinalProgress(IProgress<ProgressNotificationValue>? progress, UnityTestRunResult result)

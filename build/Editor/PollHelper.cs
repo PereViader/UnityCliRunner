@@ -12,6 +12,29 @@ namespace UnityCliRunner
             return text.Replace("\r", "\\r").Replace("\n", "\\n");
         }
 
+        public static void WriteOperationResultResponse(UnityOperationResult res, StreamWriter writer)
+        {
+            if (res.success)
+            {
+                if (!string.IsNullOrEmpty(res.payload))
+                {
+                    writer.WriteLine($"SUCCESS {EscapeLine(res.payload)}");
+                }
+                else
+                {
+                    writer.WriteLine("SUCCESS");
+                }
+            }
+            else if (res.interrupted)
+            {
+                writer.WriteLine($"INTERRUPTION {EscapeLine(res.message)}");
+            }
+            else
+            {
+                writer.WriteLine($"FAILURE {EscapeLine(res.message)}");
+            }
+        }
+
         public static void PollOperationResult<TResult>(
             string operationId,
             string resultFilePath,

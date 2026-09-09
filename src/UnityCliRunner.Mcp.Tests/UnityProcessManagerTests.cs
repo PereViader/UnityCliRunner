@@ -397,4 +397,82 @@ public class UnityProcessManagerTests
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public void FindProjectUnityPid_WhenMultipleDummyProcessesExist_DoesNotArbitrarilyReturnFirstProcess()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_multi_pid_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tempDir, "Temp"));
+
+        using var proc1 = StartDummyProcess();
+        using var proc2 = StartDummyProcess();
+
+        try
+        {
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+
+            // 1. When multiple candidate processes exist without port file, must return null (not proc1.Id)
+            int? detectedPid = procManager.FindProjectUnityPid(new[] { proc1, proc2 });
+            Assert.Null(detectedPid);
+            Assert.NotEqual(proc1.Id, detectedPid);
+
+            // 2. Even if PortFile exists, it does not prove which process owns it when multiple processes exist
+            File.WriteAllText(procManager.PortFile, "65432");
+            int? detectedPidWithPort = procManager.FindProjectUnityPid(new[] { proc1, proc2 });
+            Assert.Null(detectedPidWithPort);
+
+            // 3. Single process candidate correctly resolves
+            int? singlePid = procManager.FindProjectUnityPid(new[] { proc1 });
+            Assert.Equal(proc1.Id, singlePid);
+
+            // 4. ProcessProvider delegate with multiple processes also resolves to null
+            procManager.ProcessProvider = () => new[] { proc1, proc2 };
+            Assert.Null(procManager.FindProjectUnityPid());
+        }
+        finally
+        {
+            try { if (!proc1.HasExited) proc1.Kill(true); } catch { }
+            try { if (!proc2.HasExited) proc2.Kill(true); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task StopUnityAsync_WhenMultipleProcessesExistAndPidCannotBeProven_DoesNotKillProcesses()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_safe_stop_" + Guid.NewGuid().ToString("N"));
+        string tempSubDir = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(tempSubDir);
+
+        using var proc1 = StartDummyProcess();
+        using var proc2 = StartDummyProcess();
+
+        // Lock the lockfile so IsUnityRunning sees Unity as active, but PID cannot be proven
+        string lockFilePath = Path.Combine(tempSubDir, "UnityLockfile");
+        using var lockStream = File.Open(lockFilePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+
+        try
+        {
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance)
+            {
+                ProcessProvider = () => new[] { proc1, proc2 }
+            };
+
+            Assert.True(procManager.IsUnityRunning(out int? runningPid));
+            Assert.Null(runningPid);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            bool stopped = await procManager.StopUnityAsync(cts.Token);
+
+            Assert.False(stopped);
+            Assert.False(proc1.HasExited, "proc1 should NOT have been killed by StopUnityAsync.");
+            Assert.False(proc2.HasExited, "proc2 should NOT have been killed by StopUnityAsync.");
+        }
+        finally
+        {
+            try { if (!proc1.HasExited) proc1.Kill(true); } catch { }
+            try { if (!proc2.HasExited) proc2.Kill(true); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
 }

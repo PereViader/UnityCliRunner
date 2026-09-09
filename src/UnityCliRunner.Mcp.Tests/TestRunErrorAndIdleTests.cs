@@ -288,4 +288,55 @@ public class TestRunErrorAndIdleTests
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
+
+    [Fact]
+    public async Task UnityClient_EvalAsync_WhenPollResponseIsIdleButResultFileExists_ReturnsResultSuccessfully()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        string capturedOpId = "";
+        UnityProcessManager procManager = null!;
+        var server = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("EVAL"))
+            {
+                var parts = cmd.Split(' ', 3);
+                if (parts.Length > 1)
+                {
+                    capturedOpId = parts[1];
+                }
+                return "RUNNING";
+            }
+            if (cmd.StartsWith("POLL_EVAL"))
+            {
+                // Simulate race condition: Editor finished evaluation, wrote result file, and returned IDLE
+                var result = new UnityEvalResult
+                {
+                    OperationId = capturedOpId,
+                    Success = true,
+                    Payload = "42"
+                };
+                File.WriteAllText(procManager.EvalResultFile, System.Text.Json.JsonSerializer.Serialize(result));
+                return "IDLE";
+            }
+            return null;
+        }, cts.Token);
+        procManager = server.procManager;
+        var client = server.client;
+        var listener = server.listener;
+        var tempDir = server.tempDir;
+
+        try
+        {
+            var result = await client.EvalAsync("1 + 1", cts.Token);
+
+            Assert.True(result.Success);
+            Assert.Equal("42", result.Payload);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
 }

@@ -129,11 +129,6 @@ namespace UnityCliRunner
             }
         }
 
-        [Obsolete("Running state is now tracked exclusively in UnityCliOperationStore.")]
-        public static void WriteExecuteRunningState(string operationId)
-        {
-        }
-
         public static void ExecuteMethod(string operationId, MethodInfo method, string[] stringParams)
         {
             var paramInfos = method.GetParameters();

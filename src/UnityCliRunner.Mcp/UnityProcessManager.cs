@@ -35,19 +35,14 @@ public class UnityProcessManager
     public string RefreshResultFile => Path.Combine(TempDir, "unity_refresh_result.json");
     public string EvalResultFile => Path.Combine(TempDir, "unity_eval_result.json");
     public string ExecuteResultFile => Path.Combine(TempDir, "unity_execute_result.json");
-    public string ExecuteRunningFile => Path.Combine(TempDir, "unity_execute_running.txt");
-    public string EvalRunningFile => Path.Combine(TempDir, "unity_eval_running.txt");
     public string TestRunningFile => Path.Combine(TempDir, "unity_test_running.txt");
     public string TestResultsFile => Path.Combine(TempDir, "unity_test_results.json");
-    public string TestFailuresFile => Path.Combine(TempDir, "unity_test_failures.txt");
 
     public void PurgeOperationState()
     {
         string[] files =
         {
             OperationFile,
-            ExecuteRunningFile,
-            EvalRunningFile,
             TestRunningFile,
             PidFile,
             PortFile
@@ -118,9 +113,9 @@ public class UnityProcessManager
                     byte[] bytes = File.ReadAllBytes(lockFilePath);
                     lockPid = BitConverter.ToInt32(bytes, 0);
                 }
-                else
+                else if (fileInfo.Length > 0)
                 {
-                    string text = ReadFileWithRetry(lockFilePath).Trim();
+                    string text = ReadFileWithRetry(lockFilePath, maxRetries: 1).Trim();
                     int.TryParse(text, out lockPid);
                 }
 
@@ -186,8 +181,15 @@ public class UnityProcessManager
         }
     }
 
-    private int? FindProjectUnityPid()
+    internal Func<Process[]>? ProcessProvider { get; set; }
+
+    internal virtual Process[] GetUnityProcesses()
     {
+        if (ProcessProvider != null)
+        {
+            return ProcessProvider();
+        }
+
         try
         {
             var processes = Process.GetProcessesByName("Unity");
@@ -195,29 +197,32 @@ public class UnityProcessManager
             {
                 processes = Process.GetProcessesByName("unity-editor");
             }
+            return processes;
+        }
+        catch
+        {
+            return Array.Empty<Process>();
+        }
+    }
+
+    internal int? FindProjectUnityPid(Process[]? candidateProcesses = null)
+    {
+        try
+        {
+            var processes = candidateProcesses ?? GetUnityProcesses();
+            if (processes.Length == 0)
+            {
+                return null;
+            }
 
             if (processes.Length == 1)
             {
                 return processes[0].Id;
             }
 
-            // If multiple Unity processes exist, check command line where possible
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                foreach (var proc in processes)
-                {
-                    try
-                    {
-                        // On Windows, if port file exists and responds, match it
-                        if (File.Exists(PortFile))
-                        {
-                            return proc.Id;
-                        }
-                    }
-                    catch { }
-                }
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            // Multiple Unity processes exist. Never fall back to returning an arbitrary process.
+            // Only return a PID if it can be deterministically proven to belong to this project.
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
                 string normalizedProject = ProjectRoot.TrimEnd('/', '\\');
                 foreach (var proc in processes)
@@ -238,17 +243,13 @@ public class UnityProcessManager
                 }
             }
 
-            if (processes.Length > 0)
-            {
-                return processes[0].Id;
-            }
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to query system Unity processes.");
+            return null;
         }
-
-        return null;
     }
 
     /// <summary>
@@ -757,6 +758,8 @@ public class UnityProcessManager
                 return true;
             }
 
+            int? targetPid = pid;
+
             // Try sending EXIT to socket first
             try
             {
@@ -767,20 +770,26 @@ public class UnityProcessManager
             // Wait up to 5 seconds for process to exit
             for (int i = 0; i < 25; i++)
             {
-                if (!IsUnityRunning(out pid))
+                if (!IsUnityRunning(out int? currentPid))
                 {
                     PurgeOperationState();
                     return true;
                 }
+
+                if (!targetPid.HasValue && currentPid.HasValue)
+                {
+                    targetPid = currentPid;
+                }
+
                 await Task.Delay(200, cancellationToken);
             }
 
-            // Force kill if still running
-            if (pid.HasValue && pid.Value > 0)
+            // Force kill if still running and target PID is deterministically known
+            if (targetPid.HasValue && targetPid.Value > 0)
             {
                 try
                 {
-                    var proc = Process.GetProcessById(pid.Value);
+                    var proc = Process.GetProcessById(targetPid.Value);
                     proc.Kill(true);
                     proc.WaitForExit();
                 }
