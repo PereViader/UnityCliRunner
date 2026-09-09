@@ -1,6 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
+using System.Linq;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using ModelContextProtocol;
@@ -15,6 +20,19 @@ public class UnityTools
     private readonly UnityClient _client;
     private readonly UnityProcessManager _processManager;
 
+    private static readonly JsonSerializerOptions s_JsonOptions = new()
+    {
+        WriteIndented = true
+    };
+
+    private static readonly Regex s_StackTraceRegex = new(
+        @"(?:(?:in|\bat\b|\()\s*)?(?<file>(?:[a-zA-Z]:[\\/]|/|[A-Za-z0-9_.\-]+[\\/])[^:\r\n()]+):(?:line\s+)?(?<line>\d+)\)?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex s_CompilerDiagnosticRegex = new(
+        @"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s*(?<severity>error|warning)\s+(?<code>[A-Z0-9]+):\s*(?<msg>.+)$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public UnityTools(UnityClient client, UnityProcessManager processManager)
     {
         _client = client;
@@ -26,11 +44,32 @@ public class UnityTools
     public async Task<CallToolResult> UnityStatusAsync(CancellationToken cancellationToken = default)
     {
         string status = await _client.GetStatusAsync(cancellationToken);
+        string? editorVersion = _processManager.GetProjectEditorVersion();
+        _processManager.IsUnityRunning(out int? pid);
+        int port = _processManager.ReadPortFile();
+        string? mode = pid.HasValue ? _processManager.GetUnityMode(pid) : null;
+        string? activeOperation = ExtractActiveOperation(status);
+
         if (status == "Not Running")
         {
+            var structuredNotRunning = new StructuredStatusResult
+            {
+                Status = "Not Running",
+                EditorVersion = editorVersion,
+                ProjectRoot = _processManager.ProjectRoot,
+                Pid = null,
+                Mode = null,
+                Port = null,
+                ActiveOperation = null
+            };
+
             return new CallToolResult
             {
-                Content = [new TextContentBlock { Text = "Status: Not Running (will auto-start on demand)" }],
+                Content =
+                [
+                    new TextContentBlock { Text = "Status: Not Running (will auto-start on demand)" },
+                    new TextContentBlock { Text = JsonSerializer.Serialize(structuredNotRunning, s_JsonOptions) }
+                ],
                 IsError = false
             };
         }
@@ -39,26 +78,52 @@ public class UnityTools
         {
             var sb = new StringBuilder();
             sb.AppendLine("Status: Ready");
-            string? editorVersion = _processManager.GetProjectEditorVersion();
             sb.AppendLine($"Editor Version: {editorVersion ?? "Unknown"}");
             sb.AppendLine($"Project Root: {_processManager.ProjectRoot}");
-            _processManager.IsUnityRunning(out int? pid);
             sb.AppendLine($"PID: {(pid.HasValue ? pid.Value.ToString() : "Unknown")}");
-            string mode = _processManager.GetUnityMode(pid);
-            sb.AppendLine($"Mode: {mode}");
-            int port = _processManager.ReadPortFile();
+            sb.AppendLine($"Mode: {mode ?? "Unknown"}");
             sb.AppendLine($"Port: {(port > 0 ? port.ToString() : "Unknown")}");
+
+            var structuredReady = new StructuredStatusResult
+            {
+                Status = "Ready",
+                EditorVersion = editorVersion,
+                ProjectRoot = _processManager.ProjectRoot,
+                Pid = pid,
+                Mode = mode,
+                Port = port > 0 ? port : null,
+                ActiveOperation = null
+            };
 
             return new CallToolResult
             {
-                Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
+                Content =
+                [
+                    new TextContentBlock { Text = sb.ToString().TrimEnd() },
+                    new TextContentBlock { Text = JsonSerializer.Serialize(structuredReady, s_JsonOptions) }
+                ],
                 IsError = false
             };
         }
 
+        var structuredOther = new StructuredStatusResult
+        {
+            Status = status,
+            EditorVersion = editorVersion,
+            ProjectRoot = _processManager.ProjectRoot,
+            Pid = pid,
+            Mode = mode,
+            Port = port > 0 ? port : null,
+            ActiveOperation = activeOperation
+        };
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = $"Status: {status}" }],
+            Content =
+            [
+                new TextContentBlock { Text = $"Status: {status}" },
+                new TextContentBlock { Text = JsonSerializer.Serialize(structuredOther, s_JsonOptions) }
+            ],
             IsError = false
         };
     }
@@ -83,15 +148,8 @@ public class UnityTools
                 sb.AppendLine(result.Message.TrimEnd());
                 sb.Append("AssetDatabase refresh completed with 0 errors.");
             }
-
-            return new CallToolResult
-            {
-                Content = [new TextContentBlock { Text = sb.ToString() }],
-                IsError = false
-            };
         }
-
-        if (result.Interrupted)
+        else if (result.Interrupted)
         {
             string msg = !string.IsNullOrWhiteSpace(result.Message)
                 ? result.Message
@@ -114,10 +172,23 @@ public class UnityTools
             }
         }
 
+        var diagnostics = ParseCompilerDiagnostics(result.Message);
+        var structured = new StructuredRefreshResult
+        {
+            Success = result.Success,
+            Interrupted = result.Interrupted,
+            Message = result.Message ?? "",
+            Diagnostics = diagnostics
+        };
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            IsError = true
+            Content =
+            [
+                new TextContentBlock { Text = sb.ToString().TrimEnd() },
+                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
+            ],
+            IsError = !result.Success
         };
     }
 
@@ -141,15 +212,8 @@ public class UnityTools
                 sb.AppendLine(result.Message.TrimEnd());
                 sb.Append("Clean script recompilation completed with 0 errors.");
             }
-
-            return new CallToolResult
-            {
-                Content = [new TextContentBlock { Text = sb.ToString() }],
-                IsError = false
-            };
         }
-
-        if (result.Interrupted)
+        else if (result.Interrupted)
         {
             string msg = !string.IsNullOrWhiteSpace(result.Message)
                 ? result.Message
@@ -172,10 +236,23 @@ public class UnityTools
             }
         }
 
+        var diagnostics = ParseCompilerDiagnostics(result.Message);
+        var structured = new StructuredRefreshResult
+        {
+            Success = result.Success,
+            Interrupted = result.Interrupted,
+            Message = result.Message ?? "",
+            Diagnostics = diagnostics
+        };
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            IsError = true
+            Content =
+            [
+                new TextContentBlock { Text = sb.ToString().TrimEnd() },
+                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
+            ],
+            IsError = !result.Success
         };
     }
 
@@ -389,6 +466,24 @@ public class UnityTools
             }
         }
 
+        var structuredFailures = new List<StructuredTestFailure>();
+        for (int i = 0; i < result.FailedTests.Count; i++)
+        {
+            var fail = result.FailedTests[i];
+            var (filePath, lineNumber, fileUri) = ExtractSourceLocation(fail.StackTrace, _processManager.ProjectRoot);
+            structuredFailures.Add(new StructuredTestFailure
+            {
+                Name = fail.Name,
+                FullName = fail.FullName,
+                Duration = fail.Duration,
+                Message = fail.Message,
+                StackTrace = fail.StackTrace,
+                FilePath = filePath,
+                LineNumber = lineNumber,
+                FileUri = fileUri
+            });
+        }
+
         if (result.FailedTests.Count > 0)
         {
             sb.AppendLine();
@@ -397,8 +492,15 @@ public class UnityTools
             int countToReport = Math.Min(result.FailedTests.Count, maxDetailedFailures);
             for (int i = 0; i < countToReport; i++)
             {
-                var fail = result.FailedTests[i];
+                var fail = structuredFailures[i];
                 sb.AppendLine($"• {fail.FullName ?? fail.Name} ({fail.Duration.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)}s)");
+                if (!string.IsNullOrWhiteSpace(fail.FilePath) && fail.LineNumber.HasValue)
+                {
+                    string link = !string.IsNullOrWhiteSpace(fail.FileUri)
+                        ? $"[{fail.FilePath}:{fail.LineNumber}]({fail.FileUri})"
+                        : $"{fail.FilePath}:{fail.LineNumber}";
+                    sb.AppendLine($"  Location: {link}");
+                }
                 if (!string.IsNullOrWhiteSpace(fail.Message))
                 {
                     sb.AppendLine($"  Message: {fail.Message}");
@@ -416,11 +518,128 @@ public class UnityTools
             }
         }
 
+        double totalDuration = result.Duration > 0
+            ? result.Duration
+            : structuredFailures.Sum(f => f.Duration);
+
+        var structuredRunResult = new StructuredTestRunResult
+        {
+            Success = success,
+            PassCount = result.PassCount,
+            FailCount = result.FailCount,
+            SkipCount = result.SkipCount,
+            TotalCount = totalTests,
+            Duration = totalDuration,
+            ResultState = result.ResultState,
+            Message = result.Message ?? "",
+            Failures = structuredFailures
+        };
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
+            Content =
+            [
+                new TextContentBlock { Text = sb.ToString().TrimEnd() },
+                new TextContentBlock { Text = JsonSerializer.Serialize(structuredRunResult, s_JsonOptions) }
+            ],
             IsError = !success
         };
+    }
+
+    internal static (string? filePath, int? lineNumber, string? fileUri) ExtractSourceLocation(string? stackTrace, string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(stackTrace))
+            return (null, null, null);
+
+        using var reader = new StringReader(stackTrace);
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (line.Contains("<filename unknown>", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var match = s_StackTraceRegex.Match(line);
+            if (match.Success)
+            {
+                string rawFile = match.Groups["file"].Value.Trim();
+                if (int.TryParse(match.Groups["line"].Value, out int lineNum))
+                {
+                    string resolvedPath = rawFile;
+                    if (!Path.IsPathRooted(resolvedPath) && !string.IsNullOrEmpty(projectRoot))
+                    {
+                        resolvedPath = Path.Combine(projectRoot, resolvedPath);
+                    }
+
+                    string normalizedPath = resolvedPath.Replace('\\', '/');
+                    string fileUri = normalizedPath.StartsWith('/')
+                        ? $"file://{normalizedPath}#L{lineNum}"
+                        : $"file:///{normalizedPath}#L{lineNum}";
+
+                    return (rawFile, lineNum, fileUri);
+                }
+            }
+        }
+
+        return (null, null, null);
+    }
+
+    internal static List<StructuredCompilerDiagnostic> ParseCompilerDiagnostics(string? diagnosticText)
+    {
+        var diagnostics = new List<StructuredCompilerDiagnostic>();
+        if (string.IsNullOrWhiteSpace(diagnosticText))
+            return diagnostics;
+
+        using var reader = new StringReader(diagnosticText);
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            var match = s_CompilerDiagnosticRegex.Match(line.Trim());
+            if (match.Success)
+            {
+                diagnostics.Add(new StructuredCompilerDiagnostic
+                {
+                    File = match.Groups["file"].Value,
+                    Line = int.Parse(match.Groups["line"].Value),
+                    Column = int.Parse(match.Groups["col"].Value),
+                    Severity = match.Groups["severity"].Value.ToLowerInvariant(),
+                    Code = match.Groups["code"].Value,
+                    Message = match.Groups["msg"].Value.Trim(),
+                    Assembly = null
+                });
+            }
+        }
+
+        return diagnostics;
+    }
+
+    private string? ExtractActiveOperation(string status)
+    {
+        if (File.Exists(_processManager.OperationFile))
+        {
+            try
+            {
+                string json = UnityProcessManager.ReadFileWithRetry(_processManager.OperationFile, maxRetries: 2, delayMs: 20);
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    var op = JsonSerializer.Deserialize<UnityCliOperationState>(json);
+                    if (op != null && !string.IsNullOrEmpty(op.Kind))
+                    {
+                        return op.Kind;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        if (status.StartsWith("Busy (", StringComparison.OrdinalIgnoreCase) && status.EndsWith(")"))
+        {
+            string inner = status.Substring(6, status.Length - 7).Trim();
+            int commaIdx = inner.IndexOf(',');
+            return commaIdx >= 0 ? inner.Substring(0, commaIdx).Trim() : inner;
+        }
+
+        return null;
     }
 
     [McpServerTool(Name = "unity_stop")]

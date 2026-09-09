@@ -68,6 +68,9 @@ public class UnityTestRunResult
     [JsonPropertyName("resultState")]
     public string ResultState { get; set; } = "";
 
+    [JsonPropertyName("duration")]
+    public double Duration { get; set; }
+
     [JsonPropertyName("failedTests")]
     public List<FailedTestInfo> FailedTests { get; set; } = new();
 }
@@ -181,4 +184,124 @@ public class UnityCompilationException : System.Exception
     {
         ErrorLines = errorLines;
     }
+}
+
+public class StructuredTestFailure
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "";
+
+    [JsonPropertyName("fullName")]
+    public string FullName { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public double Duration { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("stackTrace")]
+    public string StackTrace { get; set; } = "";
+
+    [JsonPropertyName("filePath")]
+    public string? FilePath { get; set; }
+
+    [JsonPropertyName("lineNumber")]
+    public int? LineNumber { get; set; }
+
+    [JsonPropertyName("fileUri")]
+    public string? FileUri { get; set; }
+}
+
+public class StructuredTestRunResult
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("passCount")]
+    public int PassCount { get; set; }
+
+    [JsonPropertyName("failCount")]
+    public int FailCount { get; set; }
+
+    [JsonPropertyName("skipCount")]
+    public int SkipCount { get; set; }
+
+    [JsonPropertyName("totalCount")]
+    public int TotalCount { get; set; }
+
+    [JsonPropertyName("duration")]
+    public double Duration { get; set; }
+
+    [JsonPropertyName("resultState")]
+    public string ResultState { get; set; } = "";
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("failures")]
+    public List<StructuredTestFailure> Failures { get; set; } = new();
+}
+
+public class StructuredCompilerDiagnostic
+{
+    [JsonPropertyName("file")]
+    public string File { get; set; } = "";
+
+    [JsonPropertyName("line")]
+    public int Line { get; set; }
+
+    [JsonPropertyName("column")]
+    public int Column { get; set; }
+
+    [JsonPropertyName("severity")]
+    public string Severity { get; set; } = "";
+
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = "";
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("assembly")]
+    public string? Assembly { get; set; }
+}
+
+public class StructuredRefreshResult
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("interrupted")]
+    public bool Interrupted { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("diagnostics")]
+    public List<StructuredCompilerDiagnostic> Diagnostics { get; set; } = new();
+}
+
+public class StructuredStatusResult
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("editorVersion")]
+    public string? EditorVersion { get; set; }
+
+    [JsonPropertyName("projectRoot")]
+    public string? ProjectRoot { get; set; }
+
+    [JsonPropertyName("pid")]
+    public int? Pid { get; set; }
+
+    [JsonPropertyName("mode")]
+    public string? Mode { get; set; }
+
+    [JsonPropertyName("port")]
+    public int? Port { get; set; }
+
+    [JsonPropertyName("activeOperation")]
+    public string? ActiveOperation { get; set; }
 }

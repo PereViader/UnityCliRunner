@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -827,5 +828,259 @@ public class ToolFormattingTests
         {
             try { Directory.Delete(tempDir, true); } catch { }
         }
+    }
+
+    private static T? GetStructuredResult<T>(CallToolResult result) where T : class
+    {
+        if (result.Content.Count > 1 && result.Content[1] is TextContentBlock block)
+        {
+            return JsonSerializer.Deserialize<T>(block.Text);
+        }
+        return null;
+    }
+
+    // ==========================================
+    // 7. Structured Data & Diagnostics tests
+    // ==========================================
+
+    [Fact]
+    public async Task UnityRunTests_ReturnsStructuredDataWithCountsAndFailures()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            var failed = new List<FailedTestInfo>
+            {
+                new FailedTestInfo
+                {
+                    Name = "Test_AssertFailure",
+                    FullName = "MySuite.Test_AssertFailure",
+                    Duration = 0.25,
+                    Message = "Expected 10 but got 5",
+                    StackTrace = "  at MySuite.Test_AssertFailure () [0x00010] in Assets/Tests/Editor/DummyTest.cs:42\n"
+                }
+            };
+
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = false,
+                ResultState = "Failed",
+                PassCount = 7,
+                FailCount = 1,
+                SkipCount = 2,
+                Duration = 1.85,
+                FailedTests = failed
+            };
+
+            var result = await tools.UnityRunTestsAsync();
+
+            Assert.True(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+
+            string humanText = GetResultText(result);
+            Assert.Contains("Tests Failed: 1 failed, 7 passed, 2 skipped.", humanText);
+            Assert.Contains("• MySuite.Test_AssertFailure (0.250s)", humanText);
+            Assert.Contains("Location: [Assets/Tests/Editor/DummyTest.cs:42](file:///", humanText);
+
+            var structured = GetStructuredResult<StructuredTestRunResult>(result);
+            Assert.NotNull(structured);
+            Assert.False(structured.Success);
+            Assert.Equal(7, structured.PassCount);
+            Assert.Equal(1, structured.FailCount);
+            Assert.Equal(2, structured.SkipCount);
+            Assert.Equal(10, structured.TotalCount);
+            Assert.Equal(1.85, structured.Duration);
+            Assert.Equal("Failed", structured.ResultState);
+            Assert.Single(structured.Failures);
+
+            var f = structured.Failures[0];
+            Assert.Equal("Test_AssertFailure", f.Name);
+            Assert.Equal("MySuite.Test_AssertFailure", f.FullName);
+            Assert.Equal(0.25, f.Duration);
+            Assert.Equal("Expected 10 but got 5", f.Message);
+            Assert.Equal("Assets/Tests/Editor/DummyTest.cs", f.FilePath);
+            Assert.Equal(42, f.LineNumber);
+            Assert.NotNull(f.FileUri);
+            Assert.StartsWith("file:///", f.FileUri);
+            Assert.EndsWith("#L42", f.FileUri);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_ReturnsStructuredDiagnostics()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = false,
+                Interrupted = false,
+                Message = "Assets/Scripts/Game.cs(12,4): error CS0103: The name 'player' does not exist in the current context\n" +
+                          "Assets/Scripts/Util.cs(88,16): warning CS0219: The variable 'temp' is assigned but its value is never used"
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.True(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+
+            var structured = GetStructuredResult<StructuredRefreshResult>(result);
+            Assert.NotNull(structured);
+            Assert.False(structured.Success);
+            Assert.False(structured.Interrupted);
+            Assert.Equal(2, structured.Diagnostics.Count);
+
+            var d0 = structured.Diagnostics[0];
+            Assert.Equal("Assets/Scripts/Game.cs", d0.File);
+            Assert.Equal(12, d0.Line);
+            Assert.Equal(4, d0.Column);
+            Assert.Equal("error", d0.Severity);
+            Assert.Equal("CS0103", d0.Code);
+            Assert.Equal("The name 'player' does not exist in the current context", d0.Message);
+
+            var d1 = structured.Diagnostics[1];
+            Assert.Equal("Assets/Scripts/Util.cs", d1.File);
+            Assert.Equal(88, d1.Line);
+            Assert.Equal(16, d1.Column);
+            Assert.Equal("warning", d1.Severity);
+            Assert.Equal("CS0219", d1.Code);
+            Assert.Equal("The variable 'temp' is assigned but its value is never used", d1.Message);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRecompile_ReturnsStructuredDiagnostics()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = false,
+                Interrupted = false,
+                Message = "Assets/Scripts/RecompileTest.cs(5,10): error CS1002: ; expected"
+            };
+
+            var result = await tools.UnityRecompileAsync();
+
+            Assert.True(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+
+            var structured = GetStructuredResult<StructuredRefreshResult>(result);
+            Assert.NotNull(structured);
+            Assert.False(structured.Success);
+            Assert.Single(structured.Diagnostics);
+
+            var d = structured.Diagnostics[0];
+            Assert.Equal("Assets/Scripts/RecompileTest.cs", d.File);
+            Assert.Equal(5, d.Line);
+            Assert.Equal(10, d.Column);
+            Assert.Equal("error", d.Severity);
+            Assert.Equal("CS1002", d.Code);
+            Assert.Equal("; expected", d.Message);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityStatus_ReturnsStructuredStatusForReadyAndBusy()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            File.WriteAllText(Path.Combine(tempDir, "ProjectSettings", "ProjectVersion.txt"), "m_EditorVersion: 6000.0.32f1\n");
+            File.WriteAllText(Path.Combine(tempDir, "Temp", "unity_cli_port.txt"), "54321");
+
+            pm.Running = true;
+            pm.Pid = 4321;
+            pm.Mode = "Batchmode";
+            client.StatusToReturn = "Ready";
+
+            var readyResult = await tools.UnityStatusAsync();
+
+            Assert.False(readyResult.IsError);
+            Assert.Equal(2, readyResult.Content.Count);
+
+            var readyStructured = GetStructuredResult<StructuredStatusResult>(readyResult);
+            Assert.NotNull(readyStructured);
+            Assert.Equal("Ready", readyStructured.Status);
+            Assert.Equal("6000.0.32f1", readyStructured.EditorVersion);
+            Assert.Equal(pm.ProjectRoot, readyStructured.ProjectRoot);
+            Assert.Equal(4321, readyStructured.Pid);
+            Assert.Equal("Batchmode", readyStructured.Mode);
+            Assert.Equal(54321, readyStructured.Port);
+            Assert.Null(readyStructured.ActiveOperation);
+
+            // Busy status
+            client.StatusToReturn = "Busy (eval, started 2026-09-09T08:00:00Z)";
+            var busyResult = await tools.UnityStatusAsync();
+
+            Assert.False(busyResult.IsError);
+            Assert.Equal(2, busyResult.Content.Count);
+
+            var busyStructured = GetStructuredResult<StructuredStatusResult>(busyResult);
+            Assert.NotNull(busyStructured);
+            Assert.Equal("Busy (eval, started 2026-09-09T08:00:00Z)", busyStructured.Status);
+            Assert.Equal("eval", busyStructured.ActiveOperation);
+
+            // Not Running status
+            pm.Running = false;
+            client.StatusToReturn = "Not Running";
+            var notRunningResult = await tools.UnityStatusAsync();
+
+            Assert.False(notRunningResult.IsError);
+            Assert.Equal(2, notRunningResult.Content.Count);
+
+            var notRunningStructured = GetStructuredResult<StructuredStatusResult>(notRunningResult);
+            Assert.NotNull(notRunningStructured);
+            Assert.Equal("Not Running", notRunningStructured.Status);
+            Assert.Null(notRunningStructured.Pid);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Theory]
+    [InlineData("  at MySuite.Test () [0x00000] in C:/Code/Assets/Tests/Test.cs:55", "C:/Code/Assets/Tests/Test.cs", 55)]
+    [InlineData("   at MySuite.Test() in C:\\Code\\Assets\\Tests\\Test.cs:line 102", "C:\\Code\\Assets\\Tests\\Test.cs", 102)]
+    [InlineData("MySuite.Test () (at Assets/Tests/Test.cs:23)", "Assets/Tests/Test.cs", 23)]
+    [InlineData("  at NUnit.Framework.Assert.Fail() in <filename unknown>:0\n  at MySuite.Run() in Assets/Tests/Run.cs:99", "Assets/Tests/Run.cs", 99)]
+    public void ExtractSourceLocation_ExtractsExpectedFileAndLine(string stackTrace, string expectedFile, int expectedLine)
+    {
+        var (file, line, uri) = UnityTools.ExtractSourceLocation(stackTrace, "C:/ProjectRoot");
+
+        Assert.Equal(expectedFile, file);
+        Assert.Equal(expectedLine, line);
+        Assert.NotNull(uri);
+        Assert.StartsWith("file:///", uri);
+        Assert.EndsWith($"#L{expectedLine}", uri);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("  at MySuite.TestMethod() line 42")]
+    [InlineData("  at NUnit.Framework.Assert.AreEqual() in <filename unknown>:0")]
+    public void ExtractSourceLocation_WhenNoSourceLocation_ReturnsNulls(string? stackTrace)
+    {
+        var (file, line, uri) = UnityTools.ExtractSourceLocation(stackTrace, "C:/ProjectRoot");
+
+        Assert.Null(file);
+        Assert.Null(line);
+        Assert.Null(uri);
     }
 }

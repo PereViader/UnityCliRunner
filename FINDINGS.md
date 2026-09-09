@@ -87,3 +87,9 @@ This document records observed Unity Editor and Test Framework behavior, togethe
 - Generated Unity files and settings rewrites should be removed from the worktree after validation. Review `git status` and `git diff --check` so test artifacts, line-ending changes, and Unity migrations are not committed accidentally.
 - Golden-output normalization should be narrowly targeted to known nondeterminism such as duration, project path, or a fixture-specific IL offset. Never normalize error categories, operation IDs, or other values that establish protocol correctness.
 - Reliability tests should assert durable externally observable outcomes: exact operation correlation, atomic results, recovery after a lost connection, busy rejection, and successful continuation after a real domain reload.
+
+## MCP structured responses and diagnostics
+
+- When enhancing MCP tools to provide structured, machine-readable payloads, maintain backward compatibility for existing consumers and test frameworks by keeping `result.Content[0]` as the human-readable `TextContentBlock` and appending `result.Content[1]` as the JSON-serialized structured model. MCP clients that concatenate text content blocks continue to match expected strings without disruption.
+- Unity stack traces across Mono runtime, .NET Core runtime, and Unity Editor use varying line formats (`at ... [0x...] in <file>:<line>`, `at ... in <file>:line <line>`, and `... (at <file>:<line>)`). Robust source-location extraction must accommodate all three formats and filter out internal framework frames (such as `<filename unknown>:0` from NUnit assertion delegates) to locate actual user test code.
+- Formatting source locations with standard markdown links (`[FilePath:Line](file:///AbsolutePath#LLine)`) allows autonomous agents, terminal emulators, and IDEs to provide direct one-click navigation to failing assertions.
