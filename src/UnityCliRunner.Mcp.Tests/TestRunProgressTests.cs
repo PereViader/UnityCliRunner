@@ -35,7 +35,10 @@ public class TestRunProgressTests
             var logger = NullLogger<UnityProcessManager>.Instance;
             var procManager = new UnityProcessManager(tempDir, logger);
             var clientLogger = NullLogger<UnityClient>.Instance;
-            var client = new UnityClient(procManager, clientLogger);
+            var client = new UnityClient(procManager, clientLogger)
+            {
+                PollIntervalMs = 50
+            };
 
             var receivedProgress = new List<ProgressNotificationValue>();
             var progress = new Progress<ProgressNotificationValue>(p =>
@@ -47,6 +50,7 @@ public class TestRunProgressTests
             });
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            int pollCount = 0;
 
             // Run mock server handling socket commands in background
             var serverTask = Task.Run(async () =>
@@ -88,23 +92,28 @@ public class TestRunProgressTests
                             string[] parts = line.Split(' ');
                             string opId = parts.Length > 1 ? parts[1] : "test-op";
 
-                            // Simulate writing progress to unity_test_running.txt
-                            _ = Task.Run(async () =>
+                            var state1 = new UnityTestRunState
                             {
-                                await Task.Delay(200);
-                                var state1 = new UnityTestRunState
-                                {
-                                    RunId = opId,
-                                    Status = "Running",
-                                    TotalTests = 10,
-                                    CompletedTests = 2,
-                                    PassCount = 2,
-                                    FailCount = 0,
-                                    CurrentTestName = "Suite.TestAlpha"
-                                };
-                                File.WriteAllText(procManager.TestRunningFile, JsonSerializer.Serialize(state1));
+                                RunId = opId,
+                                Status = "Running",
+                                TotalTests = 10,
+                                CompletedTests = 2,
+                                PassCount = 2,
+                                FailCount = 0,
+                                CurrentTestName = "Suite.TestAlpha"
+                            };
+                            File.WriteAllText(procManager.TestRunningFile, JsonSerializer.Serialize(state1));
 
-                                await Task.Delay(300);
+                            await writer.WriteLineAsync("RUNNING");
+                        }
+                        else if (line.StartsWith("POLL_TESTS"))
+                        {
+                            string[] parts = line.Split(' ');
+                            string opId = parts.Length > 1 ? parts[1] : "test-op";
+                            pollCount++;
+
+                            if (pollCount == 1)
+                            {
                                 var state2 = new UnityTestRunState
                                 {
                                     RunId = opId,
@@ -116,8 +125,10 @@ public class TestRunProgressTests
                                     CurrentTestName = "Suite.TestBeta"
                                 };
                                 File.WriteAllText(procManager.TestRunningFile, JsonSerializer.Serialize(state2));
-
-                                await Task.Delay(300);
+                                await writer.WriteLineAsync("RUNNING");
+                            }
+                            else
+                            {
                                 var result = new UnityTestRunResult
                                 {
                                     RunId = opId,
@@ -128,19 +139,7 @@ public class TestRunProgressTests
                                     ResultState = "Passed"
                                 };
                                 File.WriteAllText(procManager.TestResultsFile, JsonSerializer.Serialize(result));
-                            });
-
-                            await writer.WriteLineAsync("RUNNING");
-                        }
-                        else if (line.StartsWith("POLL_TESTS"))
-                        {
-                            if (File.Exists(procManager.TestResultsFile))
-                            {
                                 await writer.WriteLineAsync("SUCCESS 9 passed");
-                            }
-                            else
-                            {
-                                await writer.WriteLineAsync("RUNNING");
                             }
                         }
                     }
@@ -195,6 +194,8 @@ public class TestRunProgressTests
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
 
+            int pollCount = 0;
+
             var serverTask = Task.Run(async () =>
             {
                 while (!cts.IsCancellationRequested)
@@ -230,22 +231,28 @@ public class TestRunProgressTests
                             string[] parts = line.Split(' ');
                             string opId = parts.Length > 1 ? parts[1] : "test-op";
 
-                            _ = Task.Run(async () =>
+                            var state = new UnityTestRunState
                             {
-                                await Task.Delay(200);
-                                var state = new UnityTestRunState
-                                {
-                                    RunId = opId,
-                                    Status = "Running",
-                                    TotalTests = 5,
-                                    CompletedTests = 3,
-                                    PassCount = 3,
-                                    FailCount = 0,
-                                    CurrentTestName = "SampleTest.TestMethod"
-                                };
-                                File.WriteAllText(Path.Combine(unityTemp, "unity_test_running.txt"), JsonSerializer.Serialize(state));
+                                RunId = opId,
+                                Status = "Running",
+                                TotalTests = 5,
+                                CompletedTests = 3,
+                                PassCount = 3,
+                                FailCount = 0,
+                                CurrentTestName = "SampleTest.TestMethod"
+                            };
+                            File.WriteAllText(Path.Combine(unityTemp, "unity_test_running.txt"), JsonSerializer.Serialize(state));
 
-                                await Task.Delay(300);
+                            await writer.WriteLineAsync("RUNNING");
+                        }
+                        else if (line.StartsWith("POLL_TESTS"))
+                        {
+                            string[] parts = line.Split(' ');
+                            string opId = parts.Length > 1 ? parts[1] : "test-op";
+                            pollCount++;
+
+                            if (pollCount == 1)
+                            {
                                 var result = new UnityTestRunResult
                                 {
                                     RunId = opId,
@@ -256,19 +263,11 @@ public class TestRunProgressTests
                                     ResultState = "Passed"
                                 };
                                 File.WriteAllText(Path.Combine(unityTemp, "unity_test_results.json"), JsonSerializer.Serialize(result));
-                            });
-
-                            await writer.WriteLineAsync("RUNNING");
-                        }
-                        else if (line.StartsWith("POLL_TESTS"))
-                        {
-                            if (File.Exists(Path.Combine(unityTemp, "unity_test_results.json")))
-                            {
-                                await writer.WriteLineAsync("SUCCESS 5 passed");
+                                await writer.WriteLineAsync("RUNNING");
                             }
                             else
                             {
-                                await writer.WriteLineAsync("RUNNING");
+                                await writer.WriteLineAsync("SUCCESS 5 passed");
                             }
                         }
                     }

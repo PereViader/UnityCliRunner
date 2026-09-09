@@ -87,6 +87,7 @@ This document records observed Unity Editor and Test Framework behavior, togethe
 - Generated Unity files and settings rewrites should be removed from the worktree after validation. Review `git status` and `git diff --check` so test artifacts, line-ending changes, and Unity migrations are not committed accidentally.
 - Golden-output normalization should be narrowly targeted to known nondeterminism such as duration, project path, or a fixture-specific IL offset. Never normalize error categories, operation IDs, or other values that establish protocol correctness.
 - Reliability tests should assert durable externally observable outcomes: exact operation correlation, atomic results, recovery after a lost connection, busy rejection, and successful continuation after a real domain reload.
+- Mock socket servers in tests verifying multi-stage progress reporting must coordinate state progression with polling commands (such as advancing running state on `POLL_TESTS`) rather than using uncoordinated `Task.Delay` in background threads. Under variable CPU load or multi-core contention in CI containers, thread scheduling jitter can cause background delays to elapse faster or slower than client poll intervals, causing intermediate progress states to be overwritten before the polling client can observe them.
 
 ## MCP structured responses and diagnostics
 

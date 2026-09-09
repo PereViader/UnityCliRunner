@@ -30,6 +30,11 @@ public class UnityClient
     }
 
     /// <summary>
+    /// Interval in milliseconds between polling checks during long-running operations. Defaults to 500ms.
+    /// </summary>
+    public int PollIntervalMs { get; set; } = 500;
+
+    /// <summary>
     /// Returns current Editor connection state: Ready, Not Running, Compiling, Running Unreachable, Busy.
     /// </summary>
     public virtual async Task<string> GetStatusAsync(CancellationToken cancellationToken = default)
@@ -208,6 +213,7 @@ public class UnityClient
             IsMatch = r => r.OperationId == opId,
             PollCommand = $"POLL_REFRESH {opId}",
             PollTimeoutSeconds = 2,
+            PollIntervalMs = PollIntervalMs,
             OnResultFound = r =>
             {
                 progress?.Report(new ProgressNotificationValue
@@ -595,6 +601,7 @@ public class UnityClient
             IsMatch = r => r.RunId == opId,
             PollCommand = $"POLL_TESTS {opId}",
             PollTimeoutSeconds = 5,
+            PollIntervalMs = PollIntervalMs,
             OnResultFound = res =>
             {
                 ReportFinalProgress(progress, res);
@@ -880,6 +887,7 @@ public class UnityClient
             IsMatch = r => r.OperationId == opId,
             PollCommand = pollCommand,
             PollTimeoutSeconds = 5,
+            PollIntervalMs = PollIntervalMs,
             OnResultFound = onResultFound,
             CreateProcessExitedResult = id => new TResult
             {
