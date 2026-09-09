@@ -662,6 +662,110 @@ public class ToolFormattingTests
         }
     }
 
+    [Fact]
+    public async Task UnityRunTests_WhenFilterSpecifiedAndZeroTestsRun_ReturnsErrorWithDescriptiveMessage()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = true,
+                FailCount = 0,
+                PassCount = 0,
+                SkipCount = 0
+            };
+
+            var result = await tools.UnityRunTestsAsync(filter: "SomeFilter");
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("No tests found matching filter 'SomeFilter' (mode: all).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRunTests_WhenCategorySpecifiedAndZeroTestsRun_ReturnsErrorWithDescriptiveMessage()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = true,
+                FailCount = 0,
+                PassCount = 0,
+                SkipCount = 0
+            };
+
+            var result = await tools.UnityRunTestsAsync(category: "SomeCat");
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("No tests found matching category 'SomeCat' (mode: all).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRunTests_WhenFilterAndCategorySpecifiedAndZeroTestsRun_ReturnsErrorWithBoth()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = true,
+                FailCount = 0,
+                PassCount = 0,
+                SkipCount = 0
+            };
+
+            var result = await tools.UnityRunTestsAsync(filter: "SomeFilter", category: "SomeCat");
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("No tests found matching filter 'SomeFilter' and category 'SomeCat' (mode: all).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRunTests_WhenUnfilteredAndZeroTestsRun_ReturnsSuccessWithEmptySuiteMessage()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = true,
+                FailCount = 0,
+                PassCount = 0,
+                SkipCount = 0
+            };
+
+            var result = await tools.UnityRunTestsAsync();
+
+            Assert.False(result.IsError);
+            string text = GetResultText(result);
+            Assert.Equal("Tests Passed: 0 passed, 0 skipped (no tests found in suite).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
     // ==========================================
     // 6. unity_stop tests
     // ==========================================

@@ -323,23 +323,18 @@ public class UnityTools
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        mode = string.IsNullOrWhiteSpace(mode) ? "all" : mode;
         var result = await _client.RunTestsAsync(filter, category, mode, failedOnly, progress, cancellationToken);
         var sb = new StringBuilder();
 
+        bool hasFilter = !string.IsNullOrWhiteSpace(filter);
+        bool hasCategory = !string.IsNullOrWhiteSpace(category);
+        bool hasFilterOrCategory = hasFilter || hasCategory;
+        int totalTests = result.PassCount + result.FailCount + result.SkipCount;
+
         bool success = result.Success && result.FailCount == 0;
 
-        if (result.Success)
-        {
-            if (result.PassCount == 0 && result.SkipCount == 0 && !string.IsNullOrWhiteSpace(result.Message))
-            {
-                sb.AppendLine(result.Message);
-            }
-            else
-            {
-                sb.AppendLine($"Tests Passed: {result.PassCount} passed, {result.SkipCount} skipped.");
-            }
-        }
-        else if (result.ResultState == "CompileError")
+        if (result.ResultState == "CompileError")
         {
             sb.AppendLine("Test execution aborted: Script compilation failed.");
             if (!string.IsNullOrWhiteSpace(result.Message))
@@ -350,6 +345,40 @@ public class UnityTools
         else if (result.ResultState == "Interrupted")
         {
             sb.AppendLine($"Test run interrupted: {result.Message}");
+        }
+        else if (hasFilterOrCategory && totalTests == 0)
+        {
+            success = false;
+            if (hasFilter && hasCategory)
+            {
+                sb.AppendLine($"No tests found matching filter '{filter}' and category '{category}' (mode: {mode}).");
+            }
+            else if (hasFilter)
+            {
+                sb.AppendLine($"No tests found matching filter '{filter}' (mode: {mode}).");
+            }
+            else
+            {
+                sb.AppendLine($"No tests found matching category '{category}' (mode: {mode}).");
+            }
+        }
+        else if (result.Success)
+        {
+            if (totalTests == 0)
+            {
+                if (!string.IsNullOrWhiteSpace(result.Message))
+                {
+                    sb.AppendLine(result.Message);
+                }
+                else
+                {
+                    sb.AppendLine("Tests Passed: 0 passed, 0 skipped (no tests found in suite).");
+                }
+            }
+            else
+            {
+                sb.AppendLine($"Tests Passed: {result.PassCount} passed, {result.SkipCount} skipped.");
+            }
         }
         else
         {
