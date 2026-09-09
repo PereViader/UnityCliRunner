@@ -508,6 +508,8 @@ public class ToolFormattingTests
 
             Assert.False(result.IsError);
             Assert.Equal("100", GetResultText(result));
+            Assert.DoesNotContain("Logs:", GetResultText(result));
+            Assert.DoesNotContain("Result:", GetResultText(result));
         }
         finally
         {
@@ -532,6 +534,112 @@ public class ToolFormattingTests
 
             Assert.False(result.IsError);
             Assert.Equal("Logged message from snippet", GetResultText(result));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityEval_WithLogsAndPayload_SeparatesLogsAndResult()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.EvalResultToReturn = new UnityEvalResult
+            {
+                Success = true,
+                Payload = "42",
+                Logs =
+                [
+                    new ConsoleLogEntry { LogType = "Log", Message = "Calculating value..." },
+                    new ConsoleLogEntry { LogType = "Warning", Message = "Calculation took longer than expected" }
+                ],
+                Duration = 0.05
+            };
+
+            var result = await tools.UnityEvalAsync("Debug.Log(\"Calculating value...\"); 42");
+
+            Assert.False(result.IsError);
+            string text = GetResultText(result);
+            Assert.StartsWith("Logs:", text);
+            Assert.Contains("Calculating value...", text);
+            Assert.Contains("[Warning] Calculation took longer than expected", text);
+            Assert.Contains("Result:", text);
+            Assert.EndsWith("42", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityEval_StructuredJsonInContentBlock1()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.EvalResultToReturn = new UnityEvalResult
+            {
+                Success = true,
+                Payload = "42",
+                Duration = 0.05,
+                Logs = [new ConsoleLogEntry { LogType = "Log", Message = "step 1" }]
+            };
+
+            var result = await tools.UnityEvalAsync("42");
+
+            Assert.False(result.IsError);
+            Assert.Equal(2, result.Content.Count);
+            Assert.True(result.Content[1] is TextContentBlock);
+
+            var jsonBlock = (TextContentBlock)result.Content[1];
+            var structured = JsonSerializer.Deserialize<StructuredEvalResult>(jsonBlock.Text);
+
+            Assert.NotNull(structured);
+            Assert.True(structured.Success);
+            Assert.False(structured.Interrupted);
+            Assert.Equal("42", structured.Payload);
+            Assert.Equal(0.05, structured.Duration);
+            Assert.Single(structured.Logs);
+            Assert.Equal("step 1", structured.Logs[0].Message);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityEval_FailureWithLogs_SeparatesLogsAndError()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.EvalResultToReturn = new UnityEvalResult
+            {
+                Success = false,
+                Message = "NullReferenceException: Object reference not set to an instance of an object",
+                Logs = [new ConsoleLogEntry { LogType = "Error", Message = "Failed to locate target" }]
+            };
+
+            var result = await tools.UnityEvalAsync("GameObject.Find(\"Missing\").name");
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.StartsWith("Logs:", text);
+            Assert.Contains("[Error] Failed to locate target", text);
+            Assert.Contains("Error:", text);
+            Assert.Contains("NullReferenceException:", text);
+
+            Assert.Equal(2, result.Content.Count);
+            var jsonBlock = (TextContentBlock)result.Content[1];
+            var structured = JsonSerializer.Deserialize<StructuredEvalResult>(jsonBlock.Text);
+            Assert.NotNull(structured);
+            Assert.False(structured.Success);
+            Assert.Equal("NullReferenceException: Object reference not set to an instance of an object", structured.Message);
         }
         finally
         {

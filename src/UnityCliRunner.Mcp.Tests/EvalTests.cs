@@ -212,4 +212,53 @@ public class EvalTests
         Assert.True(result.IsError);
         Assert.Contains("delayed-fail", result.Text);
     }
+
+    [Fact]
+    public async Task TestEvalDefaultImports_ResolvesExpandedNamespaces()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        // Uses Path from System.IO, Image from UnityEngine.UI, UIBehaviour from UnityEngine.EventSystems, AnimatorController from UnityEditor.Animations
+        string code = "Path.Combine(\"dir\", \"file\") + \":\" + typeof(Image).Name + \":\" + typeof(UIBehaviour).Name + \":\" + typeof(AnimatorController).Name";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("dir", result.Text);
+        Assert.Contains("Image", result.Text);
+        Assert.Contains("UIBehaviour", result.Text);
+        Assert.Contains("AnimatorController", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalFormatting_Scene_ReturnsRicherFormat()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "SceneManager.GetActiveScene()" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("Scene \"", result.Text);
+        Assert.Contains("path: \"", result.Text);
+        Assert.Contains("isLoaded:", result.Text);
+        Assert.Contains("isDirty:", result.Text);
+        Assert.Contains("rootCount:", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalFormatting_Transform_ReturnsTransformFormat()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "new GameObject(\"EvalTransformTest\").transform" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("Transform \"EvalTransformTest\" [children: 0, localPos:", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalFormatting_ScriptableObject_ReturnsScriptableObjectFormat()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "ScriptableObject.CreateInstance<ScriptableObject>()" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("ScriptableObject (ScriptableObject) [name:", result.Text);
+    }
 }

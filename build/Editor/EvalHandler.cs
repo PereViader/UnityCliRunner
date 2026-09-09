@@ -230,29 +230,58 @@ namespace UnityCliRunner
             return false;
         }
 
+        private static bool HasType(string fullName)
+        {
+            try
+            {
+                return CommandHelper.FindType(fullName) != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static string BuildSource(string methodBody)
         {
-            return @"using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using UnityEngine;
-using UnityEngine.SceneManagement;
-using UnityEditor;
-using UnityEditor.SceneManagement;
+            var sb = new StringBuilder();
+            sb.AppendLine("using System;");
+            sb.AppendLine("using System.Collections;");
+            sb.AppendLine("using System.Collections.Generic;");
+            sb.AppendLine("using System.IO;");
+            sb.AppendLine("using System.Linq;");
+            sb.AppendLine("using System.Reflection;");
+            sb.AppendLine("using System.Text;");
+            sb.AppendLine("using System.Threading;");
+            sb.AppendLine("using System.Threading.Tasks;");
+            sb.AppendLine("using UnityEngine;");
+            sb.AppendLine("using UnityEngine.SceneManagement;");
+            sb.AppendLine("using UnityEditor;");
+            sb.AppendLine("using UnityEditor.SceneManagement;");
 
-public static class __UnityCliEvalRunner
-{
-    public static async Task<object> Execute(CancellationToken cancellationToken)
-    {
-#line 1 ""eval""
-" + methodBody + @"
-    }
-}";
+            if (HasType("UnityEngine.UI.Button") || HasType("UnityEngine.UI.CanvasUpdate"))
+            {
+                sb.AppendLine("using UnityEngine.UI;");
+            }
+            if (HasType("UnityEngine.EventSystems.EventSystem") || HasType("UnityEngine.EventSystems.UIBehaviour"))
+            {
+                sb.AppendLine("using UnityEngine.EventSystems;");
+            }
+            if (HasType("UnityEditor.Animations.AnimatorController"))
+            {
+                sb.AppendLine("using UnityEditor.Animations;");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("public static class __UnityCliEvalRunner");
+            sb.AppendLine("{");
+            sb.AppendLine("    public static async Task<object> Execute(CancellationToken cancellationToken)");
+            sb.AppendLine("    {");
+            sb.AppendLine("#line 1 \"eval\"");
+            sb.AppendLine(methodBody);
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+            return sb.ToString();
         }
 
         [Obsolete("Running state is now tracked exclusively in UnityCliOperationStore.")]

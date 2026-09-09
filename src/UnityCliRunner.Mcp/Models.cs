@@ -282,6 +282,27 @@ public class StructuredRefreshResult
     public List<StructuredCompilerDiagnostic> Diagnostics { get; set; } = new();
 }
 
+public class StructuredEvalResult
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("interrupted")]
+    public bool Interrupted { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+
+    [JsonPropertyName("duration")]
+    public double Duration { get; set; }
+
+    [JsonPropertyName("payload")]
+    public string? Payload { get; set; }
+
+    [JsonPropertyName("logs")]
+    public List<ConsoleLogEntry> Logs { get; set; } = new();
+}
+
 public class StructuredStatusResult
 {
     [JsonPropertyName("status")]

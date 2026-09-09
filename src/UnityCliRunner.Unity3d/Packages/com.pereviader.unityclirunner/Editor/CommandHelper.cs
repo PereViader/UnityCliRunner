@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace UnityCliRunner
 {
@@ -237,6 +238,7 @@ namespace UnityCliRunner
             if (result is UnityEngine.Object unityObj && unityObj == null)
             {
                 if (result is GameObject) return "null (GameObject)";
+                if (result is Transform) return "null (Transform)";
                 if (result is Component) return "null (Component)";
                 return $"null ({result.GetType().Name})";
             }
@@ -252,12 +254,47 @@ namespace UnityCliRunner
                 return $"{go.name} (GameObject) [active: {go.activeSelf}, tag: \"{go.tag}\", layer: {go.layer}, components: {string.Join(", ", compNames)}]";
             }
 
+            // Transform formatting (must precede Component formatting)
+            if (result is Transform t)
+            {
+                if (t == null) return "null (Transform)";
+                return $"Transform \"{t.name}\" [children: {t.childCount}, localPos: {t.localPosition}, localRot: {t.localEulerAngles}]";
+            }
+
             // Component formatting
             if (result is Component comp)
             {
                 if (comp == null) return "null (Component)";
                 string goName = comp.gameObject != null ? comp.gameObject.name : "null";
                 return $"{comp.GetType().Name} (Component on \"{goName}\")";
+            }
+
+            // ScriptableObject formatting
+            if (result is ScriptableObject so)
+            {
+                if (so == null) return $"null ({result.GetType().Name})";
+                return $"{so.GetType().Name} (ScriptableObject) [name: \"{so.name}\", assetPath: \"{AssetDatabase.GetAssetPath(so)}\"]";
+            }
+
+            // Scene formatting
+            if (result is Scene scene)
+            {
+                return $"Scene \"{scene.name}\" [path: \"{scene.path}\", isLoaded: {scene.isLoaded}, isDirty: {scene.isDirty}, rootCount: {scene.rootCount}]";
+            }
+
+            // SerializedObject formatting
+            if (result is SerializedObject serializedObj)
+            {
+                return $"SerializedObject on \"{serializedObj.targetObject?.name}\" ({serializedObj.targetObject?.GetType().Name})";
+            }
+
+            // SerializedProperty formatting
+            if (result is SerializedProperty prop)
+            {
+                string propVal = FormatSerializedPropertyValue(prop);
+                return propVal != null
+                    ? $"SerializedProperty \"{prop.propertyPath}\" ({prop.propertyType}) = {propVal}"
+                    : $"SerializedProperty \"{prop.propertyPath}\" ({prop.propertyType})";
             }
 
             // Collections / IEnumerable
@@ -290,6 +327,51 @@ namespace UnityCliRunner
             catch { }
 
             return result.ToString();
+        }
+
+        private static string FormatSerializedPropertyValue(SerializedProperty prop)
+        {
+            try
+            {
+                switch (prop.propertyType)
+                {
+                    case SerializedPropertyType.Integer:
+                        return prop.intValue.ToString();
+                    case SerializedPropertyType.Boolean:
+                        return prop.boolValue ? "true" : "false";
+                    case SerializedPropertyType.Float:
+                        return prop.floatValue.ToString(CultureInfo.InvariantCulture);
+                    case SerializedPropertyType.String:
+                        return $"\"{prop.stringValue}\"";
+                    case SerializedPropertyType.Color:
+                        return prop.colorValue.ToString();
+                    case SerializedPropertyType.ObjectReference:
+                        var obj = prop.objectReferenceValue;
+                        return obj != null ? $"\"{obj.name}\" ({obj.GetType().Name})" : "null";
+                    case SerializedPropertyType.Enum:
+                        return prop.enumNames != null && prop.enumValueIndex >= 0 && prop.enumValueIndex < prop.enumNames.Length
+                            ? prop.enumNames[prop.enumValueIndex]
+                            : prop.enumValueIndex.ToString();
+                    case SerializedPropertyType.Vector2:
+                        return prop.vector2Value.ToString();
+                    case SerializedPropertyType.Vector3:
+                        return prop.vector3Value.ToString();
+                    case SerializedPropertyType.Vector4:
+                        return prop.vector4Value.ToString();
+                    case SerializedPropertyType.Rect:
+                        return prop.rectValue.ToString();
+                    case SerializedPropertyType.ArraySize:
+                        return prop.intValue.ToString();
+                    case SerializedPropertyType.Character:
+                        return ((char)prop.intValue).ToString();
+                    default:
+                        return null;
+                }
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public static Type FindType(string fullName)

@@ -257,68 +257,100 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_eval")]
-    [Description("Evaluates dynamic C# snippet in-memory against active Editor/Play Mode session.")]
+    [Description("Evaluates dynamic C# snippet in-memory (<80ms, no domain reload) against active Editor/Play Mode session. Primary data-gathering channel for inspecting Unity state.\nQuick patterns:\n- Active scene: SceneManager.GetActiveScene()\n- Find GameObjects: GameObject.FindObjectsByType<GameObject>(FindObjectsSortMode.None)\n- Find components: GameObject.FindObjectsByType<Camera>(FindObjectsSortMode.None)\n- Inspect hierarchy: Selection.activeTransform or GameObject.Find(\"Player\")?.transform\n- Serialized properties: new SerializedObject(Selection.activeObject).FindProperty(\"m_Name\")\n- Asset database: AssetDatabase.FindAssets(\"t:Prefab\")")]
     public async Task<CallToolResult> UnityEvalAsync(
-        [Description("C# expression, statement, or multi-statement snippet to evaluate in Unity Editor.")] string code,
+        [Description("C# expression, statement, or multi-statement snippet to evaluate in Unity Editor. Common imports (UnityEngine, UnityEditor, SceneManagement, UI, EventSystems, Animations, System.IO, Linq) are included by default.")] string code,
         CancellationToken cancellationToken = default)
     {
         var result = await _client.EvalAsync(code, cancellationToken);
-        var sb = new StringBuilder();
 
+        string logsText = "";
         if (result.Logs.Count > 0)
         {
+            var logSb = new StringBuilder();
             foreach (var log in result.Logs)
             {
                 if (log.LogType == "Warning")
                 {
-                    sb.AppendLine($"[Warning] {log.Message}");
+                    logSb.AppendLine($"[Warning] {log.Message}");
                 }
                 else if (log.LogType is "Error" or "Assert" or "Exception")
                 {
-                    sb.AppendLine($"[{log.LogType}] {log.Message}");
+                    logSb.AppendLine($"[{log.LogType}] {log.Message}");
                 }
                 else
                 {
-                    sb.AppendLine(log.Message);
+                    logSb.AppendLine(log.Message);
                 }
             }
+            logsText = logSb.ToString().TrimEnd();
         }
+
+        bool hasLogs = !string.IsNullOrEmpty(logsText);
+        string humanText;
 
         if (result.Success)
         {
-            if (!string.IsNullOrEmpty(result.Payload))
+            bool hasPayload = !string.IsNullOrEmpty(result.Payload);
+            if (hasLogs && hasPayload)
             {
-                sb.Append(result.Payload);
+                humanText = $"Logs:{Environment.NewLine}{logsText}{Environment.NewLine}{Environment.NewLine}Result:{Environment.NewLine}{result.Payload!.TrimEnd()}";
             }
-
-            string text = sb.ToString().TrimEnd();
-            if (string.IsNullOrEmpty(text))
+            else if (hasPayload)
             {
-                text = "(Evaluation succeeded with no output)";
+                humanText = result.Payload!.TrimEnd();
             }
-
-            return new CallToolResult
+            else if (hasLogs)
             {
-                Content = [new TextContentBlock { Text = text }],
-                IsError = false
-            };
-        }
-
-        if (result.Interrupted)
-        {
-            sb.Append(string.IsNullOrWhiteSpace(result.Message)
-                ? "Command interrupted by Unity recompilation outside the Unity CLI workflow."
-                : result.Message);
+                humanText = logsText;
+            }
+            else
+            {
+                humanText = "(Evaluation succeeded with no output)";
+            }
         }
         else
         {
-            sb.Append(string.IsNullOrWhiteSpace(result.Message) ? "Evaluation failed." : result.Message);
+            string errorMsg;
+            if (result.Interrupted)
+            {
+                errorMsg = string.IsNullOrWhiteSpace(result.Message)
+                    ? "Command interrupted by Unity recompilation outside the Unity CLI workflow."
+                    : result.Message;
+            }
+            else
+            {
+                errorMsg = string.IsNullOrWhiteSpace(result.Message) ? "Evaluation failed." : result.Message;
+            }
+
+            if (hasLogs)
+            {
+                humanText = $"Logs:{Environment.NewLine}{logsText}{Environment.NewLine}{Environment.NewLine}Error:{Environment.NewLine}{errorMsg.TrimEnd()}";
+            }
+            else
+            {
+                humanText = errorMsg.TrimEnd();
+            }
         }
+
+        var structured = new StructuredEvalResult
+        {
+            Success = result.Success,
+            Interrupted = result.Interrupted,
+            Message = result.Message ?? "",
+            Duration = result.Duration,
+            Payload = result.Payload,
+            Logs = result.Logs ?? new()
+        };
 
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            IsError = true
+            Content =
+            [
+                new TextContentBlock { Text = humanText },
+                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
+            ],
+            IsError = !result.Success
         };
     }
 
