@@ -109,7 +109,7 @@ public class LifecycleAndCompilationTests
 
         try
         {
-            await File.WriteAllTextAsync(operationFile, testOperationJson);
+            WriteAtomic(operationFile, testOperationJson);
 
             await using (var client = new McpTestClient(_fixture.UnityRoot))
             {
@@ -200,7 +200,7 @@ public class LifecycleAndCompilationTests
 
         try
         {
-            await File.WriteAllTextAsync(operationFile, testOperationJson);
+            WriteAtomic(operationFile, testOperationJson);
             Assert.True(File.Exists(operationFile));
 
             using (var tcpClient = new TcpClient())
@@ -418,6 +418,47 @@ public class LifecycleAndCompilationTests
 
         string status = await client.GetStatusAsync();
         Assert.Equal("Ready", status);
+    }
+
+    private static void WriteAtomic(string path, string content)
+    {
+        string dir = Path.GetDirectoryName(path)!;
+        Directory.CreateDirectory(dir);
+        string tempPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(tempPath, content, new UTF8Encoding(false));
+            for (int i = 0; i < 5; i++)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Replace(tempPath, path, null);
+                    }
+                    else
+                    {
+                        File.Move(tempPath, path);
+                    }
+                    return;
+                }
+                catch (IOException) when (i < 4)
+                {
+                    Thread.Sleep(10);
+                }
+                catch (UnauthorizedAccessException) when (i < 4)
+                {
+                    Thread.Sleep(10);
+                }
+            }
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                try { File.Delete(tempPath); } catch { }
+            }
+        }
     }
 
     private static void DeleteFileWithRetry(string path, int maxRetries = 10, int delayMs = 50)

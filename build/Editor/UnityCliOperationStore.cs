@@ -7,7 +7,7 @@ using UnityEngine;
 namespace UnityCliRunner
 {
     [Serializable]
-    internal sealed class UnityCliOperationState
+    public sealed class UnityCliOperationState
     {
         public string operationId;
         public string kind;
@@ -114,7 +114,29 @@ namespace UnityCliRunner
                     return null;
                 }
 
-                var state = JsonUtility.FromJson<UnityCliOperationState>(File.ReadAllText(OperationFilePath));
+                string json = null;
+                for (int i = 0; i < 3; i++)
+                {
+                    try
+                    {
+                        json = File.ReadAllText(OperationFilePath);
+                        if (!string.IsNullOrWhiteSpace(json))
+                        {
+                            break;
+                        }
+                    }
+                    catch (IOException) when (i < 2)
+                    {
+                        System.Threading.Thread.Sleep(10);
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return null;
+                }
+
+                var state = JsonUtility.FromJson<UnityCliOperationState>(json);
                 if (state == null || !IsValidToken(state.operationId) || !IsValidToken(state.kind))
                 {
                     QuarantineMalformedRecord();

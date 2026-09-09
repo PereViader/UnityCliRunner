@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace UnityCliRunner
@@ -155,7 +156,7 @@ namespace UnityCliRunner
                 operationId: operationId,
                 operationKind: OperationKinds.Execute,
                 resultFilePath: UnityCliPaths.ExecuteResultFile,
-                isVoid: method.ReturnType == typeof(void),
+                isVoid: method.ReturnType == typeof(void) || method.ReturnType == typeof(Task) || method.ReturnType == typeof(ValueTask),
                 canCancel: hasCt,
                 invoker: ct =>
                 {

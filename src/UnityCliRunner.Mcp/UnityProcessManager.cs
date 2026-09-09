@@ -591,7 +591,12 @@ public class UnityProcessManager
 
                     if (!startedProcess.HasExited)
                     {
-                        try { startedProcess.Kill(true); } catch { }
+                        try
+                        {
+                            startedProcess.Kill(true);
+                            startedProcess.WaitForExit();
+                        }
+                        catch { }
                     }
 
                     throw new UnityCompilationException(

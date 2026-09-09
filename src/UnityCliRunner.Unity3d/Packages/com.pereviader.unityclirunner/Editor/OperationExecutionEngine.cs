@@ -344,15 +344,22 @@ namespace UnityCliRunner
             // Check if generic Task<T>
             Type tType = innerTask.GetType();
             PropertyInfo resultProp = null;
-            Type cur = tType;
-            while (cur != null && cur != typeof(object))
+            if (!isVoid)
             {
-                if (cur.IsGenericType && cur.GetGenericTypeDefinition() == typeof(Task<>))
+                Type cur = tType;
+                while (cur != null && cur != typeof(object))
                 {
-                    resultProp = cur.GetProperty("Result");
-                    break;
+                    if (cur.IsGenericType && cur.GetGenericTypeDefinition() == typeof(Task<>))
+                    {
+                        var genericArgs = cur.GetGenericArguments();
+                        if (genericArgs.Length > 0 && genericArgs[0].Name != "VoidTaskResult")
+                        {
+                            resultProp = cur.GetProperty("Result");
+                        }
+                        break;
+                    }
+                    cur = cur.BaseType;
                 }
-                cur = cur.BaseType;
             }
 
             if (resultProp != null)

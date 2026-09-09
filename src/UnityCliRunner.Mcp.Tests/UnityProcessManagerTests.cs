@@ -338,6 +338,7 @@ public class UnityProcessManagerTests
             });
 
             Assert.Contains("NewBroken.cs", ex.Message);
+            try { proc.WaitForExit(3000); } catch { }
             Assert.True(proc.HasExited, "Started process should have been killed when compilation error was detected.");
         }
         finally

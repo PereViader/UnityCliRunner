@@ -210,7 +210,7 @@ public class ExecuteMethodTests
         });
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("Method execution succeeded.", result.Text);
+        Assert.Equal("null", result.Text);
     }
 
     [Fact]
