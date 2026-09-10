@@ -27,7 +27,7 @@ public class LifecycleAndCompilationTests
         var result = await client.CallToolAsync("unity_status");
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("Status: Ready", result.Text);
+        Assert.Contains("Ready", result.Text);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class LifecycleAndCompilationTests
                 var result = await client.CallToolAsync("unity_status");
 
                 Assert.False(result.IsError, result.Text);
-                Assert.Contains("Status: Busy (execute, started 2026-09-08T12:00:00.0000000Z)", result.Text);
+                Assert.Contains("Busy (execute)", result.Text);
             }
         }
         finally
@@ -128,7 +128,7 @@ public class LifecycleAndCompilationTests
         {
             var result = await client.CallToolAsync("unity_status");
             Assert.False(result.IsError, result.Text);
-            Assert.Contains("Status: Ready", result.Text);
+            Assert.Contains("Ready", result.Text);
         }
     }
 
@@ -151,7 +151,7 @@ public class LifecycleAndCompilationTests
 
         var statusResult = await client.CallToolAsync("unity_status");
         Assert.False(statusResult.IsError, statusResult.Text);
-        Assert.Contains("Status: Ready", statusResult.Text);
+        Assert.Contains("Ready", statusResult.Text);
     }
 
     [Fact]

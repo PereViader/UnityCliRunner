@@ -126,8 +126,9 @@ public class McpProtocolTests
         Assert.True(callDoc.RootElement.TryGetProperty("result", out var callResult));
         Assert.False(callResult.TryGetProperty("isError", out var isErr) && isErr.GetBoolean());
         Assert.True(callResult.TryGetProperty("content", out var content));
+        Assert.Equal(1, content.GetArrayLength());
         string statusText = content[0].GetProperty("text").GetString()!;
-        Assert.StartsWith("Status:", statusText);
+        Assert.Equal("Not Running", statusText);
 
         writer.Close();
         if (!proc.WaitForExit(3000))

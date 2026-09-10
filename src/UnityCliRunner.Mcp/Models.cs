@@ -338,27 +338,3 @@ public class StructuredExecuteResult
     public List<ConsoleLogEntry> Logs { get; set; } = new();
 }
 
-
-public class StructuredStatusResult
-{
-    [JsonPropertyName("status")]
-    public string Status { get; set; } = "";
-
-    [JsonPropertyName("editorVersion")]
-    public string? EditorVersion { get; set; }
-
-    [JsonPropertyName("projectRoot")]
-    public string? ProjectRoot { get; set; }
-
-    [JsonPropertyName("pid")]
-    public int? Pid { get; set; }
-
-    [JsonPropertyName("mode")]
-    public string? Mode { get; set; }
-
-    [JsonPropertyName("port")]
-    public int? Port { get; set; }
-
-    [JsonPropertyName("activeOperation")]
-    public string? ActiveOperation { get; set; }
-}

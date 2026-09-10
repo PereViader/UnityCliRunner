@@ -40,90 +40,14 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_status", ReadOnly = true)]
-    [Description("Returns the current Unity Editor connection state (Ready, Not Running, Compiling, Running Unreachable). Note: Unity automatically starts on demand when action tools are called.")]
+    [Description("Returns current Editor connection state: Ready, Not Running, Compiling, Running Unreachable, or Busy (<operation>). Note: Unity automatically starts on demand when action tools are called.")]
     public async Task<CallToolResult> UnityStatusAsync(CancellationToken cancellationToken = default)
     {
         string status = await _client.GetStatusAsync(cancellationToken);
-        string? editorVersion = _processManager.GetProjectEditorVersion();
-        _processManager.IsUnityRunning(out int? pid);
-        int port = _processManager.ReadPortFile();
-        string? mode = pid.HasValue ? _processManager.GetUnityMode(pid) : null;
-        string? activeOperation = ExtractActiveOperation(status);
-
-        if (status == "Not Running")
-        {
-            var structuredNotRunning = new StructuredStatusResult
-            {
-                Status = "Not Running",
-                EditorVersion = editorVersion,
-                ProjectRoot = _processManager.ProjectRoot,
-                Pid = null,
-                Mode = null,
-                Port = null,
-                ActiveOperation = null
-            };
-
-            return new CallToolResult
-            {
-                Content =
-                [
-                    new TextContentBlock { Text = "Status: Not Running (will auto-start on demand)" },
-                    new TextContentBlock { Text = JsonSerializer.Serialize(structuredNotRunning, s_JsonOptions) }
-                ],
-                IsError = false
-            };
-        }
-
-        if (status == "Ready")
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("Status: Ready");
-            sb.AppendLine($"Editor Version: {editorVersion ?? "Unknown"}");
-            sb.AppendLine($"Project Root: {_processManager.ProjectRoot}");
-            sb.AppendLine($"PID: {(pid.HasValue ? pid.Value.ToString() : "Unknown")}");
-            sb.AppendLine($"Mode: {mode ?? "Unknown"}");
-            sb.AppendLine($"Port: {(port > 0 ? port.ToString() : "Unknown")}");
-
-            var structuredReady = new StructuredStatusResult
-            {
-                Status = "Ready",
-                EditorVersion = editorVersion,
-                ProjectRoot = _processManager.ProjectRoot,
-                Pid = pid,
-                Mode = mode,
-                Port = port > 0 ? port : null,
-                ActiveOperation = null
-            };
-
-            return new CallToolResult
-            {
-                Content =
-                [
-                    new TextContentBlock { Text = sb.ToString().TrimEnd() },
-                    new TextContentBlock { Text = JsonSerializer.Serialize(structuredReady, s_JsonOptions) }
-                ],
-                IsError = false
-            };
-        }
-
-        var structuredOther = new StructuredStatusResult
-        {
-            Status = status,
-            EditorVersion = editorVersion,
-            ProjectRoot = _processManager.ProjectRoot,
-            Pid = pid,
-            Mode = mode,
-            Port = port > 0 ? port : null,
-            ActiveOperation = activeOperation
-        };
 
         return new CallToolResult
         {
-            Content =
-            [
-                new TextContentBlock { Text = $"Status: {status}" },
-                new TextContentBlock { Text = JsonSerializer.Serialize(structuredOther, s_JsonOptions) }
-            ],
+            Content = [new TextContentBlock { Text = status }],
             IsError = false
         };
     }
@@ -592,34 +516,6 @@ public class UnityTools
     internal static List<StructuredCompilerDiagnostic> ParseCompilerDiagnostics(string? diagnosticText)
         => DiagnosticFormatter.Default.ParseCompilerDiagnostics(diagnosticText);
 
-    private string? ExtractActiveOperation(string status)
-    {
-        if (File.Exists(_pathResolver.OperationFile))
-        {
-            try
-            {
-                string json = UnityProcessManager.ReadFileWithRetry(_pathResolver.OperationFile, maxRetries: 2, delayMs: 20);
-                if (!string.IsNullOrWhiteSpace(json))
-                {
-                    var op = JsonSerializer.Deserialize<UnityCliOperationState>(json);
-                    if (op != null && !string.IsNullOrEmpty(op.Kind))
-                    {
-                        return op.Kind;
-                    }
-                }
-            }
-            catch { }
-        }
-
-        if (status.StartsWith("Busy (", StringComparison.OrdinalIgnoreCase) && status.EndsWith(")"))
-        {
-            string inner = status.Substring(6, status.Length - 7).Trim();
-            int commaIdx = inner.IndexOf(',');
-            return commaIdx >= 0 ? inner.Substring(0, commaIdx).Trim() : inner;
-        }
-
-        return null;
-    }
 
     [McpServerTool(Name = "unity_stop")]
     [Description("Safely stops the running Unity background instance. Do NOT call this automatically after operations; keep the instance warm for speed. Only use when explicitly requested by the user, to recover from a freeze/hang, or to release project locks so the user can open the Unity GUI.")]

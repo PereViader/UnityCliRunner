@@ -139,30 +139,18 @@ public class ToolFormattingTests
     // ==========================================
 
     [Fact]
-    public async Task UnityStatus_WhenReady_IncludesKeyDiagnosticContext()
+    public async Task UnityStatus_WhenReady_ReturnsReady()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
         {
-            File.WriteAllText(Path.Combine(tempDir, "ProjectSettings", "ProjectVersion.txt"), "m_EditorVersion: 6000.0.32f1\n");
-            File.WriteAllText(Path.Combine(tempDir, "Temp", "unity_cli_port.txt"), "54321");
-
-            pm.Running = true;
-            pm.Pid = 9988;
-            pm.Mode = "Batchmode";
             client.StatusToReturn = "Ready";
 
             var result = await tools.UnityStatusAsync();
 
             Assert.False(result.IsError);
-            string text = GetResultText(result);
-
-            Assert.Contains("Status: Ready", text);
-            Assert.Contains("Editor Version: 6000.0.32f1", text);
-            Assert.Contains($"Project Root: {pm.ProjectRoot}", text);
-            Assert.Contains("PID: 9988", text);
-            Assert.Contains("Mode: Batchmode", text);
-            Assert.Contains("Port: 54321", text);
+            Assert.Single(result.Content);
+            Assert.Equal("Ready", GetResultText(result));
         }
         finally
         {
@@ -171,7 +159,7 @@ public class ToolFormattingTests
     }
 
     [Fact]
-    public async Task UnityStatus_WhenNotRunning_ReturnsAutoStartMessage()
+    public async Task UnityStatus_WhenNotRunning_ReturnsNotRunning()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
@@ -182,7 +170,8 @@ public class ToolFormattingTests
             var result = await tools.UnityStatusAsync();
 
             Assert.False(result.IsError);
-            Assert.Equal("Status: Not Running (will auto-start on demand)", GetResultText(result));
+            Assert.Single(result.Content);
+            Assert.Equal("Not Running", GetResultText(result));
         }
         finally
         {
@@ -191,17 +180,18 @@ public class ToolFormattingTests
     }
 
     [Fact]
-    public async Task UnityStatus_WhenBusy_ReportsActiveOperationAndStartTime()
+    public async Task UnityStatus_WhenBusy_ReportsActiveOperation()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
         {
-            client.StatusToReturn = "Busy (execute, started 2026-09-08T12:00:00.0000000Z)";
+            client.StatusToReturn = "Busy (execute)";
 
             var result = await tools.UnityStatusAsync();
 
             Assert.False(result.IsError);
-            Assert.Equal("Status: Busy (execute, started 2026-09-08T12:00:00.0000000Z)", GetResultText(result));
+            Assert.Single(result.Content);
+            Assert.Equal("Busy (execute)", GetResultText(result));
         }
         finally
         {
@@ -220,7 +210,8 @@ public class ToolFormattingTests
             var result = await tools.UnityStatusAsync();
 
             Assert.False(result.IsError);
-            Assert.Equal("Status: Compiling", GetResultText(result));
+            Assert.Single(result.Content);
+            Assert.Equal("Compiling", GetResultText(result));
         }
         finally
         {
@@ -1326,7 +1317,7 @@ public class ToolFormattingTests
     }
 
     [Fact]
-    public async Task UnityStatus_ReturnsStructuredStatusForReadyAndBusy()
+    public async Task UnityStatus_ReturnsSingleContentBlockForReadyAndBusyAndNotRunning()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
@@ -1342,29 +1333,16 @@ public class ToolFormattingTests
             var readyResult = await tools.UnityStatusAsync();
 
             Assert.False(readyResult.IsError);
-            Assert.Equal(2, readyResult.Content.Count);
-
-            var readyStructured = GetStructuredResult<StructuredStatusResult>(readyResult);
-            Assert.NotNull(readyStructured);
-            Assert.Equal("Ready", readyStructured.Status);
-            Assert.Equal("6000.0.32f1", readyStructured.EditorVersion);
-            Assert.Equal(pm.ProjectRoot, readyStructured.ProjectRoot);
-            Assert.Equal(4321, readyStructured.Pid);
-            Assert.Equal("Batchmode", readyStructured.Mode);
-            Assert.Equal(54321, readyStructured.Port);
-            Assert.Null(readyStructured.ActiveOperation);
+            Assert.Single(readyResult.Content);
+            Assert.Equal("Ready", GetResultText(readyResult));
 
             // Busy status
-            client.StatusToReturn = "Busy (eval, started 2026-09-09T08:00:00Z)";
+            client.StatusToReturn = "Busy (eval)";
             var busyResult = await tools.UnityStatusAsync();
 
             Assert.False(busyResult.IsError);
-            Assert.Equal(2, busyResult.Content.Count);
-
-            var busyStructured = GetStructuredResult<StructuredStatusResult>(busyResult);
-            Assert.NotNull(busyStructured);
-            Assert.Equal("Busy (eval, started 2026-09-09T08:00:00Z)", busyStructured.Status);
-            Assert.Equal("eval", busyStructured.ActiveOperation);
+            Assert.Single(busyResult.Content);
+            Assert.Equal("Busy (eval)", GetResultText(busyResult));
 
             // Not Running status
             pm.Running = false;
@@ -1372,12 +1350,8 @@ public class ToolFormattingTests
             var notRunningResult = await tools.UnityStatusAsync();
 
             Assert.False(notRunningResult.IsError);
-            Assert.Equal(2, notRunningResult.Content.Count);
-
-            var notRunningStructured = GetStructuredResult<StructuredStatusResult>(notRunningResult);
-            Assert.NotNull(notRunningStructured);
-            Assert.Equal("Not Running", notRunningStructured.Status);
-            Assert.Null(notRunningStructured.Pid);
+            Assert.Single(notRunningResult.Content);
+            Assert.Equal("Not Running", GetResultText(notRunningResult));
         }
         finally
         {

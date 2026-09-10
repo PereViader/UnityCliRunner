@@ -112,9 +112,7 @@ public class UnityClient : IUnityClient
 
     private static string FormatBusyStatus(UnityCliOperationState op)
     {
-        return string.IsNullOrEmpty(op.StartedUtc)
-            ? $"Busy ({op.Kind})"
-            : $"Busy ({op.Kind}, started {op.StartedUtc})";
+        return $"Busy ({op.Kind})";
     }
 
     private async Task CancelOperationAsync(string opId, string kind)
