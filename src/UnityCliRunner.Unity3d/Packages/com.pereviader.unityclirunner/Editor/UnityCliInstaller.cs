@@ -9,7 +9,12 @@ namespace UnityCliRunner
     public static class UnityCliInstaller
     {
         [MenuItem("Tools/UnityCliRunner/Install MCP Configurations")]
-        public static void InstallMcpConfigurations()
+        private static void InstallFromMenu()
+        {
+            Install(true);
+        }
+
+        public static bool Install(bool showDialog)
         {
             try
             {
@@ -17,8 +22,11 @@ namespace UnityCliRunner
                 if (packageInfo == null)
                 {
                     Debug.LogError("[UnityCliRunner] Could not find package info for assembly.");
-                    EditorUtility.DisplayDialog("UnityCliRunner Error", "Could not find package information for assembly. Installation aborted.", "OK");
-                    return;
+                    if (showDialog && !Application.isBatchMode)
+                    {
+                        EditorUtility.DisplayDialog("UnityCliRunner Error", "Could not find package information for assembly. Installation aborted.", "OK");
+                    }
+                    return false;
                 }
 
                 string assetsPath = Application.dataPath;
@@ -68,19 +76,21 @@ namespace UnityCliRunner
                 sb.AppendLine($"• {MakeRelativePath(rootFolder, codexConfigPath).Replace('\\', '/')}");
 
                 Debug.Log($"[UnityCliRunner] {sb}");
-                if (!Application.isBatchMode)
+                if (showDialog && !Application.isBatchMode)
                 {
                     EditorUtility.DisplayDialog("UnityCliRunner Success", sb.ToString(), "OK");
                 }
+                return true;
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[UnityCliRunner] Failed to install MCP configurations: {ex.Message}");
                 Debug.LogException(ex);
-                if (!Application.isBatchMode)
+                if (showDialog && !Application.isBatchMode)
                 {
                     EditorUtility.DisplayDialog("UnityCliRunner Error", $"Failed to install MCP configurations:\n{ex.Message}", "OK");
                 }
+                return false;
             }
         }
 
