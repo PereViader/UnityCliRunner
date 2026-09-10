@@ -63,7 +63,10 @@ builder.Services.AddSingleton<IDiagnosticFormatter, DiagnosticFormatter>();
 builder.Services.AddSingleton<UnityTools>();
 
 builder.Services
-    .AddMcpServer()
+    .AddMcpServer(options =>
+    {
+        options.ServerInstructions = "All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code, executing methods, or running tests.";
+    })
     .WithStdioServerTransport()
     .WithTools<UnityTools>();
 

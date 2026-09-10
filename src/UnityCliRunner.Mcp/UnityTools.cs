@@ -129,7 +129,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_refresh")]
-    [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Action tools auto-refresh before executing.")]
+    [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
     public async Task<CallToolResult> UnityRefreshAsync(
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
@@ -257,12 +257,13 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_eval")]
-    [Description("Evaluates C# snippet in-memory (<80ms) without domain reload. Primary tool to query scene, GameObjects, and component state.")]
+    [Description("Evaluates C# snippet in-memory to query scene, GameObjects, and component state.")]
     public async Task<CallToolResult> UnityEvalAsync(
         [Description("C# expression, statement, or multi-statement snippet to evaluate in Unity Editor. Common imports (UnityEngine, UnityEditor, SceneManagement, UI, EventSystems, Animations, System.IO, Linq) are included by default.")] string code,
+        IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _client.EvalAsync(code, cancellationToken);
+        var result = await _client.EvalAsync(code, progress, cancellationToken);
 
         string logsText = "";
         if (result.Logs.Count > 0)
@@ -430,7 +431,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_run_tests")]
-    [Description("Runs EditMode/PlayMode tests with failure diagnostics. Auto-refreshes pending script changes first; do not call unity_refresh beforehand.")]
+    [Description("Runs EditMode/PlayMode tests with failure diagnostics.")]
     public async Task<CallToolResult> UnityRunTestsAsync(
         [Description("Test filter string (wildcards and class/method names supported).")] string? filter = null,
         [Description("Test category filter.")] string? category = null,

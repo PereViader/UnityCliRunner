@@ -332,12 +332,52 @@ public class UnityClient : IUnityClient
         return await PollOperationUntilTerminalAsync(spec, cancellationToken);
     }
 
+    public Task<UnityEvalResult> EvalAsync(string code, CancellationToken cancellationToken) =>
+        EvalAsync(code, null, cancellationToken);
+
     /// <summary>
     /// Evaluates dynamic C# snippet in-memory against active Editor/Play Mode.
     /// </summary>
-    public virtual async Task<UnityEvalResult> EvalAsync(string code, CancellationToken cancellationToken = default)
+    public virtual async Task<UnityEvalResult> EvalAsync(
+        string code,
+        IProgress<ProgressNotificationValue>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        await _processManager.EnsureUnityRunningAsync(cancellationToken);
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 0,
+            Total = 100,
+            Message = "Refreshing AssetDatabase prior to evaluation..."
+        });
+
+        IProgress<ProgressNotificationValue>? refreshProgress = progress == null ? null : new ProgressRelay(p =>
+        {
+            int scaled = (int)Math.Round((p.Progress / (double)(p.Total ?? 100)) * 40);
+            progress.Report(new ProgressNotificationValue
+            {
+                Progress = scaled,
+                Total = 100,
+                Message = "Refreshing AssetDatabase prior to evaluation..."
+            });
+        });
+
+        var refreshResult = await RefreshAsync(isRecompile: false, refreshProgress, cancellationToken);
+        if (!refreshResult.Success)
+        {
+            return new UnityEvalResult
+            {
+                Success = false,
+                Interrupted = refreshResult.Interrupted,
+                Message = refreshResult.Message
+            };
+        }
+
+        progress?.Report(new ProgressNotificationValue
+        {
+            Progress = 50,
+            Total = 100,
+            Message = "Evaluating C# snippet..."
+        });
 
         string opId = Guid.NewGuid().ToString("N");
         string escapedCode = ProtocolCodec.EscapeLine(code);

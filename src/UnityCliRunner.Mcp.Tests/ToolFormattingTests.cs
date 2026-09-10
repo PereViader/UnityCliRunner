@@ -90,7 +90,10 @@ public class ToolFormattingTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(RefreshResultToReturn);
 
-        public override Task<UnityEvalResult> EvalAsync(string code, CancellationToken cancellationToken = default) =>
+        public override Task<UnityEvalResult> EvalAsync(
+            string code,
+            IProgress<ProgressNotificationValue>? progress = null,
+            CancellationToken cancellationToken = default) =>
             Task.FromResult(EvalResultToReturn);
 
         public override Task<UnityExecuteResult> ExecuteMethodAsync(
@@ -1518,10 +1521,11 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
     // ==========================================
 
     [Theory]
-    [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Action tools auto-refresh before executing.")]
-    [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics. Auto-refreshes pending script changes first; do not call unity_refresh beforehand.")]
+    [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
+    [InlineData("unity_eval", "Evaluates C# snippet in-memory to query scene, GameObjects, and component state.")]
+    [InlineData("unity_execute_method", "Invokes static C# method with arguments in Unity Editor.")]
+    [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics.")]
     [InlineData("unity_recompile", "Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.")]
-    [InlineData("unity_eval", "Evaluates C# snippet in-memory (<80ms) without domain reload. Primary tool to query scene, GameObjects, and component state.")]
     public void UnityTools_Methods_HaveExpectedRefinedDescriptions(string toolName, string expectedDescription)
     {
         var methods = typeof(UnityTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);

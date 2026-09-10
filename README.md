@@ -13,11 +13,11 @@ By communicating with a running Unity Editor (or a headless background instance)
 UnityCliRunner provides 7 MCP tools:
 
 1. **`unity_status`**: Inspects Editor connection state (`Ready`, `Not Running`, `Compiling`, or `Running Unreachable`). Unity automatically starts on demand when action tools are invoked.
-2. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Action tools auto-refresh before executing.
+2. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.
 3. **`unity_recompile`**: Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.
-4. **`unity_run_tests`**: Runs EditMode/PlayMode tests with failure diagnostics. Auto-refreshes pending script changes first; do not call unity_refresh beforehand.
-5. **`unity_execute_method`**: Executes static C# methods (`Namespace.Class.Method`) with typed arguments and returns formatted outputs and console logs.
-6. **`unity_eval`**: Evaluates C# snippet in-memory (<80ms) without domain reload. Primary tool to query scene, GameObjects, and component state.
+4. **`unity_run_tests`**: Runs EditMode/PlayMode tests with failure diagnostics.
+5. **`unity_execute_method`**: Executes static C# methods (`Namespace.Class.Method`) with typed arguments.
+6. **`unity_eval`**: Evaluates C# snippet in-memory to query scene, GameObjects, and component state.
 7. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
 
 ---
@@ -27,11 +27,11 @@ UnityCliRunner provides 7 MCP tools:
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
 | **`unity_status`** | _none_ | Checks Editor state (`Ready`, `Not Running`, etc.). Auto-starts on demand for action tools. |
-| **`unity_refresh`** | _none_ | Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Action tools auto-refresh before executing. |
+| **`unity_refresh`** | _none_ | Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand. |
 | **`unity_recompile`** | _none_ | Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache. |
-| **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`), `failedOnly` | Runs EditMode/PlayMode tests with failure diagnostics. Auto-refreshes pending script changes first; do not call unity_refresh beforehand. |
-| **`unity_execute_method`** | `methodName`, `args` (array) | Executes static C# method with arguments (refreshes first, stops Play Mode). |
-| **`unity_eval`** | `code` (string) | Evaluates C# snippet in-memory (<80ms) without domain reload. Primary tool to query scene, GameObjects, and component state. |
+| **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`), `failedOnly` | Runs EditMode/PlayMode tests with failure diagnostics. |
+| **`unity_execute_method`** | `methodName`, `args` (array) | Executes static C# method with arguments. |
+| **`unity_eval`** | `code` (string) | Evaluates C# snippet in-memory to query scene, GameObjects, and component state. |
 | **`unity_stop`** | _none_ | Safely terminates the background instance (used to release GUI locks or recover; do not stop routinely). |
 
 > **Auto-Start & Warm Instance**: If Unity is not running when an operation is requested, UnityCliRunner automatically starts a headless background instance in batchmode first and keeps it warm for subsequent commands.

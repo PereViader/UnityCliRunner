@@ -81,6 +81,8 @@ public class McpProtocolTests
         Assert.True(initDoc.RootElement.TryGetProperty("result", out var initResult));
         Assert.True(initResult.TryGetProperty("serverInfo", out var serverInfo));
         Assert.Equal("UnityCliRunner.Mcp", serverInfo.GetProperty("name").GetString());
+        Assert.True(initResult.TryGetProperty("instructions", out var instructions));
+        Assert.Equal("All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code, executing methods, or running tests.", instructions.GetString());
 
         // 2. Initialized notification
         await writer.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");

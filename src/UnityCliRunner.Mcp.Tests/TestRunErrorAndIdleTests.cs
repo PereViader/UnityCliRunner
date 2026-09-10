@@ -46,7 +46,12 @@ public class TestRunErrorAndIdleTests
                     string? line = await reader.ReadLineAsync(cancellationToken);
                     if (line == null) continue;
 
-                    if (line == "PING")
+                    string? customResp = handleCommand(line);
+                    if (customResp != null)
+                    {
+                        await writer.WriteLineAsync(customResp);
+                    }
+                    else if (line == "PING")
                     {
                         await writer.WriteLineAsync("PONG");
                     }
@@ -57,14 +62,6 @@ public class TestRunErrorAndIdleTests
                     else if (line.StartsWith("REFRESH"))
                     {
                         await writer.WriteLineAsync("REFRESHING");
-                    }
-                    else
-                    {
-                        string? resp = handleCommand(line);
-                        if (resp != null)
-                        {
-                            await writer.WriteLineAsync(resp);
-                        }
                     }
                 }
             }
@@ -331,6 +328,41 @@ public class TestRunErrorAndIdleTests
 
             Assert.True(result.Success);
             Assert.Equal("42", result.Payload);
+        }
+        finally
+        {
+            listener.Stop();
+            cts.Cancel();
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityClient_EvalAsync_WhenRefreshFails_AbortsAndReturnsCompilationError()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        bool evalInvoked = false;
+        var (client, _, listener, tempDir, _) = StartMockServer(cmd =>
+        {
+            if (cmd.StartsWith("POLL_REFRESH"))
+            {
+                return "COMPILATION_ERROR";
+            }
+            if (cmd.StartsWith("EVAL"))
+            {
+                evalInvoked = true;
+                return "RUNNING";
+            }
+            return null;
+        }, cts.Token);
+
+        try
+        {
+            var result = await client.EvalAsync("1 + 1", cts.Token);
+
+            Assert.False(result.Success);
+            Assert.False(evalInvoked, "EVAL should not be invoked when pre-refresh compilation fails.");
+            Assert.Contains("compilation", result.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
