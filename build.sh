@@ -6,9 +6,9 @@ cd "$(dirname "$0")"
 
 # Define directories
 BUILD_DIR="build"
-PACKAGE_SRC="src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner"
+PACKAGE_SRC="src/UnityLeanMcp.Unity3d/Packages/com.pereviader.unityleanmcp"
 
-echo "=== Starting UnityCliRunner build ==="
+echo "=== Starting UnityLeanMcp build ==="
 
 # 1. Clean and recreate the build directory
 if [ -d "$BUILD_DIR" ]; then
@@ -28,9 +28,9 @@ done
 shopt -u dotglob nullglob
 
 # 3. Build and publish the cross-platform .NET MCP Server directly into build MCP~
-echo "Publishing UnityCliRunner.Mcp server to $BUILD_DIR/MCP~..."
+echo "Publishing UnityLeanMcp.Mcp server to $BUILD_DIR/MCP~..."
 mkdir -p "$BUILD_DIR/MCP~"
-dotnet publish src/UnityCliRunner.Mcp/UnityCliRunner.Mcp.csproj -c Release -f net10.0 -o "$BUILD_DIR/MCP~"
+dotnet publish src/UnityLeanMcp.Mcp/UnityLeanMcp.Mcp.csproj -c Release -f net10.0 -o "$BUILD_DIR/MCP~"
 
 # 4. Update version in package.json from .env.shared
 if [ -f ".env.shared" ]; then
@@ -54,8 +54,8 @@ else
 fi
 
 # 5. Verify published MCP binary exists in build
-if [ ! -f "$BUILD_DIR/MCP~/UnityCliRunner.Mcp.dll" ]; then
-  echo "Error: UnityCliRunner.Mcp.dll was not found in $BUILD_DIR/MCP~/" >&2
+if [ ! -f "$BUILD_DIR/MCP~/UnityLeanMcp.Mcp.dll" ]; then
+  echo "Error: UnityLeanMcp.Mcp.dll was not found in $BUILD_DIR/MCP~/" >&2
   exit 1
 fi
 

@@ -1,11 +1,11 @@
 {
   "servers": {
-    "unity-cli": {
+    "unity-lean-mcp": {
       "command": "dotnet",
       "args": [
-        "UnityCliRunner.Mcp.dll"
+        "UnityLeanMcp.Mcp.dll"
       ],
-      "cwd": "C:/Users/perev/Code/UnityCliRunner/src/UnityCliRunner.Unity3d/Packages/com.pereviader.unityclirunner/MCP~/"
+      "cwd": "C:/Users/perev/Code/UnityCliRunner/src/UnityLeanMcp.Unity3d/Packages/com.pereviader.unityleanmcp/MCP~/"
     }
   }
 }

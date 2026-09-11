@@ -62,8 +62,8 @@ ExportedObj/
 # Allow standalone .NET MCP server and tests in src/
 !src/**/*.csproj
 !src/**/*.sln
-src/UnityCliRunner.Unity3d/**/*.csproj
-src/UnityCliRunner.Unity3d/**/*.sln
+src/UnityLeanMcp.Unity3d/**/*.csproj
+src/UnityLeanMcp.Unity3d/**/*.sln
 src/**/bin/
 src/**/obj/
 
@@ -113,7 +113,7 @@ ServerData/
 # Auto-generated cache in Assets folder
 [Aa]ssets/[Ss]ceneDependencyCache*
 
-# UnityCliRunner background log
+# UnityLeanMcp background log
 unity_background_log.txt
 
 # Non-portable MCP configuration files (contain user/machine-specific absolute paths)

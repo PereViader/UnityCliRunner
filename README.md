@@ -1,16 +1,16 @@
-[![Test and publish](https://github.com/PereViader/UnityCliRunner/actions/workflows/TestAndPublish.yml/badge.svg)](https://github.com/PereViader/UnityCliRunner/actions/workflows/TestAndPublish.yml) ![Unity version 2021.3](https://img.shields.io/badge/Unity-2021.3-57b9d3.svg?style=flat&logo=unity) [![GitHub Release](https://img.shields.io/github/v/release/PereViader/UnityCliRunner?include_prereleases)](https://github.com/PereViader/UnityCliRunner/releases) [![openupm](https://img.shields.io/npm/v/com.pereviader.unityclirunner?label=openupm&registry_uri=https://package.openupm.com)](https://openupm.com/packages/com.pereviader.unityclirunner/)
+[![Test and publish](https://github.com/PereViader/UnityLeanMcp/actions/workflows/TestAndPublish.yml/badge.svg)](https://github.com/PereViader/UnityLeanMcp/actions/workflows/TestAndPublish.yml) ![Unity version 2021.3](https://img.shields.io/badge/Unity-2021.3-57b9d3.svg?style=flat&logo=unity) [![GitHub Release](https://img.shields.io/github/v/release/PereViader/UnityLeanMcp?include_prereleases)](https://github.com/PereViader/UnityLeanMcp/releases) [![openupm](https://img.shields.io/npm/v/com.pereviader.unityleanmcp?label=openupm&registry_uri=https://package.openupm.com)](https://openupm.com/packages/com.pereviader.unityleanmcp/)
 
-# UnityCliRunner
+# UnityLeanMcp
 
-A native **Model Context Protocol (MCP)** server that connects AI coding agents (Antigravity, Claude Code, Cursor, VS Code) directly with the Unity Editor.
+A lean, native **Model Context Protocol (MCP)** server that connects AI coding agents (Antigravity, Claude Code, Cursor, VS Code, Codex) directly to the Unity Editor without polluting the context window.
 
-By communicating with a running Unity Editor (or a headless background instance) via loopback TCP sockets and exposing standard JSON-RPC stdio MCP tools, UnityCliRunner enables sub-second compilation feedback, instant test execution, dynamic C# evaluation, and static method invocations without shell quoting issues or slow batchmode restarts.
+By communicating with a running Unity Editor (or a headless background instance) via loopback TCP sockets and exposing standard JSON-RPC stdio MCP tools, UnityLeanMcp enables sub-second compilation feedback, instant test execution, dynamic C# evaluation, and static method invocations without shell quoting issues, slow batchmode restarts, or heavy token overhead.
 
 ---
 
 ## Overview & Key Capabilities
 
-UnityCliRunner provides 7 MCP tools:
+UnityLeanMcp provides 7 focused, token-optimized MCP tools:
 
 1. **`unity_status`**: Inspects Editor connection state (`Ready`, `Not Running`, `Compiling`, or `Running Unreachable`). Unity automatically starts on demand when action tools are invoked.
 2. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.
@@ -34,7 +34,7 @@ UnityCliRunner provides 7 MCP tools:
 | **`unity_eval`** | `code` (string) | Evaluates C# snippet in-memory to query scene, GameObjects, and component state. |
 | **`unity_stop`** | _none_ | Safely terminates the background instance (used to release GUI locks or recover; do not stop routinely). |
 
-> **Auto-Start & Warm Instance**: If Unity is not running when an operation is requested, UnityCliRunner automatically starts a headless background instance in batchmode first and keeps it warm for subsequent commands.
+> **Auto-Start & Warm Instance**: If Unity is not running when an operation is requested, UnityLeanMcp automatically starts a headless background instance in batchmode first and keeps it warm for subsequent commands.
 
 ---
 
@@ -46,18 +46,18 @@ UnityCliRunner provides 7 MCP tools:
 
 ### 2. Install the Package
 
-[Install from OpenUPM](https://openupm.com/packages/com.pereviader.unityclirunner/#modal-manualinstallation):
+[Install from OpenUPM](https://openupm.com/packages/com.pereviader.unityleanmcp/#modal-manualinstallation):
 ```bash
-openupm add com.pereviader.unityclirunner
+openupm add com.pereviader.unityleanmcp
 ```
 
 ### 3. Install MCP Configurations
 
 In the Unity Editor menu, select:
-**Tools > UnityCliRunner > Install MCP Configurations**
+**Tools > UnityLeanMcp > Install MCP Configurations**
 
 This automatically creates or updates the configuration files for:
-- **Antigravity**: `.agents/plugins/unity-cli/mcp_config.json`
+- **Antigravity**: `.agents/plugins/unity-lean-mcp/mcp_config.json`
 - **VS Code**: `.vscode/mcp.json`
 - **Cursor**: `.cursor/mcp.json`
 - **Claude Code**: `.mcp.json`
@@ -70,12 +70,12 @@ If configuring manually, add the following to your MCP client configuration:
 ```json
 {
   "mcpServers": {
-    "unity-cli": {
+    "unity-lean-mcp": {
       "command": "dotnet",
       "args": [
-        "UnityCliRunner.Mcp.dll"
+        "UnityLeanMcp.Mcp.dll"
       ],
-      "cwd": "<path-to-project>/Packages/com.pereviader.unityclirunner/MCP~/"
+      "cwd": "<path-to-project>/Packages/com.pereviader.unityleanmcp/MCP~/"
     }
   }
 }
@@ -88,7 +88,7 @@ If configuring manually, add the following to your MCP client configuration:
 The MCP server communicates over standard input/output using JSON-RPC. To inspect, test, and interact with the tools interactively, you can use the official MCP Inspector:
 
 ```bash
-npx @modelcontextprotocol/inspector dotnet Packages/com.pereviader.unityclirunner/MCP~/UnityCliRunner.Mcp.dll --project <path-to-unity-project>
+npx @modelcontextprotocol/inspector dotnet Packages/com.pereviader.unityleanmcp/MCP~/UnityLeanMcp.Mcp.dll --project <path-to-unity-project>
 ```
 
 ---

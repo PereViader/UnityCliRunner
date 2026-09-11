@@ -112,7 +112,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.CheckRelease.outputs.version }}
-          name: UnityCliRunner v${{ needs.CheckRelease.outputs.version }}
+          name: UnityLeanMcp v${{ needs.CheckRelease.outputs.version }}
           body: ${{ steps.get-changelog.outputs.changelog }}
           prerelease: ${{ needs.CheckRelease.outputs.isPrerelease }}
           files: |

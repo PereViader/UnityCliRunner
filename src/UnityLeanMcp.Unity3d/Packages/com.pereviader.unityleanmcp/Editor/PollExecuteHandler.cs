@@ -1,0 +1,21 @@
+﻿using System.IO;
+
+namespace UnityLeanMcp
+{
+    internal class PollExecuteHandler : ICommandHandler
+    {
+        public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.WorkerThread;
+
+        public void Handle(string payload, StreamWriter writer)
+        {
+            string operationId = payload?.Trim();
+            PollHelper.PollOperationResult<UnityExecuteResult>(
+                operationId,
+                UnityLeanMcpPaths.ExecuteResultFile,
+                null,
+                writer,
+                res => res.operationId,
+                PollHelper.WriteOperationResultResponse);
+        }
+    }
+}
