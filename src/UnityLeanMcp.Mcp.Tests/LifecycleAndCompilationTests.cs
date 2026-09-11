@@ -23,11 +23,11 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestBackgroundStatusOnline_ReturnsReadyWhenEditorIsRunning()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_status");
+        var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
+        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
+        var result = await client.GetStatusAsync();
 
-        Assert.False(result.IsError, result.Text);
-        Assert.Contains("Ready", result.Text);
+        Assert.Equal("Ready", result);
     }
 
     [Fact]
@@ -110,24 +110,22 @@ public class LifecycleAndCompilationTests
         {
             WriteAtomic(operationFile, testOperationJson);
 
-            await using (var client = new McpTestClient(_fixture.UnityRoot))
-            {
-                var result = await client.CallToolAsync("unity_status");
+            var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
+            var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
+            var result = await client.GetStatusAsync();
 
-                Assert.False(result.IsError, result.Text);
-                Assert.Contains("Busy (execute)", result.Text);
-            }
+            Assert.Contains("Busy (execute)", result);
         }
         finally
         {
             DeleteFileWithRetry(operationFile);
         }
 
-        await using (var client = new McpTestClient(_fixture.UnityRoot))
         {
-            var result = await client.CallToolAsync("unity_status");
-            Assert.False(result.IsError, result.Text);
-            Assert.Contains("Ready", result.Text);
+            var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
+            var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
+            var result = await client.GetStatusAsync();
+            Assert.Contains("Ready", result);
         }
     }
 

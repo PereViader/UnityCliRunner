@@ -134,90 +134,6 @@ public class ToolFormattingTests
             : "";
     }
 
-    // ==========================================
-    // 1. unity_status tests
-    // ==========================================
-
-    [Fact]
-    public async Task UnityStatus_WhenReady_ReturnsReady()
-    {
-        var (tempDir, pm, client, tools) = CreateTestContext();
-        try
-        {
-            client.StatusToReturn = "Ready";
-
-            var result = await tools.UnityStatusAsync();
-
-            Assert.False(result.IsError);
-            Assert.Single(result.Content);
-            Assert.Equal("Ready", GetResultText(result));
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
-    }
-
-    [Fact]
-    public async Task UnityStatus_WhenNotRunning_ReturnsNotRunning()
-    {
-        var (tempDir, pm, client, tools) = CreateTestContext();
-        try
-        {
-            pm.Running = false;
-            client.StatusToReturn = "Not Running";
-
-            var result = await tools.UnityStatusAsync();
-
-            Assert.False(result.IsError);
-            Assert.Single(result.Content);
-            Assert.Equal("Not Running", GetResultText(result));
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
-    }
-
-    [Fact]
-    public async Task UnityStatus_WhenBusy_ReportsActiveOperation()
-    {
-        var (tempDir, pm, client, tools) = CreateTestContext();
-        try
-        {
-            client.StatusToReturn = "Busy (execute)";
-
-            var result = await tools.UnityStatusAsync();
-
-            Assert.False(result.IsError);
-            Assert.Single(result.Content);
-            Assert.Equal("Busy (execute)", GetResultText(result));
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
-    }
-
-    [Fact]
-    public async Task UnityStatus_WhenCompiling_ReportsCompilingStatus()
-    {
-        var (tempDir, pm, client, tools) = CreateTestContext();
-        try
-        {
-            client.StatusToReturn = "Compiling";
-
-            var result = await tools.UnityStatusAsync();
-
-            Assert.False(result.IsError);
-            Assert.Single(result.Content);
-            Assert.Equal("Compiling", GetResultText(result));
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
-    }
 
     [Fact]
     public void UnityProcessManager_GetUnityMode_DistinguishesBatchmodeAndGui()
@@ -1062,48 +978,6 @@ public class ToolFormattingTests
         }
     }
 
-    [Fact]
-    public async Task UnityStatus_ReturnsSingleContentBlockForReadyAndBusyAndNotRunning()
-    {
-        var (tempDir, pm, client, tools) = CreateTestContext();
-        try
-        {
-            File.WriteAllText(Path.Combine(tempDir, "ProjectSettings", "ProjectVersion.txt"), "m_EditorVersion: 6000.0.32f1\n");
-            File.WriteAllText(Path.Combine(tempDir, "Temp", "unity_lean_mcp_port.txt"), "54321");
-
-            pm.Running = true;
-            pm.Pid = 4321;
-            pm.Mode = "Batchmode";
-            client.StatusToReturn = "Ready";
-
-            var readyResult = await tools.UnityStatusAsync();
-
-            Assert.False(readyResult.IsError);
-            Assert.Single(readyResult.Content);
-            Assert.Equal("Ready", GetResultText(readyResult));
-
-            // Busy status
-            client.StatusToReturn = "Busy (eval)";
-            var busyResult = await tools.UnityStatusAsync();
-
-            Assert.False(busyResult.IsError);
-            Assert.Single(busyResult.Content);
-            Assert.Equal("Busy (eval)", GetResultText(busyResult));
-
-            // Not Running status
-            pm.Running = false;
-            client.StatusToReturn = "Not Running";
-            var notRunningResult = await tools.UnityStatusAsync();
-
-            Assert.False(notRunningResult.IsError);
-            Assert.Single(notRunningResult.Content);
-            Assert.Equal("Not Running", GetResultText(notRunningResult));
-        }
-        finally
-        {
-            try { Directory.Delete(tempDir, true); } catch { }
-        }
-    }
 
     [Theory]
     [InlineData("  at MySuite.Test () [0x00000] in C:/Code/Assets/Tests/Test.cs:55", "C:/Code/Assets/Tests/Test.cs", 55)]
@@ -1298,7 +1172,7 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
         var methods = typeof(UnityTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);
         var toolMethods = methods.Where(m => m.GetCustomAttribute<McpServerToolAttribute>() != null).ToList();
 
-        Assert.Equal(5, toolMethods.Count);
+        Assert.Equal(4, toolMethods.Count);
         foreach (var method in toolMethods)
         {
             var descAttr = method.GetCustomAttribute<DescriptionAttribute>();

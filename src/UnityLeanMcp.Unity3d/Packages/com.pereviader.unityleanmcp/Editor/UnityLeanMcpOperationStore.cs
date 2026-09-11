@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text;
 using UnityEditor;
@@ -159,7 +159,12 @@ namespace UnityLeanMcp
         {
             lock (s_CacheLock)
             {
-                return Clone(s_CachedState);
+                if (!File.Exists(OperationFilePath))
+                {
+                    s_CachedState = null;
+                    return null;
+                }
+                return Read();
             }
         }
 

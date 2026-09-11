@@ -272,6 +272,38 @@ namespace UnityLeanMcp
                         return;
                     }
 
+                    // Reject mutating operations early on the worker thread if another operation is active,
+                    // or if Unity is compiling. This prevents main thread deadlock and dispatcher queue pollution
+                    // when an operation (e.g. eval or execute) is executing synchronously on the main thread.
+                    if (command == "RUN_TESTS" || command == "EXECUTE_METHOD" || command == "EVAL" || command == "REFRESH" || command == "RECOMPILE")
+                    {
+                        var activeOp = UnityLeanMcpOperationStore.ReadThreadSafeSnapshot();
+                        if (activeOp != null)
+                        {
+                            string requestOpId = null;
+                            if (!string.IsNullOrWhiteSpace(payload))
+                            {
+                                int spaceIndex = payload.IndexOf(' ');
+                                requestOpId = spaceIndex > 0 ? payload.Substring(0, spaceIndex).Trim() : payload.Trim();
+                            }
+
+                            if (string.IsNullOrEmpty(requestOpId) || activeOp.operationId != requestOpId)
+                            {
+                                writer.WriteLine($"BUSY {activeOp.kind} {activeOp.operationId}");
+                                return;
+                            }
+                        }
+
+                        if (command == "RUN_TESTS" || command == "EXECUTE_METHOD" || command == "EVAL")
+                        {
+                            if (UnityLeanMcpCompilationTracker.IsCompiling || UnityLeanMcpCompilationTracker.RefreshPending)
+                            {
+                                writer.WriteLine("BUSY compile");
+                                return;
+                            }
+                        }
+                    }
+
                     // Worker thread execution target (e.g. PING, POLL_REFRESH)
                     if (handler.ExecutionTarget == CommandExecutionTarget.WorkerThread)
                     {

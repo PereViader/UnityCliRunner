@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using UnityEditor;
 
@@ -25,11 +25,6 @@ namespace UnityLeanMcp
             var operation = UnityLeanMcpOperationStore.ReadThreadSafeSnapshot();
             if (operation != null)
             {
-                if (!string.IsNullOrEmpty(operationId) && operation.operationId != operationId)
-                {
-                    return $"BUSY {operation.kind} {operation.operationId}";
-                }
-
                 if (operation.kind == OperationKinds.Refresh || operation.kind == OperationKinds.Recompile)
                 {
                     if (operation.status == OperationStatus.Interrupted)
@@ -37,6 +32,11 @@ namespace UnityLeanMcp
                         return "INTERRUPTION Unity editor restarted before the operation completed.";
                     }
                     return "COMPILING";
+                }
+
+                if (string.IsNullOrEmpty(operationId) || operation.operationId != operationId)
+                {
+                    return $"BUSY {operation.kind} {operation.operationId}";
                 }
             }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using Xunit;
@@ -55,14 +55,10 @@ public class UnityIntegrationFixture : IAsyncLifetime
         // Ensure Unity is started and ready
         await using var client = new McpTestClient(_unityRoot);
         await client.InitializeAsync();
-        var statusRes = await client.CallToolAsync("unity_status");
-        if (statusRes.Text.Contains("Not Running") || statusRes.Text.Contains("Running Unreachable"))
+        var startRes = await client.CallToolAsync("unity_refresh", timeout: TimeSpan.FromSeconds(120));
+        if (startRes.IsError)
         {
-            var startRes = await client.CallToolAsync("unity_refresh", timeout: TimeSpan.FromSeconds(120));
-            if (startRes.IsError)
-            {
-                throw new InvalidOperationException($"Failed to start Unity for integration tests: {startRes.Text}");
-            }
+            throw new InvalidOperationException($"Failed to start Unity for integration tests: {startRes.Text}");
         }
     }
 

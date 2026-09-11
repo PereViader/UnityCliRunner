@@ -107,6 +107,12 @@ namespace UnityLeanMcp
                 return;
             }
 
+            if (UnityLeanMcpCompilationTracker.IsCompiling || UnityLeanMcpCompilationTracker.RefreshPending)
+            {
+                writer.WriteLine("BUSY compile");
+                return;
+            }
+
             if (string.IsNullOrEmpty(payload))
             {
                 writer.WriteLine("ERROR: Missing arguments");

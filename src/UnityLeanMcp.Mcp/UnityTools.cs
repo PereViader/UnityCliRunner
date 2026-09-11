@@ -39,19 +39,6 @@ public class UnityTools
         _diagnosticFormatter = diagnosticFormatter ?? DiagnosticFormatter.Default;
     }
 
-    [McpServerTool(Name = "unity_status", ReadOnly = true)]
-    [Description("Returns current Editor connection state: Ready, Not Running, Compiling, Running Unreachable, or Busy (<operation>). Note: Unity automatically starts on demand when action tools are called.")]
-    public async Task<CallToolResult> UnityStatusAsync(CancellationToken cancellationToken = default)
-    {
-        string status = await _client.GetStatusAsync(cancellationToken);
-
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = status }],
-            IsError = false
-        };
-    }
-
     [McpServerTool(Name = "unity_refresh")]
     [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
     public async Task<CallToolResult> UnityRefreshAsync(
@@ -295,6 +282,10 @@ public class UnityTools
             {
                 sb.AppendLine($"Tests Passed: {result.PassCount} passed, {result.SkipCount} skipped.");
             }
+        }
+        else if (result.Message?.Contains("busy", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            sb.AppendLine(result.Message);
         }
         else
         {

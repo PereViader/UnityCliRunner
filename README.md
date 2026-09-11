@@ -10,13 +10,12 @@ By communicating with a running Unity Editor (or a headless background instance)
 
 ## Overview & Key Capabilities
 
-UnityLeanMcp provides 5 focused, token-optimized MCP tools:
+UnityLeanMcp provides 4 focused, token-optimized MCP tools:
 
-1. **`unity_status`**: Inspects Editor connection state (`Ready`, `Not Running`, `Compiling`, or `Running Unreachable`). Unity automatically starts on demand when action tools are invoked.
-2. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Optional `clean` flag forces clean rebuild by clearing compiler cache when recovering from stale/corrupted cache. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.
-3. **`unity_eval`**: Evaluates raw C# top-level statements in-memory to query scene, GameObjects, component state, or invoke methods. Supports top-level `using` directives and `await`. No default namespaces are pre-imported.
-4. **`unity_run_tests`**: Runs EditMode/PlayMode tests with failure diagnostics.
-5. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
+1. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Optional `clean` flag forces clean rebuild by clearing compiler cache when recovering from stale/corrupted cache. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.
+2. **`unity_eval`**: Evaluates raw C# top-level statements in-memory to query scene, GameObjects, component state, or invoke methods. Supports top-level `using` directives and `await`. No default namespaces are pre-imported.
+3. **`unity_run_tests`**: Runs EditMode/PlayMode tests with failure diagnostics.
+4. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
 
 ---
 
@@ -24,7 +23,6 @@ UnityLeanMcp provides 5 focused, token-optimized MCP tools:
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
-| **`unity_status`** | _none_ | Checks Editor state (`Ready`, `Not Running`, etc.). Auto-starts on demand for action tools. |
 | **`unity_refresh`** | `clean` (optional bool, default `false`) | Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Set `clean: true` only to force clean rebuild by clearing compiler cache. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand. |
 | **`unity_eval`** | `code` (string) | Evaluates raw C# top-level statements in-memory. Supports top-level `using` directives and `await`. Explicitly `return <value>;` to return data. No default namespaces are pre-imported. |
 | **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`), `failedOnly` | Runs EditMode/PlayMode tests with failure diagnostics. |

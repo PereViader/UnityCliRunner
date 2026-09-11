@@ -105,7 +105,7 @@ public class McpProtocolTests
             toolNames.Add(tool.GetProperty("name").GetString()!);
         }
 
-        Assert.Contains("unity_status", toolNames);
+        Assert.DoesNotContain("unity_status", toolNames);
         Assert.Contains("unity_refresh", toolNames);
         Assert.DoesNotContain("unity_recompile", toolNames);
         Assert.Contains("unity_eval", toolNames);
@@ -113,10 +113,10 @@ public class McpProtocolTests
         Assert.Contains("unity_run_tests", toolNames);
         Assert.Contains("unity_stop", toolNames);
         Assert.DoesNotContain("unity_start", toolNames);
-        Assert.Equal(5, toolNames.Count);
+        Assert.Equal(4, toolNames.Count);
 
-        // 4. tools/call unity_status
-        string callMsg = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"unity_status\",\"arguments\":{}}}";
+        // 4. tools/call unity_stop
+        string callMsg = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"unity_stop\",\"arguments\":{}}}";
         await writer.WriteLineAsync(callMsg);
         await writer.FlushAsync();
 
@@ -127,8 +127,8 @@ public class McpProtocolTests
         Assert.False(callResult.TryGetProperty("isError", out var isErr) && isErr.GetBoolean());
         Assert.True(callResult.TryGetProperty("content", out var content));
         Assert.Equal(1, content.GetArrayLength());
-        string statusText = content[0].GetProperty("text").GetString()!;
-        Assert.Equal("Not Running", statusText);
+        string stopText = content[0].GetProperty("text").GetString()!;
+        Assert.True(stopText == "Unity background instance is not running." || stopText == "Stopped.", $"Unexpected stop text: {stopText}");
 
         writer.Close();
         if (!proc.WaitForExit(3000))
