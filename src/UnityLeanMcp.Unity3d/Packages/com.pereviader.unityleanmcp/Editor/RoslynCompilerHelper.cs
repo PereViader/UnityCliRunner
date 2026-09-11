@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -396,6 +396,145 @@ namespace UnityLeanMcp
             catch (Exception ex)
             {
                 errors.Add("Roslyn compilation error: " + ex.Message);
+                return false;
+            }
+        }
+
+        public static bool HasTopLevelValueReturn(string sourceCode)
+        {
+            if (string.IsNullOrWhiteSpace(sourceCode) || !IsSupported)
+            {
+                return false;
+            }
+
+            try
+            {
+                // Wrap in a probe method so all C# language versions parse statements into a method body
+                string probeSource = "class __Probe { async System.Threading.Tasks.Task<object> M() {\n" + sourceCode + "\n} }";
+
+                // Parse SyntaxTree
+                object syntaxTree;
+                var parsePars = s_ParseTextMethod.GetParameters();
+                if (parsePars.Length == 1)
+                {
+                    syntaxTree = s_ParseTextMethod.Invoke(null, new object[] { probeSource });
+                }
+                else
+                {
+                    var parseArgs = new object[parsePars.Length];
+                    parseArgs[0] = probeSource;
+                    for (int i = 1; i < parsePars.Length; i++)
+                    {
+                        parseArgs[i] = parsePars[i].DefaultValue != DBNull.Value ? parsePars[i].DefaultValue : (parsePars[i].ParameterType.IsValueType ? Activator.CreateInstance(parsePars[i].ParameterType) : null);
+                    }
+                    syntaxTree = s_ParseTextMethod.Invoke(null, parseArgs);
+                }
+
+                if (syntaxTree == null) return false;
+
+                // Get root
+                MethodInfo getRootMethod = syntaxTree.GetType().GetMethod("GetRoot", new Type[] { typeof(CancellationToken) });
+                if (getRootMethod == null)
+                {
+                    foreach (var m in syntaxTree.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        if (m.Name == "GetRoot" && m.GetParameters().Length <= 1)
+                        {
+                            getRootMethod = m;
+                            break;
+                        }
+                    }
+                }
+                if (getRootMethod == null) return false;
+
+                object root = getRootMethod.GetParameters().Length == 0
+                    ? getRootMethod.Invoke(syntaxTree, null)
+                    : getRootMethod.Invoke(syntaxTree, new object[] { default(CancellationToken) });
+
+                if (root == null) return false;
+
+                // Call DescendantNodes(Func<SyntaxNode, bool> descendIntoChildren = null, bool descendIntoTrivia = false)
+                MethodInfo descMethod = null;
+                foreach (var m in root.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (m.Name == "DescendantNodes" && m.GetParameters().Length == 2)
+                    {
+                        descMethod = m;
+                        break;
+                    }
+                }
+                if (descMethod == null)
+                {
+                    foreach (var m in root.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        if (m.Name == "DescendantNodes" && m.GetParameters().Length == 0)
+                        {
+                            descMethod = m;
+                            break;
+                        }
+                    }
+                }
+                if (descMethod == null) return false;
+
+                object[] descArgs = descMethod.GetParameters().Length == 2 ? new object[] { null, false } : null;
+                var nodes = (System.Collections.IEnumerable)descMethod.Invoke(root, descArgs);
+                if (nodes == null) return false;
+
+                PropertyInfo parentProp = null;
+                PropertyInfo exprProp = null;
+
+                foreach (var node in nodes)
+                {
+                    if (node == null) continue;
+                    Type nodeType = node.GetType();
+                    if (nodeType.Name != "ReturnStatementSyntax") continue;
+
+                    // Check ancestors to ensure not in nested lambda or local function
+                    if (parentProp == null) parentProp = nodeType.GetProperty("Parent");
+                    object cur = parentProp != null ? parentProp.GetValue(node, null) : null;
+                    bool inNestedFunction = false;
+
+                    while (cur != null)
+                    {
+                        string pName = cur.GetType().Name;
+                        if (pName == "MethodDeclarationSyntax")
+                        {
+                            var idProp = cur.GetType().GetProperty("Identifier");
+                            var idVal = idProp != null ? idProp.GetValue(cur, null) : null;
+                            if (idVal != null && idVal.ToString() == "M")
+                            {
+                                break;
+                            }
+                            inNestedFunction = true;
+                            break;
+                        }
+                        if (pName == "SimpleLambdaExpressionSyntax" ||
+                            pName == "ParenthesizedLambdaExpressionSyntax" ||
+                            pName == "AnonymousMethodExpressionSyntax" ||
+                            pName == "LocalFunctionStatementSyntax")
+                        {
+                            inNestedFunction = true;
+                            break;
+                        }
+                        cur = parentProp.GetValue(cur, null);
+                    }
+
+                    if (inNestedFunction) continue;
+
+                    // Check Expression property of ReturnStatementSyntax
+                    if (exprProp == null) exprProp = nodeType.GetProperty("Expression");
+                    object expr = exprProp != null ? exprProp.GetValue(node, null) : null;
+                    if (expr != null)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"UnityLeanMcp: Failed to inspect snippet returns: {ex}");
                 return false;
             }
         }

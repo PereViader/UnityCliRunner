@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -18,7 +18,7 @@ public class EvalTests
     public async Task TestEvalSuccess_EvaluatesAdditionExpression()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "1 + 1" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return 1 + 1;" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("2", result.Text);
@@ -28,7 +28,7 @@ public class EvalTests
     public async Task TestEvalExpression_EvaluatesMathfSqrt()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "Mathf.Sqrt(16f)" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return Mathf.Sqrt(16f);" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("4", result.Text);
@@ -79,7 +79,7 @@ public class EvalTests
     public async Task TestEvalVoidMethod_ExecutesGCCollectWithoutError()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "System.GC.Collect()" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "System.GC.Collect();" });
 
         Assert.False(result.IsError, result.Text);
     }
@@ -101,7 +101,7 @@ public class EvalTests
     public async Task TestEvalNull_ReturnsNullWithoutError()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "(object)null" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return (object)null;" });
 
         Assert.False(result.IsError, result.Text);
         Assert.True(string.IsNullOrWhiteSpace(result.Text) || result.Text.Contains("null"));
@@ -122,7 +122,7 @@ public class EvalTests
     public async Task TestEvalGameObject_InstantiatesAndReturnsGameObjectRepresentation()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "new GameObject(\"SampleEntity\")" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return new GameObject(\"SampleEntity\");" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("SampleEntity", result.Text);
@@ -132,7 +132,7 @@ public class EvalTests
     public async Task TestEvalCollection_ReturnsArrayElements()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "new int[] { 10, 20, 30 }" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return new int[] { 10, 20, 30 };" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("10", result.Text);
@@ -174,7 +174,7 @@ public class EvalTests
     public async Task TestEvalAsync_ReturnsTaskGeneric()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "System.Threading.Tasks.Task.FromResult(\"hello-task\")" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return System.Threading.Tasks.Task.FromResult(\"hello-task\");" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("hello-task", result.Text);
@@ -218,7 +218,7 @@ public class EvalTests
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
         // Uses Path from System.IO, Image from UnityEngine.UI, UIBehaviour from UnityEngine.EventSystems, AnimatorController from UnityEditor.Animations
-        string code = "Path.Combine(\"dir\", \"file\") + \":\" + typeof(Image).Name + \":\" + typeof(UIBehaviour).Name + \":\" + typeof(AnimatorController).Name";
+        string code = "return Path.Combine(\"dir\", \"file\") + \":\" + typeof(Image).Name + \":\" + typeof(UIBehaviour).Name + \":\" + typeof(AnimatorController).Name;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
         Assert.False(result.IsError, result.Text);
@@ -232,7 +232,7 @@ public class EvalTests
     public async Task TestEvalFormatting_Scene_ReturnsRicherFormat()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "SceneManager.GetActiveScene()" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return SceneManager.GetActiveScene();" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Scene \"", result.Text);
@@ -246,7 +246,7 @@ public class EvalTests
     public async Task TestEvalFormatting_Transform_ReturnsTransformFormat()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "new GameObject(\"EvalTransformTest\").transform" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return new GameObject(\"EvalTransformTest\").transform;" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Transform \"EvalTransformTest\" [children: 0, localPos:", result.Text);
@@ -256,7 +256,7 @@ public class EvalTests
     public async Task TestEvalFormatting_ScriptableObject_ReturnsScriptableObjectFormat()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "ScriptableObject.CreateInstance<ScriptableObject>()" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "return ScriptableObject.CreateInstance<ScriptableObject>();" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("ScriptableObject (ScriptableObject) [name:", result.Text);
@@ -271,5 +271,48 @@ public class EvalTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("indented-result", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalVoidEarlyReturn_ExecutesWithoutError()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "if (true) return; UnityEngine.Debug.Log(\"should not log\");";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.DoesNotContain("should not log", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalVoidExplicitReturn_ExecutesWithoutError()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var result = await client.CallToolAsync("unity_eval", new { code = "return;" });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("(Evaluation succeeded with no output)", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalLambdaWithReturnInVoid_ExecutesWithoutError()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "var list = new System.Collections.Generic.List<int> { 1, 2 }.FindAll(x => { return x > 1; });";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("(Evaluation succeeded with no output)", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalLambdaWithVoidInValueReturn_ReturnsValue()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "System.Action a = () => { return; }; a(); return 42;";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("42", result.Text);
     }
 }

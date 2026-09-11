@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -11,8 +11,6 @@ namespace UnityLeanMcp
 {
     internal class EvalHandler : ICommandHandler
     {
-        private static readonly Regex ExplicitReturnRegex = new Regex(@"(?m)(?:^\s*|[;{}:)]|\belse\s+)\s*return\b", RegexOptions.Compiled);
-
         public static bool CancelActiveEval(string operationId)
         {
             return OperationExecutionEngine.TryCancel(operationId);
@@ -142,53 +140,13 @@ namespace UnityLeanMcp
         private static bool TryCompileSnippet(string rawCode, out byte[] assemblyBytes, out bool isVoidStatement, out List<string> errors)
         {
             assemblyBytes = null;
-            isVoidStatement = false;
             errors = new List<string>();
 
-            bool hasExplicitReturn = !string.IsNullOrEmpty(rawCode) && ExplicitReturnRegex.IsMatch(rawCode);
+            bool hasValueReturn = RoslynCompilerHelper.HasTopLevelValueReturn(rawCode);
+            isVoidStatement = !hasValueReturn;
 
-            if (hasExplicitReturn)
-            {
-                isVoidStatement = false;
-                string source = BuildSource(rawCode);
-                var explicitErrors = new List<string>();
-                if (RoslynCompilerHelper.CompileAndEmit(source, out assemblyBytes, out explicitErrors))
-                {
-                    return true;
-                }
-                errors = explicitErrors;
-            }
-
-            // Attempt 1: Expression wrapper `return (<code>);`
-            string trimmed = rawCode.TrimEnd(';', ' ', '\r', '\n');
-            string exprBody = "return (" + trimmed + ");";
-            string exprSource = BuildSource(exprBody);
-
-            if (RoslynCompilerHelper.CompileAndEmit(exprSource, out assemblyBytes, out errors))
-            {
-                isVoidStatement = false;
-                return true;
-            }
-
-            // Attempt 2: Statement wrapper `<code>; return null;`
-            string stmtBody = rawCode.EndsWith(";") ? (rawCode + "\nreturn null;") : (rawCode + ";\nreturn null;");
-            string stmtSource = BuildSource(stmtBody);
-            var stmtErrors = new List<string>();
-
-            if (RoslynCompilerHelper.CompileAndEmit(stmtSource, out assemblyBytes, out stmtErrors))
-            {
-                isVoidStatement = true;
-                errors.Clear();
-                return true;
-            }
-
-            // Return the most informative error list (prefer statement errors if multi-line)
-            if (rawCode.Contains("\n") || rawCode.Contains(";"))
-            {
-                errors = stmtErrors;
-            }
-
-            return false;
+            string source = BuildSource(rawCode, isVoidStatement);
+            return RoslynCompilerHelper.CompileAndEmit(source, out assemblyBytes, out errors);
         }
 
         private static bool HasType(string fullName)
@@ -203,7 +161,7 @@ namespace UnityLeanMcp
             }
         }
 
-        private static string BuildSource(string methodBody)
+        private static string BuildSource(string methodBody, bool isVoid)
         {
             var sb = new StringBuilder();
             sb.AppendLine("using System;");
@@ -236,7 +194,14 @@ namespace UnityLeanMcp
             sb.AppendLine();
             sb.AppendLine("public static class __UnityLeanMcpEvalRunner");
             sb.AppendLine("{");
-            sb.AppendLine("    public static async Task<object> Execute(CancellationToken cancellationToken)");
+            if (isVoid)
+            {
+                sb.AppendLine("    public static async Task Execute(CancellationToken cancellationToken)");
+            }
+            else
+            {
+                sb.AppendLine("    public static async Task<object> Execute(CancellationToken cancellationToken)");
+            }
             sb.AppendLine("    {");
             sb.AppendLine("#line 1 \"eval\"");
             sb.AppendLine(methodBody);

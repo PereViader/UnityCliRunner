@@ -129,9 +129,9 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_eval")]
-    [Description("Evaluates C# snippet in-memory to query scene, GameObjects, and component state.")]
+    [Description("Evaluates C# snippet in-memory to query scene, GameObjects, and component state. If a return value is desired, it must be returned explicitly using 'return <value>;'. Void statements and early exits ('return;') do not return a value.")]
     public async Task<CallToolResult> UnityEvalAsync(
-        [Description("C# expression, statement, or multi-statement snippet to evaluate in Unity Editor. Common imports (UnityEngine, UnityEditor, SceneManagement, UI, EventSystems, Animations, System.IO, Linq) are included by default.")] string code,
+        [Description("C# snippet to evaluate verbatim in Unity Editor. Use 'return <value>;' to return a result (e.g. 'return Camera.main.transform.position;'). Void statements and 'return;' do not return a value. Common imports (UnityEngine, UnityEditor, SceneManagement, UI, EventSystems, Animations, System.IO, Linq) are included.")] string code,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {

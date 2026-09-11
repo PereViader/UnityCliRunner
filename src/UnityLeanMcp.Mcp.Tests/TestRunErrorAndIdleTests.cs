@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -241,7 +241,7 @@ public class TestRunErrorAndIdleTests
 
         try
         {
-            var result = await client.EvalAsync("1 + 1", cts.Token);
+            var result = await client.EvalAsync("return 1 + 1;", cts.Token);
 
             Assert.False(result.Success);
             Assert.Contains("no longer recognized by the Editor (Editor is idle)", result.Message);
@@ -324,7 +324,7 @@ public class TestRunErrorAndIdleTests
 
         try
         {
-            var result = await client.EvalAsync("1 + 1", cts.Token);
+            var result = await client.EvalAsync("return 1 + 1;", cts.Token);
 
             Assert.True(result.Success);
             Assert.Equal("42", result.Payload);
@@ -358,7 +358,7 @@ public class TestRunErrorAndIdleTests
 
         try
         {
-            var result = await client.EvalAsync("1 + 1", cts.Token);
+            var result = await client.EvalAsync("return 1 + 1;", cts.Token);
 
             Assert.False(result.Success);
             Assert.False(evalInvoked, "EVAL should not be invoked when pre-refresh compilation fails.");

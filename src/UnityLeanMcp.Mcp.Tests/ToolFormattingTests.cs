@@ -464,7 +464,7 @@ public class ToolFormattingTests
                 Logs = []
             };
 
-            var result = await tools.UnityEvalAsync("50 * 2");
+            var result = await tools.UnityEvalAsync("return 50 * 2;");
 
             Assert.False(result.IsError);
             Assert.Equal("100", GetResultText(result));
@@ -519,7 +519,7 @@ public class ToolFormattingTests
                 Duration = 0.05
             };
 
-            var result = await tools.UnityEvalAsync("Debug.Log(\"Calculating value...\"); 42");
+            var result = await tools.UnityEvalAsync("Debug.Log(\"Calculating value...\"); return 42;");
 
             Assert.False(result.IsError);
             string text = GetResultText(result);
@@ -549,7 +549,7 @@ public class ToolFormattingTests
                 Logs = [new ConsoleLogEntry { LogType = "Log", Message = "step 1" }]
             };
 
-            var result = await tools.UnityEvalAsync("42");
+            var result = await tools.UnityEvalAsync("return 42;");
 
             Assert.False(result.IsError);
             Assert.Equal(2, result.Content.Count);
@@ -585,7 +585,7 @@ public class ToolFormattingTests
                 Logs = [new ConsoleLogEntry { LogType = "Error", Message = "Failed to locate target" }]
             };
 
-            var result = await tools.UnityEvalAsync("GameObject.Find(\"Missing\").name");
+            var result = await tools.UnityEvalAsync("return GameObject.Find(\"Missing\").name;");
 
             Assert.True(result.IsError);
             string text = GetResultText(result);
@@ -1242,7 +1242,7 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
 
     [Theory]
     [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
-    [InlineData("unity_eval", "Evaluates C# snippet in-memory to query scene, GameObjects, and component state.")]
+    [InlineData("unity_eval", "Evaluates C# snippet in-memory to query scene, GameObjects, and component state. If a return value is desired, it must be returned explicitly using 'return <value>;'. Void statements and early exits ('return;') do not return a value.")]
     [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics.")]
     public void UnityTools_Methods_HaveExpectedRefinedDescriptions(string toolName, string expectedDescription)
     {
