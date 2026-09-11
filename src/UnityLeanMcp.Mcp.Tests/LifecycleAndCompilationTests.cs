@@ -60,9 +60,9 @@ public class LifecycleAndCompilationTests
         await using var _ = await _fixture.UseFixtureAsync("TestPollRefreshNonBlocking");
         await using var client = new McpTestClient(_fixture.UnityRoot);
 
-        var result = await client.CallToolAsync("unity_execute_method", new
+        var result = await client.CallToolAsync("unity_eval", new
         {
-            methodName = "Tests.DummyExecuteClass.PollRefreshWhileBusy"
+            code = "Tests.DummyExecuteClass.PollRefreshWhileBusy();"
         });
 
         Assert.False(result.IsError, result.Text);
@@ -72,18 +72,17 @@ public class LifecycleAndCompilationTests
     public async Task TestPollExecuteNonBlocking_PollsExecuteStateWithoutBlocking()
     {
         await using var _ = await _fixture.UseFixtureAsync("TestPollExecuteNonBlocking");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
+        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
+        await client.RefreshAsync();
 
-        var result = await client.CallToolAsync("unity_execute_method", new
-        {
-            methodName = "Tests.DummyExecuteClass.PollHandlersWhileBusy"
-        });
+        var result = await client.ExecuteMethodAsync("Tests.DummyExecuteClass.PollHandlersWhileBusy", null);
 
-        Assert.False(result.IsError, result.Text);
-        Assert.Contains("OK|EXECUTE:RUNNING", result.Text);
-        Assert.Contains("BUSY_EXECUTE:BUSY execute", result.Text);
-        Assert.Contains("EVAL:BUSY execute", result.Text);
-        Assert.Contains("TESTS:BUSY execute", result.Text);
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("OK|EXECUTE:RUNNING", result.Payload);
+        Assert.Contains("BUSY_EXECUTE:BUSY execute", result.Payload);
+        Assert.Contains("EVAL:BUSY execute", result.Payload);
+        Assert.Contains("TESTS:BUSY execute", result.Payload);
     }
 
     [Fact]
@@ -92,9 +91,9 @@ public class LifecycleAndCompilationTests
         await using var _ = await _fixture.UseFixtureAsync("TestBusyDetectionBeforeRefresh");
         await using var client = new McpTestClient(_fixture.UnityRoot);
 
-        var result = await client.CallToolAsync("unity_execute_method", new
+        var result = await client.CallToolAsync("unity_eval", new
         {
-            methodName = "Tests.DummyExecuteClass.TestBusyDetection"
+            code = "Tests.DummyExecuteClass.TestBusyDetection();"
         });
 
         Assert.False(result.IsError, result.Text);
@@ -136,22 +135,20 @@ public class LifecycleAndCompilationTests
     public async Task TestExecuteMethodException_DoesNotLeaveStoreBusy()
     {
         await using var _ = await _fixture.UseFixtureAsync("TestExecuteFailure");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
+        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
+        await client.RefreshAsync();
 
-        var failResult = await client.CallToolAsync("unity_execute_method", new
-        {
-            methodName = "Tests.DummyExecuteClass.FailMethod"
-        });
+        var failResult = await client.ExecuteMethodAsync("Tests.DummyExecuteClass.FailMethod", null);
 
-        Assert.True(failResult.IsError);
-        Assert.Contains("Method execution failed.", failResult.Text);
+        Assert.False(failResult.Success);
+        Assert.Contains("Intentional execution failure!", failResult.Message);
 
         string operationFile = Path.Combine(_fixture.UnityRoot, "Temp", "unity_lean_mcp_operation.json");
         Assert.False(File.Exists(operationFile), "unity_lean_mcp_operation.json should have been cleaned up after failure.");
 
-        var statusResult = await client.CallToolAsync("unity_status");
-        Assert.False(statusResult.IsError, statusResult.Text);
-        Assert.Contains("Ready", statusResult.Text);
+        string status = await client.GetStatusAsync();
+        Assert.Equal("Ready", status);
     }
 
     [Fact]

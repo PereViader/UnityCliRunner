@@ -382,7 +382,7 @@ public class ToolProgressTests
     }
 
     [Fact]
-    public async Task McpServer_EmitsProgressNotifications_ForRefreshAndExecuteMethod()
+    public async Task McpServer_EmitsProgressNotifications_ForRefreshAndEval()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), "unity_mcp_prog_all_" + Guid.NewGuid().ToString("N"));
         string unityTemp = Path.Combine(tempDir, "Temp");
@@ -440,13 +440,13 @@ public class ToolProgressTests
                         {
                             await writer.WriteLineAsync("RECOMPILING");
                         }
-                        else if (line.StartsWith("EXECUTE_METHOD"))
+                        else if (line.StartsWith("EVAL"))
                         {
                             await writer.WriteLineAsync("RUNNING");
                         }
-                        else if (line.StartsWith("POLL_EXECUTE"))
+                        else if (line.StartsWith("POLL_EVAL"))
                         {
-                            await writer.WriteLineAsync("SUCCESS Hello from method");
+                            await writer.WriteLineAsync("SUCCESS Hello from eval");
                         }
                     }
                 }
@@ -482,19 +482,19 @@ public class ToolProgressTests
                 tok.GetString() == "progress-recompile-token");
             Assert.True(hasRecompileProgress, "Expected progress notification for unity_refresh with clean = true");
 
-            // Test 3: unity_execute_method
-            var executeResult = await client.CallToolAsync(
-                "unity_execute_method",
-                new { methodName = "MyNamespace.MyClass.MyMethod" },
+            // Test 3: unity_eval
+            var evalResult = await client.CallToolAsync(
+                "unity_eval",
+                new { code = "1 + 1" },
                 timeout: TimeSpan.FromSeconds(20),
-                progressToken: "progress-execute-token");
+                progressToken: "progress-eval-token");
 
-            Assert.False(executeResult.IsError, executeResult.Text);
-            bool hasExecuteProgress = client.ReceivedNotifications.Exists(n =>
+            Assert.False(evalResult.IsError, evalResult.Text);
+            bool hasEvalProgress = client.ReceivedNotifications.Exists(n =>
                 n.TryGetProperty("method", out var m) && m.GetString() == "notifications/progress" &&
                 n.TryGetProperty("params", out var p) && p.TryGetProperty("progressToken", out var tok) &&
-                tok.GetString() == "progress-execute-token");
-            Assert.True(hasExecuteProgress, "Expected progress notification for unity_execute_method");
+                tok.GetString() == "progress-eval-token");
+            Assert.True(hasEvalProgress, "Expected progress notification for unity_eval");
 
             listener.Stop();
             cts.Cancel();

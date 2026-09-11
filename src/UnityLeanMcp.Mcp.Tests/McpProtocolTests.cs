@@ -82,7 +82,7 @@ public class McpProtocolTests
         Assert.True(initResult.TryGetProperty("serverInfo", out var serverInfo));
         Assert.Equal("UnityLeanMcp.Mcp", serverInfo.GetProperty("name").GetString());
         Assert.True(initResult.TryGetProperty("instructions", out var instructions));
-        Assert.Equal("All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code, executing methods, or running tests.", instructions.GetString());
+        Assert.Equal("All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code or running tests.", instructions.GetString());
 
         // 2. Initialized notification
         await writer.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
@@ -109,11 +109,11 @@ public class McpProtocolTests
         Assert.Contains("unity_refresh", toolNames);
         Assert.DoesNotContain("unity_recompile", toolNames);
         Assert.Contains("unity_eval", toolNames);
-        Assert.Contains("unity_execute_method", toolNames);
+        Assert.DoesNotContain("unity_execute_method", toolNames);
         Assert.Contains("unity_run_tests", toolNames);
         Assert.Contains("unity_stop", toolNames);
         Assert.DoesNotContain("unity_start", toolNames);
-        Assert.Equal(6, toolNames.Count);
+        Assert.Equal(5, toolNames.Count);
 
         // 4. tools/call unity_status
         string callMsg = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"unity_status\",\"arguments\":{}}}";

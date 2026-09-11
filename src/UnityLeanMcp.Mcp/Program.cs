@@ -65,7 +65,7 @@ builder.Services.AddSingleton<UnityTools>();
 builder.Services
     .AddMcpServer(options =>
     {
-        options.ServerInstructions = "All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code, executing methods, or running tests.";
+        options.ServerInstructions = "All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code or running tests.";
     })
     .WithStdioServerTransport()
     .WithTools<UnityTools>();
