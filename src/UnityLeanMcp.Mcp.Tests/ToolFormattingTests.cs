@@ -1242,7 +1242,7 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
 
     [Theory]
     [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
-    [InlineData("unity_eval", "Evaluates C# snippet in-memory to query scene, GameObjects, and component state. If a return value is desired, it must be returned explicitly using 'return <value>;'. Void statements and early exits ('return;') do not return a value.")]
+    [InlineData("unity_eval", "Evaluates C# code in-memory against the active Unity Editor to query scene state, GameObjects, components, and project data. Accepts raw multiline C# top-level statements (and 'using' directives). Do not wrap code in a class, method, or namespace. No default namespaces are pre-imported; include all required 'using' directives in the snippet. Top-level 'await' is supported. Use 'return <value>;' to return data; void statements and 'return;' complete naturally without returning a value.")]
     [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics.")]
     public void UnityTools_Methods_HaveExpectedRefinedDescriptions(string toolName, string expectedDescription)
     {
@@ -1265,7 +1265,19 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
         Assert.NotNull(codeParam);
         var descAttr = codeParam.GetCustomAttribute<DescriptionAttribute>();
         Assert.NotNull(descAttr);
-        Assert.Contains("Common imports", descAttr.Description);
+        Assert.Contains("No default namespaces are pre-imported", descAttr.Description);
+        Assert.Contains("Raw multiline C# code text", descAttr.Description);
+    }
+
+    [Theory]
+    [InlineData("return 1 + 1;", "return 1 + 1;")]
+    [InlineData("using System.IO;\nreturn 42;", "using System.IO;\nreturn 42;")]
+    [InlineData("{\"code\": \"return 50;\"}", "return 50;")]
+    [InlineData("{\n  \"code\": \"using UnityEngine;\\nDebug.Log(1);\"\n}", "using UnityEngine;\nDebug.Log(1);")]
+    public void UnityTools_UnwrapJsonCodeIfPresent_ExtractsCodeProperly(string input, string expected)
+    {
+        string actual = UnityTools.UnwrapJsonCodeIfPresent(input);
+        Assert.Equal(expected, actual);
     }
 
     [Fact]

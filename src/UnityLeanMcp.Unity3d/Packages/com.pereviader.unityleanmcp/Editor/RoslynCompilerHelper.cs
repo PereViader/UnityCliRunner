@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using UnityEditor;
 using UnityEngine;
@@ -400,6 +401,190 @@ namespace UnityLeanMcp
             }
         }
 
+        private static object ParseSyntaxTree(string sourceCode)
+        {
+            if (s_ParseTextMethod == null) return null;
+            var parsePars = s_ParseTextMethod.GetParameters();
+            if (parsePars.Length == 1)
+            {
+                return s_ParseTextMethod.Invoke(null, new object[] { sourceCode });
+            }
+            var parseArgs = new object[parsePars.Length];
+            parseArgs[0] = sourceCode;
+            for (int i = 1; i < parsePars.Length; i++)
+            {
+                parseArgs[i] = parsePars[i].DefaultValue != DBNull.Value
+                    ? parsePars[i].DefaultValue
+                    : (parsePars[i].ParameterType.IsValueType ? Activator.CreateInstance(parsePars[i].ParameterType) : null);
+            }
+            return s_ParseTextMethod.Invoke(null, parseArgs);
+        }
+
+        private static object GetSyntaxTreeRoot(object syntaxTree)
+        {
+            if (syntaxTree == null) return null;
+            MethodInfo getRootMethod = syntaxTree.GetType().GetMethod("GetRoot", new Type[] { typeof(CancellationToken) });
+            if (getRootMethod == null)
+            {
+                foreach (var m in syntaxTree.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (m.Name == "GetRoot" && m.GetParameters().Length <= 1)
+                    {
+                        getRootMethod = m;
+                        break;
+                    }
+                }
+            }
+            if (getRootMethod == null) return null;
+            return getRootMethod.GetParameters().Length == 0
+                ? getRootMethod.Invoke(syntaxTree, null)
+                : getRootMethod.Invoke(syntaxTree, new object[] { default(CancellationToken) });
+        }
+
+        private static MethodInfo GetDescendantNodesMethod(object root)
+        {
+            if (root == null) return null;
+            MethodInfo descMethod = null;
+            foreach (var m in root.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (m.Name == "DescendantNodes" && m.GetParameters().Length == 2)
+                {
+                    descMethod = m;
+                    break;
+                }
+            }
+            if (descMethod == null)
+            {
+                foreach (var m in root.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (m.Name == "DescendantNodes" && m.GetParameters().Length == 0)
+                    {
+                        descMethod = m;
+                        break;
+                    }
+                }
+            }
+            return descMethod;
+        }
+
+        private static readonly Regex s_UsingDirectiveRegex = new Regex(
+            @"^\s*(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_][A-Za-z0-9_]*\s*=\s*)?[A-Za-z_][A-Za-z0-9_.]*(?:\s*<[^>]+>)?\s*;",
+            RegexOptions.Compiled);
+
+        public static bool ExtractUsingDirectives(string sourceCode, out List<string> usings, out string methodBody)
+        {
+            usings = new List<string>();
+            methodBody = sourceCode ?? "";
+
+            if (string.IsNullOrWhiteSpace(sourceCode))
+            {
+                return false;
+            }
+
+            if (IsSupported)
+            {
+                try
+                {
+                    object syntaxTree = ParseSyntaxTree(sourceCode);
+                    if (syntaxTree != null)
+                    {
+                        object root = GetSyntaxTreeRoot(syntaxTree);
+                        if (root != null)
+                        {
+                            MethodInfo descMethod = GetDescendantNodesMethod(root);
+                            if (descMethod != null)
+                            {
+                                object[] descArgs = descMethod.GetParameters().Length == 2 ? new object[] { null, false } : null;
+                                var nodes = (System.Collections.IEnumerable)descMethod.Invoke(root, descArgs);
+                                if (nodes != null)
+                                {
+                                    var spansToRemove = new List<(int start, int length, string text)>();
+                                    PropertyInfo fullSpanProp = null;
+
+                                    foreach (var node in nodes)
+                                    {
+                                        if (node == null) continue;
+                                        if (node.GetType().Name == "UsingDirectiveSyntax")
+                                        {
+                                            if (fullSpanProp == null) fullSpanProp = node.GetType().GetProperty("FullSpan");
+                                            if (fullSpanProp != null)
+                                            {
+                                                object span = fullSpanProp.GetValue(node, null);
+                                                int start = (int)span.GetType().GetProperty("Start").GetValue(span, null);
+                                                int length = (int)span.GetType().GetProperty("Length").GetValue(span, null);
+                                                string directiveText = node.ToString().Trim();
+                                                if (!string.IsNullOrEmpty(directiveText))
+                                                {
+                                                    spansToRemove.Add((start, length, directiveText));
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (spansToRemove.Count > 0)
+                                    {
+                                        spansToRemove.Sort((a, b) => a.start.CompareTo(b.start));
+                                        var chars = sourceCode.ToCharArray();
+                                        foreach (var (start, length, text) in spansToRemove)
+                                        {
+                                            usings.Add(text);
+                                            int end = Math.Min(start + length, chars.Length);
+                                            for (int i = start; i < end; i++)
+                                            {
+                                                if (chars[i] != '\r' && chars[i] != '\n')
+                                                {
+                                                    chars[i] = ' ';
+                                                }
+                                            }
+                                        }
+                                        methodBody = new string(chars);
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"UnityLeanMcp: Roslyn AST using extraction failed, falling back: {ex}");
+                }
+            }
+
+            return ExtractUsingDirectivesFallback(sourceCode, out usings, out methodBody);
+        }
+
+        private static bool ExtractUsingDirectivesFallback(string sourceCode, out List<string> usings, out string methodBody)
+        {
+            usings = new List<string>();
+            methodBody = sourceCode ?? "";
+
+            if (string.IsNullOrWhiteSpace(sourceCode)) return false;
+
+            var lines = sourceCode.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            bool foundAny = false;
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (s_UsingDirectiveRegex.IsMatch(line))
+                {
+                    usings.Add(line.Trim());
+                    lines[i] = "";
+                    foundAny = true;
+                }
+            }
+
+            if (foundAny)
+            {
+                string separator = sourceCode.Contains("\r\n") ? "\r\n" : "\n";
+                methodBody = string.Join(separator, lines);
+                return true;
+            }
+
+            return false;
+        }
+
         public static bool HasTopLevelValueReturn(string sourceCode)
         {
             if (string.IsNullOrWhiteSpace(sourceCode) || !IsSupported)
@@ -409,71 +594,19 @@ namespace UnityLeanMcp
 
             try
             {
+                // If snippet has using directives, extract them first so probe method does not hit CS1529
+                ExtractUsingDirectives(sourceCode, out _, out string cleanBody);
+
                 // Wrap in a probe method so all C# language versions parse statements into a method body
-                string probeSource = "class __Probe { async System.Threading.Tasks.Task<object> M() {\n" + sourceCode + "\n} }";
+                string probeSource = "class __Probe { async System.Threading.Tasks.Task<object> M() {\n" + cleanBody + "\n} }";
 
-                // Parse SyntaxTree
-                object syntaxTree;
-                var parsePars = s_ParseTextMethod.GetParameters();
-                if (parsePars.Length == 1)
-                {
-                    syntaxTree = s_ParseTextMethod.Invoke(null, new object[] { probeSource });
-                }
-                else
-                {
-                    var parseArgs = new object[parsePars.Length];
-                    parseArgs[0] = probeSource;
-                    for (int i = 1; i < parsePars.Length; i++)
-                    {
-                        parseArgs[i] = parsePars[i].DefaultValue != DBNull.Value ? parsePars[i].DefaultValue : (parsePars[i].ParameterType.IsValueType ? Activator.CreateInstance(parsePars[i].ParameterType) : null);
-                    }
-                    syntaxTree = s_ParseTextMethod.Invoke(null, parseArgs);
-                }
-
+                object syntaxTree = ParseSyntaxTree(probeSource);
                 if (syntaxTree == null) return false;
 
-                // Get root
-                MethodInfo getRootMethod = syntaxTree.GetType().GetMethod("GetRoot", new Type[] { typeof(CancellationToken) });
-                if (getRootMethod == null)
-                {
-                    foreach (var m in syntaxTree.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                    {
-                        if (m.Name == "GetRoot" && m.GetParameters().Length <= 1)
-                        {
-                            getRootMethod = m;
-                            break;
-                        }
-                    }
-                }
-                if (getRootMethod == null) return false;
-
-                object root = getRootMethod.GetParameters().Length == 0
-                    ? getRootMethod.Invoke(syntaxTree, null)
-                    : getRootMethod.Invoke(syntaxTree, new object[] { default(CancellationToken) });
-
+                object root = GetSyntaxTreeRoot(syntaxTree);
                 if (root == null) return false;
 
-                // Call DescendantNodes(Func<SyntaxNode, bool> descendIntoChildren = null, bool descendIntoTrivia = false)
-                MethodInfo descMethod = null;
-                foreach (var m in root.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    if (m.Name == "DescendantNodes" && m.GetParameters().Length == 2)
-                    {
-                        descMethod = m;
-                        break;
-                    }
-                }
-                if (descMethod == null)
-                {
-                    foreach (var m in root.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                    {
-                        if (m.Name == "DescendantNodes" && m.GetParameters().Length == 0)
-                        {
-                            descMethod = m;
-                            break;
-                        }
-                    }
-                }
+                MethodInfo descMethod = GetDescendantNodesMethod(root);
                 if (descMethod == null) return false;
 
                 object[] descArgs = descMethod.GetParameters().Length == 2 ? new object[] { null, false } : null;

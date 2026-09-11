@@ -238,7 +238,7 @@ public class LifecycleAndCompilationTests
             using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
-            await writer.WriteLineAsync($"EVAL {opId} await Task.Delay(15000, cancellationToken); return 123;");
+            await writer.WriteLineAsync($"EVAL {opId} await System.Threading.Tasks.Task.Delay(15000, cancellationToken); return 123;");
             string? ack = await reader.ReadLineAsync();
             Assert.Equal("RUNNING", ack);
         }
@@ -376,7 +376,7 @@ public class LifecycleAndCompilationTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
-            await client.EvalAsync("await Task.Delay(10000, cancellationToken); return 42;", cts.Token);
+            await client.EvalAsync("await System.Threading.Tasks.Task.Delay(10000, cancellationToken); return 42;", cts.Token);
         });
 
         var deadline = DateTime.UtcNow.AddSeconds(5);

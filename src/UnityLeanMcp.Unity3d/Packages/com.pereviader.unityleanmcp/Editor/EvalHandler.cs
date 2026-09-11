@@ -142,53 +142,25 @@ namespace UnityLeanMcp
             assemblyBytes = null;
             errors = new List<string>();
 
-            bool hasValueReturn = RoslynCompilerHelper.HasTopLevelValueReturn(rawCode);
+            RoslynCompilerHelper.ExtractUsingDirectives(rawCode, out var usings, out var methodBody);
+
+            bool hasValueReturn = RoslynCompilerHelper.HasTopLevelValueReturn(methodBody);
             isVoidStatement = !hasValueReturn;
 
-            string source = BuildSource(rawCode, isVoidStatement);
+            string source = BuildSource(methodBody, isVoidStatement, usings);
             return RoslynCompilerHelper.CompileAndEmit(source, out assemblyBytes, out errors);
         }
 
-        private static bool HasType(string fullName)
-        {
-            try
-            {
-                return CommandHelper.FindType(fullName) != null;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static string BuildSource(string methodBody, bool isVoid)
+        private static string BuildSource(string methodBody, bool isVoid, List<string> userUsings = null)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("using System;");
-            sb.AppendLine("using System.Collections;");
-            sb.AppendLine("using System.Collections.Generic;");
-            sb.AppendLine("using System.IO;");
-            sb.AppendLine("using System.Linq;");
-            sb.AppendLine("using System.Reflection;");
-            sb.AppendLine("using System.Text;");
-            sb.AppendLine("using System.Threading;");
-            sb.AppendLine("using System.Threading.Tasks;");
-            sb.AppendLine("using UnityEngine;");
-            sb.AppendLine("using UnityEngine.SceneManagement;");
-            sb.AppendLine("using UnityEditor;");
-            sb.AppendLine("using UnityEditor.SceneManagement;");
 
-            if (HasType("UnityEngine.UI.Button") || HasType("UnityEngine.UI.CanvasUpdate"))
+            if (userUsings != null && userUsings.Count > 0)
             {
-                sb.AppendLine("using UnityEngine.UI;");
-            }
-            if (HasType("UnityEngine.EventSystems.EventSystem") || HasType("UnityEngine.EventSystems.UIBehaviour"))
-            {
-                sb.AppendLine("using UnityEngine.EventSystems;");
-            }
-            if (HasType("UnityEditor.Animations.AnimatorController"))
-            {
-                sb.AppendLine("using UnityEditor.Animations;");
+                foreach (var u in userUsings)
+                {
+                    sb.AppendLine(u);
+                }
             }
 
             sb.AppendLine();
@@ -196,11 +168,11 @@ namespace UnityLeanMcp
             sb.AppendLine("{");
             if (isVoid)
             {
-                sb.AppendLine("    public static async Task Execute(CancellationToken cancellationToken)");
+                sb.AppendLine("    public static async System.Threading.Tasks.Task Execute(System.Threading.CancellationToken cancellationToken)");
             }
             else
             {
-                sb.AppendLine("    public static async Task<object> Execute(CancellationToken cancellationToken)");
+                sb.AppendLine("    public static async System.Threading.Tasks.Task<object> Execute(System.Threading.CancellationToken cancellationToken)");
             }
             sb.AppendLine("    {");
             sb.AppendLine("#line 1 \"eval\"");

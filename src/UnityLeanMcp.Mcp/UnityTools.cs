@@ -129,13 +129,14 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_eval")]
-    [Description("Evaluates C# snippet in-memory to query scene, GameObjects, and component state. If a return value is desired, it must be returned explicitly using 'return <value>;'. Void statements and early exits ('return;') do not return a value.")]
+    [Description("Evaluates C# code in-memory against the active Unity Editor to query scene state, GameObjects, components, and project data. Accepts raw multiline C# top-level statements (and 'using' directives). Do not wrap code in a class, method, or namespace. No default namespaces are pre-imported; include all required 'using' directives in the snippet. Top-level 'await' is supported. Use 'return <value>;' to return data; void statements and 'return;' complete naturally without returning a value.")]
     public async Task<CallToolResult> UnityEvalAsync(
-        [Description("C# snippet to evaluate verbatim in Unity Editor. Use 'return <value>;' to return a result (e.g. 'return Camera.main.transform.position;'). Void statements and 'return;' do not return a value. Common imports (UnityEngine, UnityEditor, SceneManagement, UI, EventSystems, Animations, System.IO, Linq) are included.")] string code,
+        [Description("Raw multiline C# code text to evaluate verbatim. Write executable statements directly like a C# script (do not wrap in a class or method). Supports top-level 'using' directives (e.g. 'using UnityEngine;') and top-level 'await'. No default namespaces are pre-imported. Send raw C# text directly—do not wrap in JSON.")] string code,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _client.EvalAsync(code, progress, cancellationToken);
+        string resolvedCode = UnwrapJsonCodeIfPresent(code);
+        var result = await _client.EvalAsync(resolvedCode, progress, cancellationToken);
 
         string logsText = "";
         if (result.Logs.Count > 0)
@@ -410,5 +411,29 @@ public class UnityTools
             Content = [new TextContentBlock { Text = stopped ? "Stopped." : "Error: Unity background instance could not be stopped." }],
             IsError = !stopped
         };
+    }
+
+    internal static string UnwrapJsonCodeIfPresent(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return code;
+        string trimmed = code.Trim();
+        if (trimmed.StartsWith("{") && trimmed.EndsWith("}"))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty("code", out var codeElem) &&
+                    codeElem.ValueKind == JsonValueKind.String)
+                {
+                    return codeElem.GetString() ?? code;
+                }
+            }
+            catch
+            {
+                // Not valid JSON, keep as raw C# code
+            }
+        }
+        return code;
     }
 }

@@ -28,10 +28,21 @@ public class EvalTests
     public async Task TestEvalExpression_EvaluatesMathfSqrt()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "return Mathf.Sqrt(16f);" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn Mathf.Sqrt(16f);" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("4", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalWithoutUsings_FailsToResolveUnimportedType()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        // Mathf is in UnityEngine; without 'using UnityEngine;', this must fail to compile
+        var result = await client.CallToolAsync("unity_eval", new { code = "return Mathf.Sqrt(16f);" });
+
+        Assert.True(result.IsError);
+        Assert.Contains("CS0103", result.Text); // The name 'Mathf' does not exist in the current context
     }
 
     [Fact]
@@ -111,7 +122,7 @@ public class EvalTests
     public async Task TestEvalDestroyedObject_HandlesDestroyedUnityObjectGracefully()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        string code = "GameObject go = new GameObject(\"TempObj\"); GameObject.DestroyImmediate(go); return go;";
+        string code = "using UnityEngine;\nGameObject go = new GameObject(\"TempObj\"); GameObject.DestroyImmediate(go); return go;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
         Assert.False(result.IsError, result.Text);
@@ -122,7 +133,7 @@ public class EvalTests
     public async Task TestEvalGameObject_InstantiatesAndReturnsGameObjectRepresentation()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "return new GameObject(\"SampleEntity\");" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn new GameObject(\"SampleEntity\");" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("SampleEntity", result.Text);
@@ -214,11 +225,11 @@ public class EvalTests
     }
 
     [Fact]
-    public async Task TestEvalDefaultImports_ResolvesExpandedNamespaces()
+    public async Task TestEvalExplicitImports_ResolvesExpandedNamespaces()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
         // Uses Path from System.IO, Image from UnityEngine.UI, UIBehaviour from UnityEngine.EventSystems, AnimatorController from UnityEditor.Animations
-        string code = "return Path.Combine(\"dir\", \"file\") + \":\" + typeof(Image).Name + \":\" + typeof(UIBehaviour).Name + \":\" + typeof(AnimatorController).Name;";
+        string code = "using System.IO;\nusing UnityEngine.UI;\nusing UnityEngine.EventSystems;\nusing UnityEditor.Animations;\nreturn Path.Combine(\"dir\", \"file\") + \":\" + typeof(Image).Name + \":\" + typeof(UIBehaviour).Name + \":\" + typeof(AnimatorController).Name;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
         Assert.False(result.IsError, result.Text);
@@ -232,7 +243,7 @@ public class EvalTests
     public async Task TestEvalFormatting_Scene_ReturnsRicherFormat()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "return SceneManager.GetActiveScene();" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine.SceneManagement;\nreturn SceneManager.GetActiveScene();" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Scene \"", result.Text);
@@ -246,7 +257,7 @@ public class EvalTests
     public async Task TestEvalFormatting_Transform_ReturnsTransformFormat()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "return new GameObject(\"EvalTransformTest\").transform;" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn new GameObject(\"EvalTransformTest\").transform;" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Transform \"EvalTransformTest\" [children: 0, localPos:", result.Text);
@@ -256,7 +267,7 @@ public class EvalTests
     public async Task TestEvalFormatting_ScriptableObject_ReturnsScriptableObjectFormat()
     {
         await using var client = new McpTestClient(_fixture.UnityRoot);
-        var result = await client.CallToolAsync("unity_eval", new { code = "return ScriptableObject.CreateInstance<ScriptableObject>();" });
+        var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn ScriptableObject.CreateInstance<ScriptableObject>();" });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("ScriptableObject (ScriptableObject) [name:", result.Text);
@@ -314,5 +325,82 @@ public class EvalTests
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("42", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalUsingDirective_ImportsNamespaceAndEvaluates()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "using System.IO;\nreturn Path.GetExtension(\"sample.txt\");";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains(".txt", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalUsingStaticDirective_EvaluatesDirectMethod()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "using static System.Math;\nreturn Sqrt(64.0);";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("8", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalUsingAliasDirective_EvaluatesViaAlias()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "using MyPath = System.IO.Path;\nreturn MyPath.GetFileName(\"folder/file.cs\");";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("file.cs", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalUsingDirective_WithVoidStatement()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "using UnityEngine;\nDebug.Log(\"test using void log\");";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("test using void log", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalIDisposableUsingStatement_PreservedInsideMethod()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "using (var reader = new System.IO.StringReader(\"disposable line\"))\n{\n    return reader.ReadLine();\n}";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("disposable line", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalIDisposableUsingDeclaration_PreservedInsideMethod()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "using var ms = new System.IO.MemoryStream(new byte[] { 1, 2, 3 });\nreturn ms.Length;";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("3", result.Text);
+    }
+
+    [Fact]
+    public async Task TestEvalUnwrapJsonCode_WhenAccidentallyWrappedInJson()
+    {
+        await using var client = new McpTestClient(_fixture.UnityRoot);
+        string code = "{\n  \"code\": \"using System.IO;\\nreturn Path.GetFileName(\\\"test/doc.pdf\\\");\"\n}";
+        var result = await client.CallToolAsync("unity_eval", new { code });
+
+        Assert.False(result.IsError, result.Text);
+        Assert.Contains("doc.pdf", result.Text);
     }
 }
