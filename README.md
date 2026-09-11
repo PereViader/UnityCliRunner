@@ -10,15 +10,14 @@ By communicating with a running Unity Editor (or a headless background instance)
 
 ## Overview & Key Capabilities
 
-UnityLeanMcp provides 7 focused, token-optimized MCP tools:
+UnityLeanMcp provides 6 focused, token-optimized MCP tools:
 
 1. **`unity_status`**: Inspects Editor connection state (`Ready`, `Not Running`, `Compiling`, or `Running Unreachable`). Unity automatically starts on demand when action tools are invoked.
-2. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.
-3. **`unity_recompile`**: Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.
-4. **`unity_run_tests`**: Runs EditMode/PlayMode tests with failure diagnostics.
-5. **`unity_execute_method`**: Executes static C# methods (`Namespace.Class.Method`) with typed arguments.
-6. **`unity_eval`**: Evaluates C# snippet in-memory to query scene, GameObjects, and component state.
-7. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
+2. **`unity_refresh`**: Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Optional `clean` flag forces clean rebuild by clearing compiler cache when recovering from stale/corrupted cache. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.
+3. **`unity_run_tests`**: Runs EditMode/PlayMode tests with failure diagnostics.
+4. **`unity_execute_method`**: Executes static C# methods (`Namespace.Class.Method`) with typed arguments.
+5. **`unity_eval`**: Evaluates C# snippet in-memory to query scene, GameObjects, and component state.
+6. **`unity_stop`**: Safely terminates the background Unity Editor instance (to release project locks or recover from hangs).
 
 ---
 
@@ -27,8 +26,7 @@ UnityLeanMcp provides 7 focused, token-optimized MCP tools:
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
 | **`unity_status`** | _none_ | Checks Editor state (`Ready`, `Not Running`, etc.). Auto-starts on demand for action tools. |
-| **`unity_refresh`** | _none_ | Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand. |
-| **`unity_recompile`** | _none_ | Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache. |
+| **`unity_refresh`** | `clean` (optional bool, default `false`) | Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Set `clean: true` only to force clean rebuild by clearing compiler cache. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand. |
 | **`unity_run_tests`** | `filter`, `category`, `mode` (`all`, `editmode`, `playmode`), `failedOnly` | Runs EditMode/PlayMode tests with failure diagnostics. |
 | **`unity_execute_method`** | `methodName`, `args` (array) | Executes static C# method with arguments. |
 | **`unity_eval`** | `code` (string) | Evaluates C# snippet in-memory to query scene, GameObjects, and component state. |

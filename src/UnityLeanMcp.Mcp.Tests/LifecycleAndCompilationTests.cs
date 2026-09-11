@@ -48,7 +48,7 @@ public class LifecycleAndCompilationTests
         await using var _ = await _fixture.UseFixtureAsync("TestRecompile");
         await using var client = new McpTestClient(_fixture.UnityRoot);
 
-        var result = await client.CallToolAsync("unity_recompile");
+        var result = await client.CallToolAsync("unity_refresh", new { clean = true });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Clean script recompilation completed with 0 errors.", result.Text);

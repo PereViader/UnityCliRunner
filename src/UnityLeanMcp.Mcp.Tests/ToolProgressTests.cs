@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -468,10 +468,10 @@ public class ToolProgressTests
                 tok.GetString() == "progress-refresh-token");
             Assert.True(hasRefreshProgress, "Expected progress notification for unity_refresh");
 
-            // Test 2: unity_recompile
+            // Test 2: unity_refresh with clean = true
             var recompileResult = await client.CallToolAsync(
-                "unity_recompile",
-                null,
+                "unity_refresh",
+                new { clean = true },
                 timeout: TimeSpan.FromSeconds(20),
                 progressToken: "progress-recompile-token");
 
@@ -480,7 +480,7 @@ public class ToolProgressTests
                 n.TryGetProperty("method", out var m) && m.GetString() == "notifications/progress" &&
                 n.TryGetProperty("params", out var p) && p.TryGetProperty("progressToken", out var tok) &&
                 tok.GetString() == "progress-recompile-token");
-            Assert.True(hasRecompileProgress, "Expected progress notification for unity_recompile");
+            Assert.True(hasRecompileProgress, "Expected progress notification for unity_refresh with clean = true");
 
             // Test 3: unity_execute_method
             var executeResult = await client.CallToolAsync(

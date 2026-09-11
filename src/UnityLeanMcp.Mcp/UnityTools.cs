@@ -55,29 +55,41 @@ public class UnityTools
     [McpServerTool(Name = "unity_refresh")]
     [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
     public async Task<CallToolResult> UnityRefreshAsync(
+        [Description("Optional. If true, forces a full clean rebuild by clearing the assembly compiler cache. Defaults to false; use only when recovering from corrupted cache or stale errors.")]
+        bool clean = false,
         IProgress<ProgressNotificationValue>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _client.RefreshAsync(isRecompile: false, progress, cancellationToken);
+        var result = await _client.RefreshAsync(isRecompile: clean, progress, cancellationToken);
         var sb = new StringBuilder();
+
+        string successMessage = clean
+            ? "Clean script recompilation completed with 0 errors."
+            : "AssetDatabase refresh completed with 0 errors.";
+        string interruptedMessage = clean
+            ? "Unity recompilation interrupted by domain reload or restart."
+            : "Unity compilation interrupted by domain reload or restart.";
+        string failedMessage = clean
+            ? "Error: Unity recompilation failed."
+            : "Error: Unity compilation failed.";
 
         if (result.Success)
         {
             if (string.IsNullOrWhiteSpace(result.Message) || result.Message == "AssetDatabase refresh completed successfully.")
             {
-                sb.Append("AssetDatabase refresh completed with 0 errors.");
+                sb.Append(successMessage);
             }
             else
             {
                 sb.AppendLine(result.Message.TrimEnd());
-                sb.Append("AssetDatabase refresh completed with 0 errors.");
+                sb.Append(successMessage);
             }
         }
         else if (result.Interrupted)
         {
             string msg = !string.IsNullOrWhiteSpace(result.Message)
                 ? result.Message
-                : "Unity compilation interrupted by domain reload or restart.";
+                : interruptedMessage;
             sb.Append(msg);
         }
         else if (result.Message?.Contains("busy", StringComparison.OrdinalIgnoreCase) == true)
@@ -90,73 +102,9 @@ public class UnityTools
             {
                 sb.AppendLine(result.Message.TrimEnd());
             }
-            if (result.Message == null || !result.Message.Contains("Error: Unity compilation failed"))
+            if (result.Message == null || !result.Message.Contains(failedMessage))
             {
-                sb.Append("Error: Unity compilation failed.");
-            }
-        }
-
-        var diagnostics = _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
-        var structured = new StructuredRefreshResult
-        {
-            Success = result.Success,
-            Interrupted = result.Interrupted,
-            Message = result.Message ?? "",
-            Diagnostics = diagnostics
-        };
-
-        return new CallToolResult
-        {
-            Content =
-            [
-                new TextContentBlock { Text = sb.ToString().TrimEnd() },
-                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
-            ],
-            IsError = !result.Success
-        };
-    }
-
-    [McpServerTool(Name = "unity_recompile")]
-    [Description("Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.")]
-    public async Task<CallToolResult> UnityRecompileAsync(
-        IProgress<ProgressNotificationValue>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await _client.RefreshAsync(isRecompile: true, progress, cancellationToken);
-        var sb = new StringBuilder();
-
-        if (result.Success)
-        {
-            if (string.IsNullOrWhiteSpace(result.Message) || result.Message == "AssetDatabase refresh completed successfully.")
-            {
-                sb.Append("Clean script recompilation completed with 0 errors.");
-            }
-            else
-            {
-                sb.AppendLine(result.Message.TrimEnd());
-                sb.Append("Clean script recompilation completed with 0 errors.");
-            }
-        }
-        else if (result.Interrupted)
-        {
-            string msg = !string.IsNullOrWhiteSpace(result.Message)
-                ? result.Message
-                : "Unity recompilation interrupted by domain reload or restart.";
-            sb.Append(msg);
-        }
-        else if (result.Message?.Contains("busy", StringComparison.OrdinalIgnoreCase) == true)
-        {
-            sb.Append(result.Message);
-        }
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(result.Message))
-            {
-                sb.AppendLine(result.Message.TrimEnd());
-            }
-            if (result.Message == null || !result.Message.Contains("Error: Unity recompilation failed"))
-            {
-                sb.Append("Error: Unity recompilation failed.");
+                sb.Append(failedMessage);
             }
         }
 

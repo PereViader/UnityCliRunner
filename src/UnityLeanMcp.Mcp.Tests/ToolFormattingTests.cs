@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
@@ -245,7 +245,7 @@ public class ToolFormattingTests
     }
 
     // ==========================================
-    // 2. unity_refresh & unity_recompile tests
+    // 2. unity_refresh tests (including clean: true)
     // ==========================================
 
     [Fact]
@@ -272,7 +272,7 @@ public class ToolFormattingTests
     }
 
     [Fact]
-    public async Task UnityRecompile_WhenClean_ReturnsZeroErrorsMessage()
+    public async Task UnityRefresh_WhenCleanFlag_ReturnsZeroErrorsMessage()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
@@ -283,7 +283,7 @@ public class ToolFormattingTests
                 Message = ""
             };
 
-            var result = await tools.UnityRecompileAsync();
+            var result = await tools.UnityRefreshAsync(clean: true);
 
             Assert.False(result.IsError);
             Assert.Equal("Clean script recompilation completed with 0 errors.", GetResultText(result));
@@ -320,7 +320,7 @@ public class ToolFormattingTests
     }
 
     [Fact]
-    public async Task UnityRecompile_WhenBusy_ReportsBusyWithoutClaimingRecompilationFailed()
+    public async Task UnityRefresh_WhenCleanAndBusy_ReportsBusyWithoutClaimingRecompilationFailed()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
@@ -331,7 +331,7 @@ public class ToolFormattingTests
                 Message = "Unity is busy with another operation: BUSY test"
             };
 
-            var result = await tools.UnityRecompileAsync();
+            var result = await tools.UnityRefreshAsync(clean: true);
 
             Assert.True(result.IsError);
             string text = GetResultText(result);
@@ -389,6 +389,32 @@ public class ToolFormattingTests
             string text = GetResultText(result);
             Assert.Contains("error CS0103", text);
             Assert.Contains("Error: Unity compilation failed.", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenCleanAndCompilationFails_ReportsDiagnosticsAndRecompilationError()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = false,
+                Interrupted = false,
+                Message = "Assets/Scripts/Foo.cs(10,5): error CS0103: The name 'bar' does not exist in the current context"
+            };
+
+            var result = await tools.UnityRefreshAsync(clean: true);
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("error CS0103", text);
+            Assert.Contains("Error: Unity recompilation failed.", text);
         }
         finally
         {
@@ -1280,7 +1306,7 @@ public class ToolFormattingTests
     }
 
     [Fact]
-    public async Task UnityRecompile_ReturnsStructuredDiagnostics()
+    public async Task UnityRefresh_WhenClean_ReturnsStructuredDiagnostics()
     {
         var (tempDir, pm, client, tools) = CreateTestContext();
         try
@@ -1292,7 +1318,7 @@ public class ToolFormattingTests
                 Message = "Assets/Scripts/RecompileTest.cs(5,10): error CS1002: ; expected"
             };
 
-            var result = await tools.UnityRecompileAsync();
+            var result = await tools.UnityRefreshAsync(clean: true);
 
             Assert.True(result.IsError);
             Assert.Equal(2, result.Content.Count);
@@ -1499,7 +1525,6 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
     [InlineData("unity_eval", "Evaluates C# snippet in-memory to query scene, GameObjects, and component state.")]
     [InlineData("unity_execute_method", "Invokes static C# method with arguments in Unity Editor.")]
     [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics.")]
-    [InlineData("unity_recompile", "Forces clean script rebuild by clearing compiler cache. Slower than unity_refresh; use only for stale/corrupted assembly cache.")]
     public void UnityTools_Methods_HaveExpectedRefinedDescriptions(string toolName, string expectedDescription)
     {
         var methods = typeof(UnityTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);
@@ -1525,12 +1550,24 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
     }
 
     [Fact]
+    public void UnityTools_UnityRefresh_CleanParameter_HasAccurateDescription()
+    {
+        var refreshMethod = typeof(UnityTools).GetMethod(nameof(UnityTools.UnityRefreshAsync));
+        Assert.NotNull(refreshMethod);
+        var cleanParam = refreshMethod.GetParameters().FirstOrDefault(p => p.Name == "clean");
+        Assert.NotNull(cleanParam);
+        var descAttr = cleanParam.GetCustomAttribute<DescriptionAttribute>();
+        Assert.NotNull(descAttr);
+        Assert.Contains("forces a full clean rebuild", descAttr.Description);
+    }
+
+    [Fact]
     public void UnityTools_AllTools_HaveNonEmptyDescriptions()
     {
         var methods = typeof(UnityTools).GetMethods(BindingFlags.Public | BindingFlags.Instance);
         var toolMethods = methods.Where(m => m.GetCustomAttribute<McpServerToolAttribute>() != null).ToList();
 
-        Assert.Equal(7, toolMethods.Count);
+        Assert.Equal(6, toolMethods.Count);
         foreach (var method in toolMethods)
         {
             var descAttr = method.GetCustomAttribute<DescriptionAttribute>();

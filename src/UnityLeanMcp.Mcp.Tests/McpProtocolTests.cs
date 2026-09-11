@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -107,13 +107,13 @@ public class McpProtocolTests
 
         Assert.Contains("unity_status", toolNames);
         Assert.Contains("unity_refresh", toolNames);
-        Assert.Contains("unity_recompile", toolNames);
+        Assert.DoesNotContain("unity_recompile", toolNames);
         Assert.Contains("unity_eval", toolNames);
         Assert.Contains("unity_execute_method", toolNames);
         Assert.Contains("unity_run_tests", toolNames);
         Assert.Contains("unity_stop", toolNames);
         Assert.DoesNotContain("unity_start", toolNames);
-        Assert.Equal(7, toolNames.Count);
+        Assert.Equal(6, toolNames.Count);
 
         // 4. tools/call unity_status
         string callMsg = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"unity_status\",\"arguments\":{}}}";
