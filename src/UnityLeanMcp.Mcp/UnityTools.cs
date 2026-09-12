@@ -55,19 +55,7 @@ public class UnityTools
             ? "Error: Unity recompilation failed."
             : "Error: Unity compilation failed.";
 
-        if (result.Success)
-        {
-            if (string.IsNullOrWhiteSpace(result.Message) || result.Message == "AssetDatabase refresh completed successfully.")
-            {
-                sb.Append(successMessage);
-            }
-            else
-            {
-                sb.AppendLine(result.Message.TrimEnd());
-                sb.Append(successMessage);
-            }
-        }
-        else if (result.Interrupted)
+        if (result.Interrupted)
         {
             string msg = !string.IsNullOrWhiteSpace(result.Message)
                 ? result.Message
@@ -80,17 +68,14 @@ public class UnityTools
         }
         else
         {
-            if (!string.IsNullOrWhiteSpace(result.Message))
-            {
-                sb.AppendLine(result.Message.TrimEnd());
-            }
-            if (result.Message == null || !result.Message.Contains(failedMessage))
-            {
-                sb.Append(failedMessage);
-            }
+            string formatted = _diagnosticFormatter.FormatCompilerDiagnostics(
+                result.Message,
+                _processManager.ProjectRoot,
+                successTrailer: successMessage,
+                failureTrailer: failedMessage,
+                isSuccess: result.Success);
+            sb.Append(formatted);
         }
-
-        _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
 
         return new CallToolResult
         {
@@ -168,7 +153,19 @@ public class UnityTools
             }
             else
             {
-                errorMsg = string.IsNullOrWhiteSpace(result.Message) ? "Evaluation failed." : result.Message;
+                var parsedDiags = _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
+                if (parsedDiags.Count > 0)
+                {
+                    errorMsg = _diagnosticFormatter.FormatCompilerDiagnostics(
+                        result.Message,
+                        _processManager.ProjectRoot,
+                        failureTrailer: "Evaluation aborted: Script compilation failed.",
+                        isSuccess: false);
+                }
+                else
+                {
+                    errorMsg = string.IsNullOrWhiteSpace(result.Message) ? "Evaluation failed." : result.Message;
+                }
             }
 
             if (hasLogs)
@@ -215,11 +212,12 @@ public class UnityTools
 
         if (result.ResultState == "CompileError")
         {
-            sb.AppendLine("Test execution aborted: Script compilation failed.");
-            if (!string.IsNullOrWhiteSpace(result.Message))
-            {
-                sb.AppendLine(result.Message);
-            }
+            string formatted = _diagnosticFormatter.FormatCompilerDiagnostics(
+                result.Message,
+                _processManager.ProjectRoot,
+                failureTrailer: "Test execution aborted: Script compilation failed.",
+                isSuccess: false);
+            sb.Append(formatted);
         }
         else if (result.ResultState == "Interrupted")
         {
@@ -339,6 +337,18 @@ public class UnityTools
 
     internal static List<StructuredCompilerDiagnostic> ParseCompilerDiagnostics(string? diagnosticText)
         => DiagnosticFormatter.Default.ParseCompilerDiagnostics(diagnosticText);
+
+    internal static string FormatCompilerDiagnostics(
+        string? diagnosticText,
+        string? projectRoot,
+        string? successTrailer = null,
+        string? failureTrailer = null,
+        bool isSuccess = false,
+        int maxWarnings = DiagnosticFormatter.DefaultMaxWarnings)
+        => DiagnosticFormatter.Default.FormatCompilerDiagnostics(diagnosticText, projectRoot, successTrailer, failureTrailer, isSuccess, maxWarnings);
+
+    internal static string FormatDiagnostic(StructuredCompilerDiagnostic diagnostic, string? projectRoot)
+        => DiagnosticFormatter.Default.FormatDiagnostic(diagnostic, projectRoot);
 
 
     [McpServerTool(Name = "unity_stop")]

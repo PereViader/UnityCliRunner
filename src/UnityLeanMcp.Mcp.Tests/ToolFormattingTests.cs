@@ -566,7 +566,7 @@ public class ToolFormattingTests
 
             Assert.True(result.IsError);
             string text = GetResultText(result);
-            Assert.StartsWith("Test execution aborted: Script compilation failed.", text);
+            Assert.EndsWith("Test execution aborted: Script compilation failed.", text);
             Assert.Contains("error CS1002", text);
             Assert.DoesNotContain("Tests Failed: 0 failed", text);
         }
@@ -949,9 +949,17 @@ public class ToolFormattingTests
             Assert.Single(result.Content);
 
             string text = GetResultText(result);
-            Assert.Contains("Assets/Scripts/Game.cs(12,4): error CS0103: The name 'player' does not exist in the current context", text);
-            Assert.Contains("Assets/Scripts/Util.cs(88,16): warning CS0219: The variable 'temp' is assigned but its value is never used", text);
-            Assert.Contains("Error: Unity compilation failed.", text);
+            Assert.Contains("Warnings:", text);
+            Assert.Contains("Assets/Scripts/Util.cs#L88", text);
+            Assert.Contains("warning CS0219: The variable 'temp' is assigned but its value is never used", text);
+            Assert.Contains("Errors:", text);
+            Assert.Contains("Assets/Scripts/Game.cs#L12", text);
+            Assert.Contains("error CS0103: The name 'player' does not exist in the current context", text);
+            Assert.EndsWith("Error: Unity compilation failed.", text);
+
+            int warningsIndex = text.IndexOf("Warnings:");
+            int errorsIndex = text.IndexOf("Errors:");
+            Assert.True(warningsIndex < errorsIndex, "Warnings must precede errors");
         }
         finally
         {
@@ -978,8 +986,11 @@ public class ToolFormattingTests
             Assert.Single(result.Content);
 
             string text = GetResultText(result);
-            Assert.Contains("Assets/Scripts/RecompileTest.cs(5,10): error CS1002: ; expected", text);
-            Assert.Contains("Error: Unity recompilation failed.", text);
+            Assert.Contains("Assets/Scripts/RecompileTest.cs#L5", text);
+            Assert.Contains("error CS1002: ; expected", text);
+            Assert.EndsWith("Error: Unity recompilation failed.", text);
+            Assert.DoesNotContain("Errors:", text);
+            Assert.DoesNotContain("Warnings:", text);
         }
         finally
         {
@@ -1070,7 +1081,7 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
             };
 
             var refreshResult = await customTools.UnityRefreshAsync();
-            Assert.True(customFormatter.ParseCompilerDiagnosticsCalled);
+            Assert.True(customFormatter.FormatCompilerDiagnosticsCalled);
 
             client.TestRunResultToReturn = new UnityTestRunResult
             {
@@ -1094,6 +1105,8 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
     {
         public bool ExtractSourceLocationCalled { get; private set; }
         public bool ParseCompilerDiagnosticsCalled { get; private set; }
+        public bool FormatCompilerDiagnosticsCalled { get; private set; }
+        public bool FormatDiagnosticCalled { get; private set; }
 
         public (string? filePath, int? lineNumber, string? fileUri) ExtractSourceLocation(string? stackTrace, string? projectRoot)
         {
@@ -1117,6 +1130,281 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
                 }
             };
         }
+
+        public string FormatCompilerDiagnostics(
+            string? diagnosticText,
+            string? projectRoot,
+            string? successTrailer = null,
+            string? failureTrailer = null,
+            bool isSuccess = false,
+            int maxWarnings = DiagnosticFormatter.DefaultMaxWarnings)
+        {
+            FormatCompilerDiagnosticsCalled = true;
+            return DiagnosticFormatter.Default.FormatCompilerDiagnostics(
+                diagnosticText, projectRoot, successTrailer, failureTrailer, isSuccess, maxWarnings);
+        }
+
+        public string FormatDiagnostic(StructuredCompilerDiagnostic diagnostic, string? projectRoot)
+        {
+            FormatDiagnosticCalled = true;
+            return DiagnosticFormatter.Default.FormatDiagnostic(diagnostic, projectRoot);
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenSuccessWithWarningsUnderCap_ReportsFormattedWarningsWithoutTruncation()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = true,
+                Message = "Assets/Scripts/A.cs(10,5): warning CS0219: Variable 'x' is unused\n" +
+                          "Assets/Scripts/B.cs(20,5): warning CS0219: Variable 'y' is unused\n" +
+                          "Assets/Scripts/C.cs(30,5): warning CS0219: Variable 'z' is unused"
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.False(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Assets/Scripts/A.cs#L10", text);
+            Assert.Contains("Assets/Scripts/B.cs#L20", text);
+            Assert.Contains("Assets/Scripts/C.cs#L30", text);
+            Assert.DoesNotContain("omitted", text);
+            Assert.DoesNotContain("Warnings:", text);
+            Assert.DoesNotContain("Errors:", text);
+            Assert.EndsWith("AssetDatabase refresh completed with 0 errors (3 warnings).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenSuccessWithSingleWarning_ReportsSingularSummary()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = true,
+                Message = "Assets/Scripts/A.cs(10,5): warning CS0219: Variable 'x' is unused"
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.False(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Assets/Scripts/A.cs#L10", text);
+            Assert.DoesNotContain("omitted", text);
+            Assert.EndsWith("AssetDatabase refresh completed with 0 errors (1 warning).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenSuccessWithWarningsOverCap_ReportsCappedWarningsAndTruncationNotice()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            var lines = new List<string>();
+            for (int i = 1; i <= 15; i++)
+            {
+                lines.Add($"Assets/Scripts/File{i}.cs({i},1): warning CS0168: The variable 'v{i}' is declared but never used");
+            }
+
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = true,
+                Message = string.Join("\n", lines)
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.False(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Assets/Scripts/File1.cs#L1", text);
+            Assert.Contains("Assets/Scripts/File10.cs#L10", text);
+            Assert.DoesNotContain("Assets/Scripts/File11.cs#L11", text);
+            Assert.Contains("... and 5 more warning(s) omitted to preserve context window.", text);
+            Assert.EndsWith("AssetDatabase refresh completed with 0 errors (15 warnings).", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenErrorsAndWarnings_DisplaysWarningsFirstAndErrorsAtEndWithHeaders()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = false,
+                Message = "Assets/Scripts/Error1.cs(10,1): error CS0103: The name 'foo' does not exist\n" +
+                          "Assets/Scripts/Warn1.cs(20,1): warning CS0219: Variable 'w1' is unused\n" +
+                          "Assets/Scripts/Error2.cs(30,1): error CS0103: The name 'bar' does not exist\n" +
+                          "Assets/Scripts/Warn2.cs(40,1): warning CS0219: Variable 'w2' is unused"
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Warnings:", text);
+            Assert.Contains("Errors:", text);
+
+            int warnHeaderIdx = text.IndexOf("Warnings:");
+            int errHeaderIdx = text.IndexOf("Errors:");
+            Assert.True(warnHeaderIdx < errHeaderIdx, "Warnings header must precede Errors header");
+
+            int warn1Idx = text.IndexOf("Warn1.cs#L20");
+            int err1Idx = text.IndexOf("Error1.cs#L10");
+            Assert.True(warn1Idx < err1Idx, "Warnings must appear before Errors");
+
+            Assert.EndsWith("Error: Unity compilation failed.", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenErrorsOnly_DisplaysErrorsWithoutHeaders()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = false,
+                Message = "Assets/Scripts/Error1.cs(10,1): error CS0103: The name 'foo' does not exist\n" +
+                          "Assets/Scripts/Error2.cs(20,1): error CS0103: The name 'bar' does not exist"
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.DoesNotContain("Warnings:", text);
+            Assert.DoesNotContain("Errors:", text);
+            Assert.Contains("Assets/Scripts/Error1.cs#L10", text);
+            Assert.Contains("Assets/Scripts/Error2.cs#L20", text);
+            Assert.EndsWith("Error: Unity compilation failed.", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRefresh_WhenUnparseableError_FallsBackToRawMessage()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.RefreshResultToReturn = new UnityRefreshResult
+            {
+                Success = false,
+                Message = "Internal compiler crash occurred during Roslyn emit."
+            };
+
+            var result = await tools.UnityRefreshAsync();
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Internal compiler crash occurred during Roslyn emit.", text);
+            Assert.EndsWith("Error: Unity compilation failed.", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityRunTests_WhenCompileErrorWithWarningsAndErrors_FormatsStructuredDiagnostics()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.TestRunResultToReturn = new UnityTestRunResult
+            {
+                Success = false,
+                ResultState = "CompileError",
+                Message = "Assets/Scripts/Util.cs(5,1): warning CS0219: Variable 't' unused\n" +
+                          "Assets/Scripts/Test.cs(12,8): error CS1002: ; expected"
+            };
+
+            var result = await tools.UnityRunTestsAsync();
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Warnings:", text);
+            Assert.Contains("Errors:", text);
+            Assert.Contains("Assets/Scripts/Util.cs#L5", text);
+            Assert.Contains("Assets/Scripts/Test.cs#L12", text);
+            Assert.EndsWith("Test execution aborted: Script compilation failed.", text);
+
+            int warnIdx = text.IndexOf("Util.cs#L5");
+            int errIdx = text.IndexOf("Test.cs#L12");
+            Assert.True(warnIdx < errIdx, "Warnings must precede errors");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityEval_WhenPreRefreshHasCompilerDiagnostics_FormatsStructuredDiagnostics()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.EvalResultToReturn = new UnityEvalResult
+            {
+                Success = false,
+                Message = "Assets/Scripts/Player.cs(42,15): error CS0103: The name 'speed' does not exist in the current context"
+            };
+
+            var result = await tools.UnityEvalAsync("return 42;");
+
+            Assert.True(result.IsError);
+            string text = GetResultText(result);
+            Assert.Contains("Assets/Scripts/Player.cs#L42", text);
+            Assert.Contains("error CS0103: The name 'speed' does not exist in the current context", text);
+            Assert.EndsWith("Evaluation aborted: Script compilation failed.", text);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Theory]
+    [InlineData("Assets/Scripts/Foo.cs", 10, "C:/Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("Assets/Scripts/Foo.cs", 10, "C:\\Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("Assets/Scripts/Foo.cs", 10, "/home/user/repo", "file:///home/user/repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("C:/Repo/Assets/Scripts/Foo.cs", 10, "C:/Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("/home/user/repo/Assets/Scripts/Foo.cs", 10, "/home/user/repo", "file:///home/user/repo/Assets/Scripts/Foo.cs#L10")]
+    public void BuildFileUri_WindowsAndPosixPaths_FormatsCorrectFileUris(string file, int line, string projectRoot, string expectedUri)
+    {
+        string uri = DiagnosticFormatter.BuildFileUri(file, line, projectRoot);
+        Assert.Equal(expectedUri, uri);
     }
 
     // ==========================================
