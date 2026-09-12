@@ -1,4 +1,4 @@
-﻿namespace UnityLeanMcp.Mcp;
+namespace UnityLeanMcp.Mcp;
 
 public interface IUnityPathResolver
 {
@@ -14,4 +14,7 @@ public interface IUnityPathResolver
     string ExecuteResultFile { get; }
     string TestRunningFile { get; }
     string TestResultsFile { get; }
+    string GetEvalResultFile(string operationId);
+    string GetExecuteResultFile(string operationId);
+    string GetTestResultsFile(string operationId);
 }

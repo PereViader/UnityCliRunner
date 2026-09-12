@@ -13,7 +13,7 @@ namespace UnityLeanMcp
             string operationId = payload?.Trim();
             PollHelper.PollOperationResult<UnityExecuteResult>(
                 operationId,
-                UnityLeanMcpPaths.ExecuteResultFile,
+                UnityLeanMcpPaths.GetExecuteResultFile(operationId),
                 null,
                 writer,
                 res => res.operationId,

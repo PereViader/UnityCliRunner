@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using UnityEngine;
 
@@ -43,34 +43,43 @@ namespace UnityLeanMcp
             Action<TResult, StreamWriter> writeResultResponse,
             Func<string, string, bool> isRunningMatch = null) where TResult : class
         {
-            // 1. Matching terminal results are authoritative
-            if (File.Exists(resultFilePath))
+            bool TryWriteTerminalResult()
             {
-                try
+                if (!string.IsNullOrEmpty(resultFilePath) && File.Exists(resultFilePath))
                 {
-                    string content = CommandHelper.ReadFileWithRetry(resultFilePath, maxRetries: 3, delayMs: 10);
-                    if (!string.IsNullOrEmpty(content))
+                    try
                     {
-                        var res = JsonUtility.FromJson<TResult>(content);
-                        if (res != null)
+                        string content = CommandHelper.ReadFileWithRetry(resultFilePath, maxRetries: 3, delayMs: 10);
+                        if (!string.IsNullOrEmpty(content))
                         {
-                            string resultOpId = getResultOperationId != null ? getResultOperationId(res) : null;
-                            if (string.IsNullOrEmpty(operationId) || resultOpId == operationId)
+                            var res = JsonUtility.FromJson<TResult>(content);
+                            if (res != null)
                             {
-                                writeResultResponse(res, writer);
-                                return;
+                                string resultOpId = getResultOperationId != null ? getResultOperationId(res) : null;
+                                if (string.IsNullOrEmpty(operationId) || resultOpId == operationId)
+                                {
+                                    writeResultResponse(res, writer);
+                                    return true;
+                                }
                             }
                         }
                     }
+                    catch (IOException)
+                    {
+                        // File is temporarily being written or replaced; fall through to running check
+                    }
+                    catch (Exception)
+                    {
+                        // Transient read or deserialization error during reload/transition; fall through to running check
+                    }
                 }
-                catch (IOException)
-                {
-                    // File is temporarily being written or replaced; fall through to running check
-                }
-                catch (Exception)
-                {
-                    // Transient read or deserialization error during reload/transition; fall through to running check
-                }
+                return false;
+            }
+
+            // 1. Matching terminal results are authoritative
+            if (TryWriteTerminalResult())
+            {
+                return;
             }
 
             // 2. Active running state for this operation
@@ -125,6 +134,13 @@ namespace UnityLeanMcp
             }
             else
             {
+                // Re-check terminal result file before declaring IDLE to avoid boundary race condition
+                // where the result file was durable and ownership was cleared right as polling occurred.
+                if (TryWriteTerminalResult())
+                {
+                    return;
+                }
+
                 writer.WriteLine("IDLE");
             }
         }

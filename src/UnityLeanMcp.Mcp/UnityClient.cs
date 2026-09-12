@@ -521,14 +521,19 @@ public class UnityClient : IUnityClient
             cancellationToken.ThrowIfCancellationRequested();
 
             string opId = Guid.NewGuid().ToString("N");
+            string resultFile = _pathResolver.GetEvalResultFile(opId);
             string command = $"EVAL {opId} {escapedCode}";
 
             _logger.LogInformation("Sending EVAL operation {OpId}...", opId);
             string? initialResponse = await SendCommandAsync(command, 10, cancellationToken);
 
             // Check if result already available
-            var immediateResult = TryReadJsonFile<UnityEvalResult>(_pathResolver.EvalResultFile, r => r.OperationId == opId);
-            if (immediateResult != null) return immediateResult;
+            var immediateResult = TryReadJsonFile<UnityEvalResult>(resultFile, r => r.OperationId == opId);
+            if (immediateResult != null)
+            {
+                try { File.Delete(resultFile); } catch { }
+                return immediateResult;
+            }
 
             var busyInfo = ParseBusyResponse(initialResponse);
             if (busyInfo.isBusy)
@@ -581,7 +586,7 @@ public class UnityClient : IUnityClient
                 opId: opId,
                 kind: "eval",
                 operationDisplayName: "evaluation",
-                resultFilePath: _pathResolver.EvalResultFile,
+                resultFilePath: resultFile,
                 pollCommand: $"POLL_EVAL {opId}",
                 cancellationToken: cancellationToken);
         }
@@ -642,6 +647,7 @@ public class UnityClient : IUnityClient
             cancellationToken.ThrowIfCancellationRequested();
 
             string opId = Guid.NewGuid().ToString("N");
+            string resultFile = _pathResolver.GetExecuteResultFile(opId);
             var sb = new StringBuilder($"EXECUTE_METHOD {opId} {methodName}");
             if (args != null)
             {
@@ -655,9 +661,10 @@ public class UnityClient : IUnityClient
             _logger.LogInformation("Sending EXECUTE_METHOD operation {OpId} for {MethodName}...", opId, methodName);
             string? initialResponse = await SendCommandAsync(sb.ToString(), 10, cancellationToken);
 
-            var immediateResult = TryReadJsonFile<UnityExecuteResult>(_pathResolver.ExecuteResultFile, r => r.OperationId == opId);
+            var immediateResult = TryReadJsonFile<UnityExecuteResult>(resultFile, r => r.OperationId == opId);
             if (immediateResult != null)
             {
+                try { File.Delete(resultFile); } catch { }
                 if (immediateResult.Success) ReportExecuteCompleted(progress);
                 return immediateResult;
             }
@@ -713,7 +720,7 @@ public class UnityClient : IUnityClient
                 opId: opId,
                 kind: "execute",
                 operationDisplayName: "method execution",
-                resultFilePath: _pathResolver.ExecuteResultFile,
+                resultFilePath: resultFile,
                 pollCommand: $"POLL_EXECUTE {opId}",
                 onResultFound: res =>
                 {
@@ -779,6 +786,7 @@ public class UnityClient : IUnityClient
             cancellationToken.ThrowIfCancellationRequested();
 
             string opId = Guid.NewGuid().ToString("N");
+            string resultFile = _pathResolver.GetTestResultsFile(opId);
             var sb = new StringBuilder($"RUN_TESTS {opId} {testMode}");
             if (!string.IsNullOrWhiteSpace(filter))
             {
@@ -802,9 +810,10 @@ public class UnityClient : IUnityClient
             _logger.LogInformation("Sending RUN_TESTS operation {OpId} (mode: {Mode})...", opId, testMode);
             string? initialResponse = await SendCommandAsync(sb.ToString(), 10, cancellationToken);
 
-            var immediateResult = TryReadJsonFile<UnityTestRunResult>(_pathResolver.TestResultsFile, r => r.RunId == opId);
+            var immediateResult = TryReadJsonFile<UnityTestRunResult>(resultFile, r => r.RunId == opId);
             if (immediateResult != null)
             {
+                try { File.Delete(resultFile); } catch { }
                 ReportFinalProgress(progress, immediateResult);
                 return immediateResult;
             }
@@ -857,9 +866,10 @@ public class UnityClient : IUnityClient
             }
         if (initialResponse != null && initialResponse.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
         {
-            var res = TryReadJsonFile<UnityTestRunResult>(_pathResolver.TestResultsFile, r => r.RunId == opId);
+            var res = TryReadJsonFile<UnityTestRunResult>(resultFile, r => r.RunId == opId);
             if (res != null)
             {
+                try { File.Delete(resultFile); } catch { }
                 ReportFinalProgress(progress, res);
                 return res;
             }
@@ -876,7 +886,7 @@ public class UnityClient : IUnityClient
             OperationId = opId,
             Kind = "test",
             OperationDisplayName = "test run",
-            ResultFilePath = _pathResolver.TestResultsFile,
+            ResultFilePath = resultFile,
             IsMatch = r => r.RunId == opId,
             PollCommand = $"POLL_TESTS {opId}",
             PollTimeoutSeconds = 5,

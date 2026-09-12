@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -138,7 +138,7 @@ public class TestRunProgressTests
                                     SkipCount = 0,
                                     ResultState = "Passed"
                                 };
-                                File.WriteAllText(procManager.TestResultsFile, JsonSerializer.Serialize(result));
+                                File.WriteAllText(procManager.GetTestResultsFile(opId), JsonSerializer.Serialize(result));
                                 await writer.WriteLineAsync("SUCCESS 9 passed");
                             }
                         }
@@ -262,7 +262,7 @@ public class TestRunProgressTests
                                     SkipCount = 0,
                                     ResultState = "Passed"
                                 };
-                                File.WriteAllText(Path.Combine(unityTemp, "unity_test_results.json"), JsonSerializer.Serialize(result));
+                                File.WriteAllText(Path.Combine(unityTemp, $"unity_test_{opId}.json"), JsonSerializer.Serialize(result));
                                 await writer.WriteLineAsync("RUNNING");
                             }
                             else

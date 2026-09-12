@@ -14,15 +14,87 @@ namespace UnityLeanMcp
         private static string s_ExecuteResultFile;
         private static string s_EvalResultFile;
 
-        public static string TempDir => s_TempDir;
-        public static string PortFile => s_PortFile;
-        public static string OperationFile => s_OperationFile;
-        public static string DiagnosticsFile => s_DiagnosticsFile;
-        public static string RefreshResultFile => s_RefreshResultFile;
-        public static string TestRunningFile => s_TestRunningFile;
-        public static string TestResultsFile => s_TestResultsFile;
-        public static string ExecuteResultFile => s_ExecuteResultFile;
-        public static string EvalResultFile => s_EvalResultFile;
+        public static string TempDir
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_TempDir)) EnsureInitialized();
+                return s_TempDir;
+            }
+        }
+        public static string PortFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_PortFile)) EnsureInitialized();
+                return s_PortFile;
+            }
+        }
+        public static string OperationFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_OperationFile)) EnsureInitialized();
+                return s_OperationFile;
+            }
+        }
+        public static string DiagnosticsFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_DiagnosticsFile)) EnsureInitialized();
+                return s_DiagnosticsFile;
+            }
+        }
+        public static string RefreshResultFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_RefreshResultFile)) EnsureInitialized();
+                return s_RefreshResultFile;
+            }
+        }
+        public static string TestRunningFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_TestRunningFile)) EnsureInitialized();
+                return s_TestRunningFile;
+            }
+        }
+        public static string TestResultsFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_TestResultsFile)) EnsureInitialized();
+                return s_TestResultsFile;
+            }
+        }
+        public static string ExecuteResultFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_ExecuteResultFile)) EnsureInitialized();
+                return s_ExecuteResultFile;
+            }
+        }
+        public static string EvalResultFile
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(s_EvalResultFile)) EnsureInitialized();
+                return s_EvalResultFile;
+            }
+        }
+
+        public static string GetEvalResultFile(string operationId) =>
+            string.IsNullOrEmpty(operationId) ? EvalResultFile : Path.Combine(TempDir, $"unity_eval_{operationId}.json");
+
+        public static string GetExecuteResultFile(string operationId) =>
+            string.IsNullOrEmpty(operationId) ? ExecuteResultFile : Path.Combine(TempDir, $"unity_execute_{operationId}.json");
+
+        public static string GetTestResultsFile(string operationId) =>
+            string.IsNullOrEmpty(operationId) ? TestResultsFile : Path.Combine(TempDir, $"unity_test_{operationId}.json");
 
         public static void EnsureInitialized()
         {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor.TestTools.TestRunner.Api;
@@ -136,9 +136,9 @@ namespace UnityLeanMcp
             try
             {
                 string runningPath = RunTestsHandler.RunningFilePath;
-                string resultsPath = RunTestsHandler.ResultsFilePath;
                 var state = RunTestsHandler.ReadRunningState();
                 runId = m_RunId ?? state?.runId;
+                string resultsPath = RunTestsHandler.GetResultsFilePath(runId);
 
                 if (state == null || string.IsNullOrEmpty(runId) || state.runId != runId ||
                     !UnityLeanMcpOperationStore.IsOwnedBy(runId, "test"))
@@ -183,6 +183,14 @@ namespace UnityLeanMcp
 
                 string json = JsonUtility.ToJson(runResult, true);
                 RunTestsHandler.WriteAtomic(resultsPath, json, runResult.runId);
+                try
+                {
+                    RunTestsHandler.WriteAtomic(RunTestsHandler.ResultsFilePath, json, runResult.runId);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"UnityLeanMcp: Failed to update persistent test results file: {ex.Message}");
+                }
                 RunTestsHandler.DeleteRunningStateIfOwned(runResult.runId);
                 RunTestsHandler.ClearCachedRunState();
                 UnityLeanMcpOperationStore.Complete(runResult.runId);

@@ -121,11 +121,12 @@ namespace UnityLeanMcp
             writer.WriteLine("RUNNING");
             writer.Flush();
 
+            string resultFilePath = UnityLeanMcpPaths.GetExecuteResultFile(operationId);
             try
             {
                 if (cts.IsCancellationRequested)
                 {
-                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Execute, UnityLeanMcpPaths.ExecuteResultFile, false, "Method execution was canceled.", 0, null, new List<ConsoleLogEntry>(), interrupted: true);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Execute, resultFilePath, false, "Method execution was canceled.", 0, null, new List<ConsoleLogEntry>(), interrupted: true);
                     return;
                 }
                 ExecuteMethod(operationId, targetMethod, methodParamsList.ToArray());
@@ -133,7 +134,7 @@ namespace UnityLeanMcp
             catch (Exception ex)
             {
                 Debug.LogError($"UnityLeanMcp: Unhandled exception during ExecuteMethod: {ex}");
-                OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Execute, UnityLeanMcpPaths.ExecuteResultFile, false, ex.ToString(), 0, null, new List<ConsoleLogEntry>());
+                OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Execute, resultFilePath, false, ex.ToString(), 0, null, new List<ConsoleLogEntry>());
             }
         }
 
@@ -158,7 +159,7 @@ namespace UnityLeanMcp
             OperationExecutionEngine.Execute(
                 operationId: operationId,
                 operationKind: OperationKinds.Execute,
-                resultFilePath: UnityLeanMcpPaths.ExecuteResultFile,
+                resultFilePath: UnityLeanMcpPaths.GetExecuteResultFile(operationId),
                 isVoid: method.ReturnType == typeof(void) || method.ReturnType == typeof(Task) || method.ReturnType == typeof(ValueTask),
                 canCancel: hasCt,
                 invoker: ct =>
@@ -215,7 +216,10 @@ namespace UnityLeanMcp
 
         public static void MarkInterrupted(string message, string targetOperationId = null)
         {
-            OperationExecutionEngine.MarkInterrupted(OperationKinds.Execute, UnityLeanMcpPaths.ExecuteResultFile, message, targetOperationId);
+            var operation = UnityLeanMcpOperationStore.Read();
+            string opId = targetOperationId ?? operation?.operationId;
+            string resultFilePath = UnityLeanMcpPaths.GetExecuteResultFile(opId);
+            OperationExecutionEngine.MarkInterrupted(OperationKinds.Execute, resultFilePath, message, targetOperationId);
         }
     }
 }

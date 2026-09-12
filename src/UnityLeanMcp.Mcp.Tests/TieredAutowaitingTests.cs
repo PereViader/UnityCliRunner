@@ -158,7 +158,7 @@ public class TieredAutowaitingTests
                                     Payload = "100"
                                 };
                                 string json = JsonSerializer.Serialize(evalResult);
-                                await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_eval_result.json"), json, cts.Token);
+                                await File.WriteAllTextAsync(Path.Combine(unityTemp, $"unity_eval_{opId}.json"), json, cts.Token);
                                 await writer.WriteLineAsync($"SUCCESS 100");
                             }
                         }
@@ -388,7 +388,7 @@ public class TieredAutowaitingTests
                                     Payload = "cleared_ok"
                                 };
                                 string json = JsonSerializer.Serialize(evalResult);
-                                await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_eval_result.json"), json, cts.Token);
+                                await File.WriteAllTextAsync(Path.Combine(unityTemp, $"unity_eval_{opId}.json"), json, cts.Token);
                                 await writer.WriteLineAsync("SUCCESS cleared_ok");
                             }
                         }
@@ -518,7 +518,7 @@ public class TieredAutowaitingTests
                                     FailCount = 0
                                 };
                                 string json = JsonSerializer.Serialize(testResult);
-                                await File.WriteAllTextAsync(Path.Combine(unityTemp, "unity_test_results.json"), json, cts.Token);
+                                await File.WriteAllTextAsync(Path.Combine(unityTemp, $"unity_test_{opId}.json"), json, cts.Token);
                                 await writer.WriteLineAsync($"SUCCESS {opId}");
                             }
                         }

@@ -34,6 +34,9 @@ public class UnityProcessManager : IUnityProcessManager
     public string ExecuteResultFile => _pathResolver.ExecuteResultFile;
     public string TestRunningFile => _pathResolver.TestRunningFile;
     public string TestResultsFile => _pathResolver.TestResultsFile;
+    public string GetEvalResultFile(string operationId) => _pathResolver.GetEvalResultFile(operationId);
+    public string GetExecuteResultFile(string operationId) => _pathResolver.GetExecuteResultFile(operationId);
+    public string GetTestResultsFile(string operationId) => _pathResolver.GetTestResultsFile(operationId);
 
     public void PurgeOperationState()
     {
@@ -51,6 +54,19 @@ public class UnityProcessManager : IUnityProcessManager
             {
                 try { File.Delete(file); } catch { }
             }
+        }
+
+        if (Directory.Exists(_pathResolver.TempDir))
+        {
+            try
+            {
+                var orphanedFiles = Directory.GetFiles(_pathResolver.TempDir, "unity_*_*.json");
+                foreach (var orphan in orphanedFiles)
+                {
+                    try { File.Delete(orphan); } catch { }
+                }
+            }
+            catch { }
         }
     }
 

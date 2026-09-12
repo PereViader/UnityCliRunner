@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -87,14 +87,11 @@ namespace UnityLeanMcp
                     logs = null
                 };
                 UnityLeanMcpOperationStore.WriteAtomic(resultFilePath, JsonUtility.ToJson(result, true), opId);
+                UnityLeanMcpOperationStore.Complete(opId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityLeanMcp: Failed to persist interrupted {operationKind} result: {ex}");
-            }
-            finally
-            {
-                UnityLeanMcpOperationStore.Complete(opId);
             }
         }
 
@@ -424,14 +421,11 @@ namespace UnityLeanMcp
                 };
                 string json = JsonUtility.ToJson(runResult, true);
                 UnityLeanMcpOperationStore.WriteAtomic(resultFilePath, json, operationId);
+                UnityLeanMcpOperationStore.Complete(operationId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityLeanMcp: Failed to write {operationKind} result: {ex}");
-            }
-            finally
-            {
-                UnityLeanMcpOperationStore.Complete(operationId);
             }
         }
 

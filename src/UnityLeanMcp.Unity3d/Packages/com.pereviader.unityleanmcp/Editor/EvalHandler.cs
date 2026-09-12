@@ -60,13 +60,14 @@ namespace UnityLeanMcp
                 return;
             }
 
+            string resultFilePath = UnityLeanMcpPaths.GetEvalResultFile(operationId);
             var cts = OperationExecutionEngine.RegisterActiveOperation(operationId, isCancelable: true);
 
             try
             {
                 if (cts.IsCancellationRequested)
                 {
-                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityLeanMcpPaths.EvalResultFile, false, "Evaluation was canceled.", 0, null, null, interrupted: true);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, resultFilePath, false, "Evaluation was canceled.", 0, null, null, interrupted: true);
                     writer.WriteLine("FAILURE Evaluation was canceled.");
                     return;
                 }
@@ -74,7 +75,7 @@ namespace UnityLeanMcp
                 if (!RoslynCompilerHelper.IsSupported)
                 {
                     string msg = "The 'eval' command is not supported on this Unity version (" + RoslynCompilerHelper.UnsupportedReason + ")";
-                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityLeanMcpPaths.EvalResultFile, false, msg, 0, null, null);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, resultFilePath, false, msg, 0, null, null);
                     writer.WriteLine($"FAILURE {msg}");
                     return;
                 }
@@ -87,7 +88,7 @@ namespace UnityLeanMcp
                 if (!TryCompileSnippet(rawCode, out assemblyBytes, out isVoidStatement, out errors) || assemblyBytes == null)
                 {
                     string combinedErrors = string.Join("\n", errors);
-                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityLeanMcpPaths.EvalResultFile, false, combinedErrors, 0, null, null);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, resultFilePath, false, combinedErrors, 0, null, null);
                     string singleLineErrors = string.Join(" | ", errors);
                     writer.WriteLine($"FAILURE {singleLineErrors}");
                     return;
@@ -95,7 +96,7 @@ namespace UnityLeanMcp
 
                 if (cts.IsCancellationRequested)
                 {
-                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityLeanMcpPaths.EvalResultFile, false, "Evaluation was canceled.", 0, null, null, interrupted: true);
+                    OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, resultFilePath, false, "Evaluation was canceled.", 0, null, null, interrupted: true);
                     writer.WriteLine("FAILURE Evaluation was canceled.");
                     return;
                 }
@@ -110,7 +111,7 @@ namespace UnityLeanMcp
                 OperationExecutionEngine.Execute(
                     operationId: operationId,
                     operationKind: OperationKinds.Eval,
-                    resultFilePath: UnityLeanMcpPaths.EvalResultFile,
+                    resultFilePath: resultFilePath,
                     isVoid: isVoidStatement,
                     invoker: ct =>
                     {
@@ -135,7 +136,7 @@ namespace UnityLeanMcp
             catch (Exception ex)
             {
                 Debug.LogError($"UnityLeanMcp: Unhandled exception during Eval: {ex}");
-                OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, UnityLeanMcpPaths.EvalResultFile, false, ex.ToString(), 0, null, null);
+                OperationExecutionEngine.FinishOperation(operationId, OperationKinds.Eval, resultFilePath, false, ex.ToString(), 0, null, null);
             }
         }
 
@@ -187,7 +188,10 @@ namespace UnityLeanMcp
 
         public static void MarkInterrupted(string message, string targetOperationId = null)
         {
-            OperationExecutionEngine.MarkInterrupted(OperationKinds.Eval, UnityLeanMcpPaths.EvalResultFile, message, targetOperationId);
+            var operation = UnityLeanMcpOperationStore.Read();
+            string opId = targetOperationId ?? operation?.operationId;
+            string resultFilePath = UnityLeanMcpPaths.GetEvalResultFile(opId);
+            OperationExecutionEngine.MarkInterrupted(OperationKinds.Eval, resultFilePath, message, targetOperationId);
         }
     }
 }

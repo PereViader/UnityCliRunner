@@ -26,6 +26,7 @@ namespace UnityLeanMcp
         internal static string TempDirectory => UnityLeanMcpPaths.TempDir;
         internal static string RunningFilePath => UnityLeanMcpPaths.TestRunningFile;
         internal static string ResultsFilePath => UnityLeanMcpPaths.TestResultsFile;
+        internal static string GetResultsFilePath(string runId) => UnityLeanMcpPaths.GetTestResultsFile(runId);
 
         internal static void ClearCachedRunState()
         {
@@ -201,7 +202,7 @@ namespace UnityLeanMcp
                             resultState = "Passed",
                             failedTests = new List<FailedTestInfo>()
                         };
-                        WriteAtomic(ResultsFilePath, JsonUtility.ToJson(emptyResult, true), operationId);
+                        WriteAtomic(GetResultsFilePath(operationId), JsonUtility.ToJson(emptyResult, true), operationId);
                         UnityLeanMcpOperationStore.Complete(operationId);
                         writer.WriteLine("SUCCESS No previously failed tests found.");
                         writer.Flush();
@@ -238,9 +239,20 @@ namespace UnityLeanMcp
             var failedNames = new List<string>();
             try
             {
-                if (File.Exists(ResultsFilePath))
+                string path = ResultsFilePath;
+                if (!File.Exists(path) && Directory.Exists(TempDirectory))
                 {
-                    string json = CommandHelper.ReadFileWithRetry(ResultsFilePath, maxRetries: 3, delayMs: 10);
+                    var files = new DirectoryInfo(TempDirectory).GetFiles("unity_test_*.json");
+                    if (files.Length > 0)
+                    {
+                        Array.Sort(files, (a, b) => b.LastWriteTimeUtc.CompareTo(a.LastWriteTimeUtc));
+                        path = files[0].FullName;
+                    }
+                }
+
+                if (File.Exists(path))
+                {
+                    string json = CommandHelper.ReadFileWithRetry(path, maxRetries: 3, delayMs: 10);
                     var result = JsonUtility.FromJson<UnityTestRunResult>(json);
                     if (result?.failedTests != null)
                     {
@@ -474,17 +486,14 @@ namespace UnityLeanMcp
 
             try
             {
-                WriteAtomic(ResultsFilePath, JsonUtility.ToJson(result, true), runId);
+                WriteAtomic(GetResultsFilePath(runId), JsonUtility.ToJson(result, true), runId);
+                DeleteRunningStateIfOwned(runId);
+                ClearCachedRunState();
+                UnityLeanMcpOperationStore.Complete(runId);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"UnityLeanMcp: Failed to persist interrupted test result. Type={ex.GetType().FullName}, StackTrace={ex.StackTrace}");
-            }
-            finally
-            {
-                DeleteRunningStateIfOwned(runId);
-                ClearCachedRunState();
-                UnityLeanMcpOperationStore.Complete(runId);
             }
         }
 
@@ -496,11 +505,12 @@ namespace UnityLeanMcp
             // 1. If neither operation store nor running state is active
             if (operation == null && runningState == null)
             {
-                if (!string.IsNullOrEmpty(operationId) && File.Exists(ResultsFilePath))
+                string resPath = GetResultsFilePath(operationId);
+                if (!string.IsNullOrEmpty(operationId) && File.Exists(resPath))
                 {
                     try
                     {
-                        var existing = JsonUtility.FromJson<UnityTestRunResult>(CommandHelper.ReadFileWithRetry(ResultsFilePath, maxRetries: 3, delayMs: 10));
+                        var existing = JsonUtility.FromJson<UnityTestRunResult>(CommandHelper.ReadFileWithRetry(resPath, maxRetries: 3, delayMs: 10));
                         if (existing != null && existing.runId == operationId)
                         {
                             writer.WriteLine("CANCELLED");
@@ -573,14 +583,7 @@ namespace UnityLeanMcp
 
             try
             {
-                WriteAtomic(ResultsFilePath, JsonUtility.ToJson(result, true), runId);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"UnityLeanMcp: Failed to persist cancelled test result. Type={ex.GetType().FullName}, StackTrace={ex.StackTrace}");
-            }
-            finally
-            {
+                WriteAtomic(GetResultsFilePath(runId), JsonUtility.ToJson(result, true), runId);
                 DeleteRunningStateIfOwned(runId);
                 ClearCachedRunState();
                 UnityLeanMcpOperationStore.Complete(runId);
@@ -589,6 +592,10 @@ namespace UnityLeanMcp
                 {
                     s_Callbacks.Reset();
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"UnityLeanMcp: Failed to persist cancelled test result. Type={ex.GetType().FullName}, StackTrace={ex.StackTrace}");
             }
         }
 

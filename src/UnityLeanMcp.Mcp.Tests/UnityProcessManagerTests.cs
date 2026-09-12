@@ -527,6 +527,9 @@ public class UnityProcessManagerTests
         Assert.Equal(Path.Combine(resolver.TempDir, "unity_execute_result.json"), resolver.ExecuteResultFile);
         Assert.Equal(Path.Combine(resolver.TempDir, "unity_test_running.txt"), resolver.TestRunningFile);
         Assert.Equal(Path.Combine(resolver.TempDir, "unity_test_results.json"), resolver.TestResultsFile);
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_eval_op1.json"), resolver.GetEvalResultFile("op1"));
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_execute_op2.json"), resolver.GetExecuteResultFile("op2"));
+        Assert.Equal(Path.Combine(resolver.TempDir, "unity_test_op3.json"), resolver.GetTestResultsFile("op3"));
     }
 
     [Theory]
@@ -550,5 +553,87 @@ public class UnityProcessManagerTests
         Assert.Equal(resolver.OperationFile, pm.OperationFile);
         Assert.Equal(resolver.TempDir, pm.TempDir);
         Assert.Equal(resolver.PortFile, pm.PortFile);
+        Assert.Equal(resolver.GetEvalResultFile("op1"), pm.GetEvalResultFile("op1"));
+        Assert.Equal(resolver.GetExecuteResultFile("op2"), pm.GetExecuteResultFile("op2"));
+        Assert.Equal(resolver.GetTestResultsFile("op3"), pm.GetTestResultsFile("op3"));
+    }
+
+    [Fact]
+    public void PurgeOperationState_DeletesOrphanedOperationFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "test_purge_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        try
+        {
+            var pm = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+
+            string file1 = Path.Combine(unityTemp, "unity_eval_123.json");
+            string file2 = Path.Combine(unityTemp, "unity_execute_456.json");
+            string file3 = Path.Combine(unityTemp, "unity_test_789.json");
+            string keepFile = Path.Combine(unityTemp, "other_file.txt");
+
+            File.WriteAllText(file1, "{}");
+            File.WriteAllText(file2, "{}");
+            File.WriteAllText(file3, "{}");
+            File.WriteAllText(keepFile, "keep");
+
+            pm.PurgeOperationState();
+
+            Assert.False(File.Exists(file1));
+            Assert.False(File.Exists(file2));
+            Assert.False(File.Exists(file3));
+            Assert.True(File.Exists(keepFile));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task OperationPoller_DeletesResultFileAfterSuccessfulRead()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "test_poller_clean_" + Guid.NewGuid().ToString("N"));
+        string unityTemp = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(unityTemp);
+
+        try
+        {
+            var pm = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
+            var poller = new OperationPoller(pm, pm.PathResolver, new UnitySocketTransport(NullLogger<UnitySocketTransport>.Instance));
+
+            string opId = "clean_test_op";
+            string resultFile = pm.GetEvalResultFile(opId);
+            var evalResult = new UnityEvalResult
+            {
+                OperationId = opId,
+                Success = true,
+                Payload = "result_ok"
+            };
+            File.WriteAllText(resultFile, System.Text.Json.JsonSerializer.Serialize(evalResult));
+            Assert.True(File.Exists(resultFile));
+
+            var spec = new OperationPollingSpec<UnityEvalResult>
+            {
+                OperationId = opId,
+                ResultFilePath = resultFile,
+                IsMatch = r => r.OperationId == opId,
+                PollCommand = $"POLL_EVAL {opId}",
+                PollTimeoutSeconds = 1,
+                PollIntervalMs = 50
+            };
+
+            var result = await poller.PollOperationUntilTerminalAsync(spec, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Equal("result_ok", result.Payload);
+            Assert.False(File.Exists(resultFile), "Result file should have been deleted by OperationPoller after terminal read.");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
     }
 }

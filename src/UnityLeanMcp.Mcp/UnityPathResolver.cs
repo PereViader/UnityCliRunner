@@ -18,6 +18,15 @@ public class UnityPathResolver : IUnityPathResolver
     public string TestRunningFile => Path.Combine(TempDir, "unity_test_running.txt");
     public string TestResultsFile => Path.Combine(TempDir, "unity_test_results.json");
 
+    public string GetEvalResultFile(string operationId) =>
+        string.IsNullOrEmpty(operationId) ? EvalResultFile : Path.Combine(TempDir, $"unity_eval_{operationId}.json");
+
+    public string GetExecuteResultFile(string operationId) =>
+        string.IsNullOrEmpty(operationId) ? ExecuteResultFile : Path.Combine(TempDir, $"unity_execute_{operationId}.json");
+
+    public string GetTestResultsFile(string operationId) =>
+        string.IsNullOrEmpty(operationId) ? TestResultsFile : Path.Combine(TempDir, $"unity_test_{operationId}.json");
+
     public UnityPathResolver(string projectRoot)
     {
         if (string.IsNullOrWhiteSpace(projectRoot))

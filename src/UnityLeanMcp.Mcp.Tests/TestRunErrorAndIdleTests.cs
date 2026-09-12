@@ -314,7 +314,7 @@ public class TestRunErrorAndIdleTests
                     Success = true,
                     Payload = "42"
                 };
-                File.WriteAllText(procManager.EvalResultFile, System.Text.Json.JsonSerializer.Serialize(result));
+                File.WriteAllText(procManager.GetEvalResultFile(capturedOpId), System.Text.Json.JsonSerializer.Serialize(result));
                 return "IDLE";
             }
             return null;
