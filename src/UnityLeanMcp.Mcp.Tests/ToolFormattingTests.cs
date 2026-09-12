@@ -1399,9 +1399,16 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
     [Theory]
     [InlineData("Assets/Scripts/Foo.cs", 10, "C:/Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
     [InlineData("Assets/Scripts/Foo.cs", 10, "C:\\Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("Assets/Scripts/Foo.cs", 10, "C:\\Repo\\", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
     [InlineData("Assets/Scripts/Foo.cs", 10, "/home/user/repo", "file:///home/user/repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("Assets/Scripts/Foo.cs", 10, "/home/user/repo/", "file:///home/user/repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("./Assets/Scripts/Foo.cs", 10, "C:/Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData(".\\Assets\\Scripts\\Foo.cs", 10, "C:\\Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
     [InlineData("C:/Repo/Assets/Scripts/Foo.cs", 10, "C:/Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("C:\\Repo\\Assets\\Scripts\\Foo.cs", 10, "C:/Repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("C:/Repo/Assets/Scripts/Foo.cs", 10, "/home/user/repo", "file:///C:/Repo/Assets/Scripts/Foo.cs#L10")]
     [InlineData("/home/user/repo/Assets/Scripts/Foo.cs", 10, "/home/user/repo", "file:///home/user/repo/Assets/Scripts/Foo.cs#L10")]
+    [InlineData("/home/user/repo/Assets/Scripts/Foo.cs", 10, "C:/Repo", "file:///home/user/repo/Assets/Scripts/Foo.cs#L10")]
     public void BuildFileUri_WindowsAndPosixPaths_FormatsCorrectFileUris(string file, int line, string projectRoot, string expectedUri)
     {
         string uri = DiagnosticFormatter.BuildFileUri(file, line, projectRoot);

@@ -33,12 +33,47 @@ public class DiagnosticFormatter : IDiagnosticFormatter
         @"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s*(?<severity>error|warning)\s+(?<code>[A-Z0-9]+):\s*(?<msg>.+)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    public static bool IsPathRootedCrossPlatform(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        if (Path.IsPathRooted(path))
+            return true;
+
+        if (path.StartsWith('/') || path.StartsWith('\\'))
+            return true;
+
+        if (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+        {
+            if (path.Length == 2 || path[2] == '/' || path[2] == '\\')
+                return true;
+        }
+
+        return false;
+    }
+
     public static string BuildFileUri(string rawFile, int? lineNumber, string? projectRoot)
     {
-        string resolvedPath = rawFile;
-        if (!Path.IsPathRooted(resolvedPath) && !string.IsNullOrEmpty(projectRoot))
+        if (string.IsNullOrWhiteSpace(rawFile))
+            return string.Empty;
+
+        if (rawFile.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {
-            resolvedPath = Path.Combine(projectRoot, resolvedPath);
+            string uriAnchor = lineNumber.HasValue && !rawFile.Contains("#L") ? $"#L{lineNumber.Value}" : "";
+            return $"{rawFile}{uriAnchor}";
+        }
+
+        string resolvedPath = rawFile;
+        if (!IsPathRootedCrossPlatform(resolvedPath) && !string.IsNullOrWhiteSpace(projectRoot))
+        {
+            string root = projectRoot.Replace('\\', '/').TrimEnd('/');
+            string rel = resolvedPath.Replace('\\', '/').TrimStart('/');
+            while (rel.StartsWith("./", StringComparison.Ordinal))
+            {
+                rel = rel[2..];
+            }
+            resolvedPath = $"{root}/{rel}";
         }
 
         string normalizedPath = resolvedPath.Replace('\\', '/');
