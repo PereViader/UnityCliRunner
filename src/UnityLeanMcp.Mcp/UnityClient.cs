@@ -16,19 +16,21 @@ public class UnityClient : IUnityClient
     private readonly IUnityProcessManager _processManager;
     private readonly IUnityPathResolver _pathResolver;
     private readonly ILogger<UnityClient> _logger;
+    private readonly IUnitySocketTransport _socketTransport;
+    private readonly IOperationPoller _operationPoller;
 
-    private static readonly JsonSerializerOptions s_JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
-
-    public UnityClient(IUnityProcessManager processManager, IUnityPathResolver pathResolver, ILogger<UnityClient> logger)
+    public UnityClient(
+        IUnityProcessManager processManager,
+        IUnityPathResolver pathResolver,
+        ILogger<UnityClient> logger,
+        IUnitySocketTransport? socketTransport = null,
+        IOperationPoller? operationPoller = null)
     {
         _processManager = processManager;
         _pathResolver = pathResolver;
         _logger = logger;
+        _socketTransport = socketTransport ?? new UnitySocketTransport(logger);
+        _operationPoller = operationPoller ?? new OperationPoller(_processManager, _pathResolver, _socketTransport, logger);
     }
 
     public UnityClient(IUnityProcessManager processManager, ILogger<UnityClient> logger)
@@ -208,19 +210,8 @@ public class UnityClient : IUnityClient
         return false;
     }
 
-    private async Task CancelOperationAsync(string opId, string kind)
-    {
-        _logger.LogInformation("Cancellation requested. Sending CANCEL_OPERATION for {OpId} ({Kind})...", opId, kind);
-        try
-        {
-            using var cancelCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            await SendCommandAsync($"CANCEL_OPERATION {opId}", 3, cancelCts.Token);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogTrace(ex, "Failed to send CANCEL_OPERATION command for {OpId}", opId);
-        }
-    }
+    private Task CancelOperationAsync(string opId, string kind) =>
+        _operationPoller.CancelOperationAsync(opId, kind);
 
     public Task<UnityRefreshResult> RefreshAsync(bool isRecompile, CancellationToken cancellationToken) =>
         RefreshAsync(isRecompile, null, cancellationToken);
@@ -596,12 +587,14 @@ public class UnityClient : IUnityClient
         }
     }
 
+    [Obsolete("unity_execute_method has been retired; use EvalAsync instead.")]
     public Task<UnityExecuteResult> ExecuteMethodAsync(string methodName, string[]? args, CancellationToken cancellationToken) =>
         ExecuteMethodAsync(methodName, args, null, cancellationToken);
 
     /// <summary>
     /// Invokes static C# method with arguments in Unity Editor.
     /// </summary>
+    [Obsolete("unity_execute_method has been retired; use EvalAsync instead.")]
     public virtual async Task<UnityExecuteResult> ExecuteMethodAsync(
         string methodName,
         string[]? args,
@@ -941,223 +934,10 @@ public class UnityClient : IUnityClient
         }
     }
 
-    private sealed class OperationPollingSpec<TResult> where TResult : class, IOperationResult, new()
-    {
-        public required string OperationId { get; init; }
-        public string? Kind { get; init; }
-        public string OperationDisplayName { get; init; } = "operation";
-        public required string ResultFilePath { get; init; }
-        public required Func<TResult, bool> IsMatch { get; init; }
-        public required string PollCommand { get; init; }
-        public int PollTimeoutSeconds { get; init; } = 5;
-        public int PollIntervalMs { get; init; } = 500;
-        public bool CheckOperationStoreForInterruption { get; init; } = true;
-        public bool ShouldCancelOnAborted { get; init; } = true;
-
-        public Func<TResult, TResult>? OnResultFound { get; init; }
-        public Func<CancellationToken, Task>? OnPollTick { get; init; }
-        public Func<string?, CancellationToken, Task>? OnAfterPoll { get; init; }
-        public Func<string, CancellationToken, Task<TResult?>>? CustomResponseHandler { get; init; }
-    }
-
-    private async Task<TResult> PollOperationUntilTerminalAsync<TResult>(
+    private Task<TResult> PollOperationUntilTerminalAsync<TResult>(
         OperationPollingSpec<TResult> spec,
-        CancellationToken cancellationToken) where TResult : class, IOperationResult, new()
-    {
-        try
-        {
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // 1. Poll tick (e.g. running state progress updates)
-                if (spec.OnPollTick != null)
-                {
-                    await spec.OnPollTick(cancellationToken);
-                }
-
-                // 2. Authoritative check: terminal result file
-                var result = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                if (result != null)
-                {
-                    return spec.OnResultFound != null ? spec.OnResultFound(result) : result;
-                }
-
-                // 3. Process liveness check
-                if (!_processManager.IsUnityRunning(out _))
-                {
-                    // Brief grace period in case result was written as process exited
-                    await Task.Delay(300, cancellationToken);
-                    var finalCheck = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                    if (finalCheck != null)
-                    {
-                        return spec.OnResultFound != null ? spec.OnResultFound(finalCheck) : finalCheck;
-                    }
-
-                    return new TResult
-                    {
-                        OperationId = spec.OperationId,
-                        Success = false,
-                        Message = $"Unity background process exited unexpectedly during {spec.OperationDisplayName}."
-                    };
-                }
-
-                // 4. Operation store check for interruption
-                if (spec.CheckOperationStoreForInterruption)
-                {
-                    var opState = TryReadJsonFile<UnityLeanMcpOperationState>(_pathResolver.OperationFile, o => o.OperationId == spec.OperationId);
-                    if (opState != null && opState.Status == "Interrupted")
-                    {
-                        return new TResult
-                        {
-                            OperationId = spec.OperationId,
-                            Success = false,
-                            Interrupted = true,
-                            Message = "Unity operation was interrupted by domain reload or editor restart."
-                        };
-                    }
-                }
-
-                // 5. Poll socket
-                string? pollResp = await SendCommandAsync(spec.PollCommand, spec.PollTimeoutSeconds, cancellationToken);
-                if (pollResp != null)
-                {
-                    if (spec.CustomResponseHandler != null)
-                    {
-                        var custom = await spec.CustomResponseHandler(pollResp, cancellationToken);
-                        if (custom != null)
-                        {
-                            return custom;
-                        }
-                    }
-
-                    if (pollResp.StartsWith("INTERRUPTION", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string msg = pollResp.Length > 12 ? pollResp[12..].Trim() : "Operation interrupted.";
-                        return new TResult
-                        {
-                            OperationId = spec.OperationId,
-                            Success = false,
-                            Interrupted = true,
-                            Message = ProtocolCodec.UnescapeLine(msg)
-                        };
-                    }
-
-                    if (pollResp.StartsWith("BUSY", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var busyInfo = ParseBusyResponse(pollResp);
-                        if (busyInfo.isCompilation)
-                        {
-                            // Ongoing compilation/refresh; continue polling until compilation finishes and settles
-                        }
-                        else
-                        {
-                            var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                            if (fileRes != null)
-                            {
-                                return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
-                            }
-
-                            return new TResult
-                            {
-                                OperationId = spec.OperationId,
-                                Success = false,
-                                Message = $"Lost ownership of {spec.OperationDisplayName}: {pollResp}"
-                            };
-                        }
-                    }
-
-                    if (string.Equals(pollResp, "IDLE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Always re-check terminal result file before declaring idle failure (Rule 26 & Issue #71)
-                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                        if (fileRes != null)
-                        {
-                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
-                        }
-
-                        return new TResult
-                        {
-                            OperationId = spec.OperationId,
-                            Success = false,
-                            Message = $"{spec.OperationDisplayName} is no longer recognized by the Editor (Editor is idle)."
-                        };
-                    }
-
-                    if (pollResp.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                        if (fileRes != null)
-                        {
-                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
-                        }
-
-                        return new TResult
-                        {
-                            OperationId = spec.OperationId,
-                            Success = false,
-                            Message = ProtocolCodec.UnescapeLine(pollResp)
-                        };
-                    }
-
-                    if (pollResp.StartsWith("FAILURE", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                        if (fileRes != null)
-                        {
-                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
-                        }
-
-                        string msg = pollResp.Length > 7 ? pollResp[7..].Trim() : "Operation failed.";
-                        return new TResult
-                        {
-                            OperationId = spec.OperationId,
-                            Success = false,
-                            Message = ProtocolCodec.UnescapeLine(msg)
-                        };
-                    }
-
-                    if (pollResp.StartsWith("SUCCESS", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var fileRes = TryReadJsonFile(spec.ResultFilePath, spec.IsMatch);
-                        if (fileRes != null)
-                        {
-                            return spec.OnResultFound != null ? spec.OnResultFound(fileRes) : fileRes;
-                        }
-
-                        string payload = pollResp.Length > 7 ? pollResp[7..].Trim() : "";
-                        var successRes = new TResult
-                        {
-                            OperationId = spec.OperationId,
-                            Success = true,
-                            Message = pollResp
-                        };
-                        if (successRes is UnityOperationResult opRes)
-                        {
-                            opRes.Payload = ProtocolCodec.UnescapeLine(payload);
-                        }
-                        return spec.OnResultFound != null ? spec.OnResultFound(successRes) : successRes;
-                    }
-                }
-
-                // 6. After poll hook (e.g. refresh compilation progress)
-                if (spec.OnAfterPoll != null)
-                {
-                    await spec.OnAfterPoll(pollResp, cancellationToken);
-                }
-
-                await Task.Delay(spec.PollIntervalMs, cancellationToken);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            if (spec.ShouldCancelOnAborted && !string.IsNullOrEmpty(spec.Kind))
-            {
-                await CancelOperationAsync(spec.OperationId, spec.Kind);
-            }
-            throw;
-        }
-    }
+        CancellationToken cancellationToken) where TResult : class, IOperationResult, new() =>
+        _operationPoller.PollOperationUntilTerminalAsync(spec, cancellationToken);
 
     private Task<TResult> PollOperationResultAsync<TResult>(
         string opId,
@@ -1166,23 +946,16 @@ public class UnityClient : IUnityClient
         string resultFilePath,
         string pollCommand,
         Func<TResult, TResult>? onResultFound = null,
-        CancellationToken cancellationToken = default) where TResult : UnityOperationResult, new()
-    {
-        var spec = new OperationPollingSpec<TResult>
-        {
-            OperationId = opId,
-            Kind = kind,
-            OperationDisplayName = operationDisplayName,
-            ResultFilePath = resultFilePath,
-            IsMatch = r => r.OperationId == opId,
-            PollCommand = pollCommand,
-            PollTimeoutSeconds = 5,
-            PollIntervalMs = PollIntervalMs,
-            OnResultFound = onResultFound
-        };
-
-        return PollOperationUntilTerminalAsync(spec, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) where TResult : UnityOperationResult, new() =>
+        _operationPoller.PollOperationResultAsync(
+            opId,
+            kind,
+            operationDisplayName,
+            resultFilePath,
+            pollCommand,
+            PollIntervalMs,
+            onResultFound,
+            cancellationToken);
 
     private static void ReportFinalProgress(IProgress<ProgressNotificationValue>? progress, UnityTestRunResult result)
     {
@@ -1199,38 +972,10 @@ public class UnityClient : IUnityClient
         });
     }
 
-
-    private async Task<string?> SendCommandAsync(string command, int timeoutSeconds = 10, CancellationToken cancellationToken = default)
+    private Task<string?> SendCommandAsync(string command, int timeoutSeconds = 10, CancellationToken cancellationToken = default)
     {
         int port = _processManager.ReadPortFile();
-        if (port <= 0 || port > 65535)
-        {
-            return null;
-        }
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-        try
-        {
-            using var client = new TcpClient();
-            await client.ConnectAsync(IPAddress.Loopback, port, cts.Token);
-            client.ReceiveTimeout = timeoutSeconds * 1000;
-            client.SendTimeout = timeoutSeconds * 1000;
-
-            using var stream = client.GetStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-
-            await writer.WriteLineAsync(command.AsMemory(), cts.Token);
-            string? line = await reader.ReadLineAsync(cts.Token);
-            return line?.Trim();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogTrace(ex, "Socket command failed: {Command}", command);
-            return null;
-        }
+        return _socketTransport.SendCommandAsync(port, command, timeoutSeconds, cancellationToken);
     }
 
     private string ReadCompilationErrors()
@@ -1255,28 +1000,8 @@ public class UnityClient : IUnityClient
         }
     }
 
-    private static T? TryReadJsonFile<T>(string filePath, Func<T, bool> predicate) where T : class
-    {
-        if (!File.Exists(filePath)) return null;
-
-        try
-        {
-            string json = UnityProcessManager.ReadFileWithRetry(filePath, maxRetries: 3, delayMs: 50);
-            if (string.IsNullOrWhiteSpace(json)) return null;
-
-            var result = JsonSerializer.Deserialize<T>(json, s_JsonOptions);
-            if (result != null && predicate(result))
-            {
-                return result;
-            }
-        }
-        catch
-        {
-            // Partially written file or transient read error during operation
-        }
-
-        return null;
-    }
+    private static T? TryReadJsonFile<T>(string filePath, Func<T, bool> predicate) where T : class =>
+        OperationPoller.TryReadJsonFile(filePath, predicate);
 
     private static void ReportExecuteCompleted(IProgress<ProgressNotificationValue>? progress)
     {

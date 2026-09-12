@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -16,6 +16,8 @@ namespace UnityLeanMcp
         }
 
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
+        public bool IsMutating => true;
+        public bool RequiresCompilationSettled => true;
 
         public void Handle(string payload, StreamWriter writer)
         {

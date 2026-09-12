@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 
 namespace UnityLeanMcp
 {
@@ -12,6 +12,8 @@ namespace UnityLeanMcp
     internal interface ICommandHandler
     {
         CommandExecutionTarget ExecutionTarget { get; }
+        bool IsMutating => false;
+        bool RequiresCompilationSettled => false;
         void Handle(string payload, StreamWriter writer);
     }
 }

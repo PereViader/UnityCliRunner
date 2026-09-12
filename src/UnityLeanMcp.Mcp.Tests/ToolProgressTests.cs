@@ -348,7 +348,9 @@ public class ToolProgressTests
                 }
             }, cts.Token);
 
+#pragma warning disable CS0618
             var result = await client.ExecuteMethodAsync("Namespace.Type.Method", null, progress, cts.Token);
+#pragma warning restore CS0618
 
             listener.Stop();
             cts.Cancel();

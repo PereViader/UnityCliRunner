@@ -17,6 +17,8 @@ namespace UnityLeanMcp
         }
 
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.MainThread;
+        public bool IsMutating => true;
+        public bool RequiresCompilationSettled => true;
 
         public void Handle(string payload, StreamWriter writer)
         {

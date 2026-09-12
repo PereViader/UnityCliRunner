@@ -273,7 +273,9 @@ public class TestRunErrorAndIdleTests
 
         try
         {
+#pragma warning disable CS0618
             var result = await client.ExecuteMethodAsync("Namespace.Class.Method", null, cts.Token);
+#pragma warning restore CS0618
 
             Assert.False(result.Success);
             Assert.Contains("no longer recognized by the Editor (Editor is idle)", result.Message);

@@ -7,6 +7,8 @@ namespace UnityLeanMcp
     internal class PollRefreshHandler : ICommandHandler
     {
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.WorkerThread;
+        public bool IsMutating => false;
+        public bool RequiresCompilationSettled => false;
 
         public void Handle(string payload, StreamWriter writer)
         {

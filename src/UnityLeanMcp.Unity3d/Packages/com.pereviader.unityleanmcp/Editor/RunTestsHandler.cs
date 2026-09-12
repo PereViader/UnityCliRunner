@@ -12,6 +12,8 @@ namespace UnityLeanMcp
     internal class RunTestsHandler : ICommandHandler
     {
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
+        public bool IsMutating => true;
+        public bool RequiresCompilationSettled => true;
 
         private const string CallbackOwnerName = "UnityLeanMcp.CallbackOwner";
         private static MyTestCallbacks s_Callbacks;

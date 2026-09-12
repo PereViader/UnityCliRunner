@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using UnityEngine;
 
@@ -7,6 +7,8 @@ namespace UnityLeanMcp
     internal class CancelOperationHandler : ICommandHandler
     {
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.WorkerThread;
+        public bool IsMutating => false;
+        public bool RequiresCompilationSettled => false;
 
         public void Handle(string payload, StreamWriter writer)
         {

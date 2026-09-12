@@ -76,7 +76,9 @@ public class LifecycleAndCompilationTests
         var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
         await client.RefreshAsync();
 
+#pragma warning disable CS0618
         var result = await client.ExecuteMethodAsync("Tests.DummyExecuteClass.PollHandlersWhileBusy", null);
+#pragma warning restore CS0618
 
         Assert.True(result.Success, result.Message);
         Assert.Contains("OK|EXECUTE:RUNNING", result.Payload);
@@ -137,7 +139,9 @@ public class LifecycleAndCompilationTests
         var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
         await client.RefreshAsync();
 
+#pragma warning disable CS0618
         var failResult = await client.ExecuteMethodAsync("Tests.DummyExecuteClass.FailMethod", null);
+#pragma warning restore CS0618
 
         Assert.False(failResult.Success);
         Assert.Contains("Intentional execution failure!", failResult.Message);
@@ -402,7 +406,9 @@ public class LifecycleAndCompilationTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
+#pragma warning disable CS0618
             await client.ExecuteMethodAsync("Tests.DummyExecuteClass.CancellableWithArgMethod", new[] { "myArg" }, cts.Token);
+#pragma warning restore CS0618
         });
 
         var deadline = DateTime.UtcNow.AddSeconds(5);

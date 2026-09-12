@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,6 +7,8 @@ namespace UnityLeanMcp
     internal class RecompileHandler : ICommandHandler
     {
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.EditModeOnly;
+        public bool IsMutating => true;
+        public bool RequiresCompilationSettled => false;
 
         public void Handle(string payload, StreamWriter writer)
         {

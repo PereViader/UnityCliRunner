@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -7,6 +7,8 @@ namespace UnityLeanMcp
     internal class ExitHandler : ICommandHandler
     {
         public CommandExecutionTarget ExecutionTarget => CommandExecutionTarget.MainThread;
+        public bool IsMutating => false;
+        public bool RequiresCompilationSettled => false;
 
         private static void ExitUnity()
         {

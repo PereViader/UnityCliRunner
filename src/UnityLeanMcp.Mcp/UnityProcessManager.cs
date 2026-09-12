@@ -17,14 +17,9 @@ public class UnityProcessManager : IUnityProcessManager
 {
     private readonly IUnityPathResolver _pathResolver;
     private readonly ILogger<UnityProcessManager> _logger;
+    private readonly IUnitySocketTransport _socketTransport;
+    private readonly IUnityLogScanner _logScanner;
     private int? _launchedPid;
-    private static readonly Regex s_CompileErrorRegex = new(
-        @"^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): error [a-zA-Z0-9]+:",
-        RegexOptions.Multiline | RegexOptions.Compiled);
-
-    private static readonly Regex s_CompileDiagRegex = new(
-        @"^([a-zA-Z]:)?[a-zA-Z0-9_./\\ -]+\([0-9]+,[0-9]+\): (error|warning) [a-zA-Z0-9]+:.*$",
-        RegexOptions.Multiline | RegexOptions.Compiled);
 
     public IUnityPathResolver PathResolver => _pathResolver;
     public string ProjectRoot => _pathResolver.ProjectRoot;
@@ -59,10 +54,16 @@ public class UnityProcessManager : IUnityProcessManager
         }
     }
 
-    public UnityProcessManager(IUnityPathResolver pathResolver, ILogger<UnityProcessManager> logger)
+    public UnityProcessManager(
+        IUnityPathResolver pathResolver,
+        ILogger<UnityProcessManager> logger,
+        IUnitySocketTransport? socketTransport = null,
+        IUnityLogScanner? logScanner = null)
     {
         _pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
         _logger = logger;
+        _socketTransport = socketTransport ?? new UnitySocketTransport(logger);
+        _logScanner = logScanner ?? new UnityLogScanner();
     }
 
     public UnityProcessManager(string projectRoot, ILogger<UnityProcessManager> logger)
@@ -545,9 +546,9 @@ public class UnityProcessManager : IUnityProcessManager
                     if (File.Exists(_pathResolver.LogFile))
                     {
                         string logText = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialLogOffset);
-                        if (s_CompileErrorRegex.IsMatch(logText))
+                        if (_logScanner.HasCompilationErrors(logText))
                         {
-                            var errorLines = ExtractUniqueCompilationLines(logText);
+                            var errorLines = _logScanner.ExtractUniqueCompilationLines(logText);
                             try
                             {
                                 Directory.CreateDirectory(_pathResolver.TempDir);
@@ -572,9 +573,9 @@ public class UnityProcessManager : IUnityProcessManager
                     if (File.Exists(_pathResolver.LogFile))
                     {
                         string logText = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialLogOffset);
-                        if (s_CompileErrorRegex.IsMatch(logText))
+                        if (_logScanner.HasCompilationErrors(logText))
                         {
-                            var errorLines = ExtractUniqueCompilationLines(logText);
+                            var errorLines = _logScanner.ExtractUniqueCompilationLines(logText);
                             try
                             {
                                 Directory.CreateDirectory(_pathResolver.TempDir);
@@ -597,10 +598,10 @@ public class UnityProcessManager : IUnityProcessManager
             if (startedProcess != null && File.Exists(_pathResolver.LogFile))
             {
                 string logText = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialLogOffset);
-                if (s_CompileErrorRegex.IsMatch(logText))
+                if (_logScanner.HasCompilationErrors(logText))
                 {
                     _logger.LogError("Compilation errors detected in Unity background log during startup.");
-                    var errorLines = ExtractUniqueCompilationLines(logText);
+                    var errorLines = _logScanner.ExtractUniqueCompilationLines(logText);
                     try
                     {
                         Directory.CreateDirectory(_pathResolver.TempDir);
@@ -643,13 +644,13 @@ public class UnityProcessManager : IUnityProcessManager
         }
     }
 
-    public async Task<bool> IsSocketReadyAsync(int timeoutSeconds = 2, CancellationToken cancellationToken = default)
+    public virtual async Task<bool> IsSocketReadyAsync(int timeoutSeconds = 2, CancellationToken cancellationToken = default)
     {
-        string? response = await ProbeSocketCommandAsync("PING", timeoutSeconds, cancellationToken);
-        return response == "PONG";
+        int port = ReadPortFile();
+        return await _socketTransport.IsSocketReadyAsync(port, timeoutSeconds, cancellationToken);
     }
 
-    public async Task<string?> ProbeSocketCommandAsync(string command, int timeoutSeconds = 2, CancellationToken cancellationToken = default)
+    public virtual async Task<string?> ProbeSocketCommandAsync(string command, int timeoutSeconds = 2, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(_pathResolver.PortFile))
         {
@@ -662,28 +663,7 @@ public class UnityProcessManager : IUnityProcessManager
             return null;
         }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-        try
-        {
-            using var client = new TcpClient();
-            await client.ConnectAsync(IPAddress.Loopback, port, cts.Token);
-            client.ReceiveTimeout = timeoutSeconds * 1000;
-            client.SendTimeout = timeoutSeconds * 1000;
-
-            using var stream = client.GetStream();
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-
-            await writer.WriteLineAsync(command.AsMemory(), cts.Token);
-            string? line = await reader.ReadLineAsync(cts.Token);
-            return line?.Trim();
-        }
-        catch
-        {
-            return null;
-        }
+        return await _socketTransport.SendCommandAsync(port, command, timeoutSeconds, cancellationToken);
     }
 
     public int ReadPortFile()
@@ -700,37 +680,11 @@ public class UnityProcessManager : IUnityProcessManager
         }
     }
 
-    private string GetLogSnippet(long initialOffset = 0)
-    {
-        if (!File.Exists(_pathResolver.LogFile)) return "No Unity log file found.";
-        try
-        {
-            string text = ReadFileWithRetry(_pathResolver.LogFile, fromOffset: initialOffset);
-            var lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-            int start = Math.Max(0, lines.Length - 25);
-            return "Last log lines:\n" + string.Join(Environment.NewLine, lines[start..]);
-        }
-        catch (Exception ex)
-        {
-            return $"Error reading log file: {ex.Message}";
-        }
-    }
+    private string GetLogSnippet(long initialOffset = 0) =>
+        _logScanner.GetLogSnippet(_pathResolver.LogFile, initialOffset);
 
-    private static List<string> ExtractUniqueCompilationLines(string logText)
-    {
-        var matches = s_CompileDiagRegex.Matches(logText);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var result = new List<string>();
-        foreach (Match m in matches)
-        {
-            string line = m.Value.Trim();
-            if (!string.IsNullOrEmpty(line) && seen.Add(line))
-            {
-                result.Add(line);
-            }
-        }
-        return result;
-    }
+    internal static List<string> ExtractUniqueCompilationLines(string logText) =>
+        new UnityLogScanner().ExtractUniqueCompilationLines(logText);
 
     public static string ReadFileWithRetry(string path, int maxRetries = 5, int delayMs = 100, long fromOffset = 0)
     {

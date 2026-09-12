@@ -227,36 +227,6 @@ public class StructuredTestFailure
     public string? FileUri { get; set; }
 }
 
-public class StructuredTestRunResult
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("passCount")]
-    public int PassCount { get; set; }
-
-    [JsonPropertyName("failCount")]
-    public int FailCount { get; set; }
-
-    [JsonPropertyName("skipCount")]
-    public int SkipCount { get; set; }
-
-    [JsonPropertyName("totalCount")]
-    public int TotalCount { get; set; }
-
-    [JsonPropertyName("duration")]
-    public double Duration { get; set; }
-
-    [JsonPropertyName("resultState")]
-    public string ResultState { get; set; } = "";
-
-    [JsonPropertyName("message")]
-    public string Message { get; set; } = "";
-
-    [JsonPropertyName("failures")]
-    public List<StructuredTestFailure> Failures { get; set; } = new();
-}
-
 public class StructuredCompilerDiagnostic
 {
     [JsonPropertyName("file")]
@@ -280,42 +250,3 @@ public class StructuredCompilerDiagnostic
     [JsonPropertyName("assembly")]
     public string? Assembly { get; set; }
 }
-
-public class StructuredRefreshResult
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("interrupted")]
-    public bool Interrupted { get; set; }
-
-    [JsonPropertyName("message")]
-    public string Message { get; set; } = "";
-
-    [JsonPropertyName("diagnostics")]
-    public List<StructuredCompilerDiagnostic> Diagnostics { get; set; } = new();
-}
-
-public class StructuredEvalResult
-{
-    [JsonPropertyName("success")]
-    public bool Success { get; set; }
-
-    [JsonPropertyName("interrupted")]
-    public bool Interrupted { get; set; }
-
-    [JsonPropertyName("message")]
-    public string Message { get; set; } = "";
-
-    [JsonPropertyName("duration")]
-    public double Duration { get; set; }
-
-    [JsonPropertyName("payload")]
-    public string? Payload { get; set; }
-
-    [JsonPropertyName("logs")]
-    public List<ConsoleLogEntry> Logs { get; set; } = new();
-}
-
-
-

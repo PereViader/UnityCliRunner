@@ -101,6 +101,7 @@ public class ToolFormattingTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(EvalResultToReturn);
 
+        [Obsolete]
         public override Task<UnityExecuteResult> ExecuteMethodAsync(
             string methodName,
             string[]? args,

@@ -275,18 +275,12 @@ namespace UnityLeanMcp
                     // Reject mutating operations early on the worker thread if another operation is active,
                     // or if Unity is compiling. This prevents main thread deadlock and dispatcher queue pollution
                     // when an operation (e.g. eval or execute) is executing synchronously on the main thread.
-                    if (command == "RUN_TESTS" || command == "EXECUTE_METHOD" || command == "EVAL" || command == "REFRESH" || command == "RECOMPILE")
+                    if (handler.IsMutating)
                     {
                         var activeOp = UnityLeanMcpOperationStore.ReadThreadSafeSnapshot();
                         if (activeOp != null)
                         {
-                            string requestOpId = null;
-                            if (!string.IsNullOrWhiteSpace(payload))
-                            {
-                                int spaceIndex = payload.IndexOf(' ');
-                                requestOpId = spaceIndex > 0 ? payload.Substring(0, spaceIndex).Trim() : payload.Trim();
-                            }
-
+                            string requestOpId = ExtractOperationId(payload);
                             if (string.IsNullOrEmpty(requestOpId) || activeOp.operationId != requestOpId)
                             {
                                 writer.WriteLine($"BUSY {activeOp.kind} {activeOp.operationId}");
@@ -294,7 +288,7 @@ namespace UnityLeanMcp
                             }
                         }
 
-                        if (command == "RUN_TESTS" || command == "EXECUTE_METHOD" || command == "EVAL")
+                        if (handler.RequiresCompilationSettled)
                         {
                             if (UnityLeanMcpCompilationTracker.IsCompiling || UnityLeanMcpCompilationTracker.RefreshPending)
                             {
@@ -388,6 +382,17 @@ namespace UnityLeanMcp
                 try { client.Close(); } catch { }
                 s_ActiveClients.TryRemove(client, out _);
             }
+        }
+
+        private static string ExtractOperationId(string payload)
+        {
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return null;
+            }
+
+            int spaceIndex = payload.IndexOf(' ');
+            return spaceIndex > 0 ? payload.Substring(0, spaceIndex).Trim() : payload.Trim();
         }
 
         private static bool IsShuttingDown()
