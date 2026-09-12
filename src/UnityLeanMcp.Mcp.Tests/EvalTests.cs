@@ -302,7 +302,7 @@ public class EvalTests
         var result = await client.CallToolAsync("unity_eval", new { code = "return;" });
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("(Evaluation succeeded with no output)", result.Text);
+        Assert.Contains("(Evaluation completed without a return statement. Use 'return <expr>;' to return a value.)", result.Text);
     }
 
     [Fact]
@@ -313,7 +313,7 @@ public class EvalTests
         var result = await client.CallToolAsync("unity_eval", new { code });
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("(Evaluation succeeded with no output)", result.Text);
+        Assert.Contains("(Evaluation completed without a return statement. Use 'return <expr>;' to return a value.)", result.Text);
     }
 
     [Fact]

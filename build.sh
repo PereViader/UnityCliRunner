@@ -59,9 +59,58 @@ if [ ! -f "$BUILD_DIR/MCP~/UnityLeanMcp.Mcp.dll" ]; then
   exit 1
 fi
 
-# 6. Optionally sync newly built binaries to $PACKAGE_SRC/MCP~ if not locked
-echo "Attempting to sync newly built binaries to $PACKAGE_SRC/MCP~..."
+# 6. Sync newly built binaries to $PACKAGE_SRC/MCP~ (handling Windows locked assemblies)
+echo "Syncing newly built binaries to $PACKAGE_SRC/MCP~..."
 mkdir -p "$PACKAGE_SRC/MCP~"
-cp -R "$BUILD_DIR/MCP~/." "$PACKAGE_SRC/MCP~/" 2>/dev/null || echo "Notice: Could not sync binaries to $PACKAGE_SRC/MCP~ (files may be in use by a running MCP server). Build output in $BUILD_DIR is intact."
+
+# Remove old .old files if possible
+rm -f "$PACKAGE_SRC/MCP~/"*.old "$PACKAGE_SRC/MCP~/"*.old.* 2>/dev/null || true
+
+# If UnityLeanMcp.Mcp.dll (or any .dll / .pdb) exists and cannot be overwritten directly due to a running host,
+# rename it to .old per FINDINGS.md line 87.
+shopt -s nullglob
+for locked_candidate in "$PACKAGE_SRC/MCP~"/*.dll "$PACKAGE_SRC/MCP~"/*.pdb; do
+  if [ -f "$locked_candidate" ] && ! ( : >> "$locked_candidate" ) 2>/dev/null; then
+    fname="$(basename "$locked_candidate")"
+    echo "Notice: $fname is locked by a running process. Renaming to $fname.old..."
+    old_target="$locked_candidate.old"
+    rm -f "$old_target" 2>/dev/null || true
+    if [ -f "$old_target" ]; then
+      old_target="$locked_candidate.old.$$"
+    fi
+    mv -f "$locked_candidate" "$old_target" 2>/dev/null || true
+  fi
+done
+shopt -u nullglob
+
+# Copy files from $BUILD_DIR/MCP~ into $PACKAGE_SRC/MCP~
+if ! cp -R "$BUILD_DIR/MCP~/." "$PACKAGE_SRC/MCP~/" 2>/dev/null; then
+  echo "Notice: Direct recursive copy failed. Copying with locked assembly fallback..."
+  shopt -s dotglob nullglob
+  for src_file in "$BUILD_DIR/MCP~"/*; do
+    fname="$(basename "$src_file")"
+    dest_file="$PACKAGE_SRC/MCP~/$fname"
+    if [ -d "$src_file" ]; then
+      cp -R "$src_file" "$dest_file" 2>/dev/null || true
+    elif [ -f "$dest_file" ]; then
+      if ! cp -f "$src_file" "$dest_file" 2>/dev/null; then
+        echo "Notice: $fname failed copy. Renaming to $fname.old..."
+        old_file="$dest_file.old"
+        rm -f "$old_file" 2>/dev/null || true
+        if [ -f "$old_file" ]; then
+          old_file="$dest_file.old.$$"
+        fi
+        mv -f "$dest_file" "$old_file" 2>/dev/null || true
+        cp -f "$src_file" "$dest_file" 2>/dev/null || echo "Warning: Could not copy $fname"
+      fi
+    else
+      cp -f "$src_file" "$dest_file" 2>/dev/null || true
+    fi
+  done
+  shopt -u dotglob nullglob
+fi
+
+# Attempt to remove old .old files if unlocked, or leave them
+rm -f "$PACKAGE_SRC/MCP~/"*.old "$PACKAGE_SRC/MCP~/"*.old.* 2>/dev/null || true
 
 echo "=== Build completed successfully! ==="

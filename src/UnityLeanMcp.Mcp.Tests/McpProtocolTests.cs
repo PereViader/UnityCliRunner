@@ -82,7 +82,7 @@ public class McpProtocolTests
         Assert.True(initResult.TryGetProperty("serverInfo", out var serverInfo));
         Assert.Equal("UnityLeanMcp.Mcp", serverInfo.GetProperty("name").GetString());
         Assert.True(initResult.TryGetProperty("instructions", out var instructions));
-        Assert.Equal("All tools automatically compile and refresh pending changes before executing; do not call unity_refresh before evaluating code or running tests.", instructions.GetString());
+        Assert.Equal("unity_refresh verifies compilation diagnostics after editing scripts. unity_run_tests and unity_eval automatically compile and refresh pending changes before executing, so do not call unity_refresh immediately before evaluating code or running tests.", instructions.GetString());
 
         // 2. Initialized notification
         await writer.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");

@@ -22,11 +22,6 @@ public class UnityTools
     private readonly IUnityPathResolver _pathResolver;
     private readonly IDiagnosticFormatter _diagnosticFormatter;
 
-    private static readonly JsonSerializerOptions s_JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     public UnityTools(
         IUnityClient client,
         IUnityProcessManager processManager,
@@ -40,7 +35,7 @@ public class UnityTools
     }
 
     [McpServerTool(Name = "unity_refresh")]
-    [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
+    [Description("Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Use to verify compilation after editing scripts. Note: unity_run_tests and unity_eval automatically refresh pending changes beforehand, so calling unity_refresh immediately before those tools is unnecessary.")]
     public async Task<CallToolResult> UnityRefreshAsync(
         [Description("Optional. If true, forces a full clean rebuild by clearing the assembly compiler cache. Defaults to false; use only when recovering from corrupted cache or stale errors.")]
         bool clean = false,
@@ -95,21 +90,13 @@ public class UnityTools
             }
         }
 
-        var diagnostics = _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
-        var structured = new StructuredRefreshResult
-        {
-            Success = result.Success,
-            Interrupted = result.Interrupted,
-            Message = result.Message ?? "",
-            Diagnostics = diagnostics
-        };
+        _diagnosticFormatter.ParseCompilerDiagnostics(result.Message);
 
         return new CallToolResult
         {
             Content =
             [
-                new TextContentBlock { Text = sb.ToString().TrimEnd() },
-                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
+                new TextContentBlock { Text = sb.ToString().TrimEnd() }
             ],
             IsError = !result.Success
         };
@@ -167,7 +154,7 @@ public class UnityTools
             }
             else
             {
-                humanText = "(Evaluation succeeded with no output)";
+                humanText = "(Evaluation completed without a return statement. Use 'return <expr>;' to return a value.)";
             }
         }
         else
@@ -194,22 +181,11 @@ public class UnityTools
             }
         }
 
-        var structured = new StructuredEvalResult
-        {
-            Success = result.Success,
-            Interrupted = result.Interrupted,
-            Message = result.Message ?? "",
-            Duration = result.Duration,
-            Payload = result.Payload,
-            Logs = result.Logs ?? new()
-        };
-
         return new CallToolResult
         {
             Content =
             [
-                new TextContentBlock { Text = humanText },
-                new TextContentBlock { Text = JsonSerializer.Serialize(structured, s_JsonOptions) }
+                new TextContentBlock { Text = humanText }
             ],
             IsError = !result.Success
         };
@@ -348,29 +324,11 @@ public class UnityTools
             }
         }
 
-        double totalDuration = result.Duration > 0
-            ? result.Duration
-            : structuredFailures.Sum(f => f.Duration);
-
-        var structuredRunResult = new StructuredTestRunResult
-        {
-            Success = success,
-            PassCount = result.PassCount,
-            FailCount = result.FailCount,
-            SkipCount = result.SkipCount,
-            TotalCount = totalTests,
-            Duration = totalDuration,
-            ResultState = result.ResultState,
-            Message = result.Message ?? "",
-            Failures = structuredFailures
-        };
-
         return new CallToolResult
         {
             Content =
             [
-                new TextContentBlock { Text = sb.ToString().TrimEnd() },
-                new TextContentBlock { Text = JsonSerializer.Serialize(structuredRunResult, s_JsonOptions) }
+                new TextContentBlock { Text = sb.ToString().TrimEnd() }
             ],
             IsError = !success
         };
@@ -385,9 +343,11 @@ public class UnityTools
 
     [McpServerTool(Name = "unity_stop")]
     [Description("Safely stops the running Unity background instance. Do NOT call this automatically after operations; keep the instance warm for speed. Only use when explicitly requested by the user, to recover from a freeze/hang, or to release project locks so the user can open the Unity GUI.")]
-    public async Task<CallToolResult> UnityStopAsync(CancellationToken cancellationToken = default)
+    public async Task<CallToolResult> UnityStopAsync(
+        [Description("Optional. If true, forces termination even if Unity is running as an interactive GUI Editor. Defaults to false.")] bool force = false,
+        CancellationToken cancellationToken = default)
     {
-        if (!_processManager.IsUnityRunning(out _))
+        if (!_processManager.IsUnityRunning(out int? pid))
         {
             return new CallToolResult
             {
@@ -396,7 +356,16 @@ public class UnityTools
             };
         }
 
-        bool stopped = await _processManager.StopUnityAsync(cancellationToken);
+        if (_processManager.GetUnityMode(pid) == "GUI" && !force)
+        {
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = "Refusing to stop Unity: The active Unity Editor is running in interactive GUI mode. Stopping it may lose unsaved user changes. Set 'force: true' to stop it anyway." }],
+                IsError = true
+            };
+        }
+
+        bool stopped = await _processManager.StopUnityAsync(force, cancellationToken);
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = stopped ? "Stopped." : "Error: Unity background instance could not be stopped." }],

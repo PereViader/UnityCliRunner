@@ -42,8 +42,13 @@ public class ToolFormattingTests
 
         public override string GetUnityMode(int? pid = null) => Mode;
 
-        public override Task<bool> StopUnityAsync(CancellationToken cancellationToken = default)
+        public override Task<bool> StopUnityAsync(bool force = false, CancellationToken cancellationToken = default)
         {
+            if (Mode == "GUI" && !force)
+            {
+                return Task.FromResult(false);
+            }
+
             if (StopSuccess)
             {
                 Running = false;
@@ -359,7 +364,33 @@ public class ToolFormattingTests
             var result = await tools.UnityEvalAsync("Time.timeScale = 1.0f;");
 
             Assert.False(result.IsError);
-            Assert.Equal("(Evaluation succeeded with no output)", GetResultText(result));
+            Assert.Equal("(Evaluation completed without a return statement. Use 'return <expr>;' to return a value.)", GetResultText(result));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityEval_WithNullReturnPayload_ReturnsNullLiteral()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            client.EvalResultToReturn = new UnityEvalResult
+            {
+                Success = true,
+                Payload = "null",
+                Logs = []
+            };
+
+            var result = await tools.UnityEvalAsync("return null;");
+
+            Assert.False(result.IsError);
+            Assert.Equal("null", GetResultText(result));
+            Assert.DoesNotContain("Logs:", GetResultText(result));
+            Assert.DoesNotContain("Result:", GetResultText(result));
         }
         finally
         {
@@ -468,19 +499,12 @@ public class ToolFormattingTests
             var result = await tools.UnityEvalAsync("return 42;");
 
             Assert.False(result.IsError);
-            Assert.Equal(2, result.Content.Count);
-            Assert.True(result.Content[1] is TextContentBlock);
+            Assert.Single(result.Content);
+            Assert.True(result.Content[0] is TextContentBlock);
 
-            var jsonBlock = (TextContentBlock)result.Content[1];
-            var structured = JsonSerializer.Deserialize<StructuredEvalResult>(jsonBlock.Text);
-
-            Assert.NotNull(structured);
-            Assert.True(structured.Success);
-            Assert.False(structured.Interrupted);
-            Assert.Equal("42", structured.Payload);
-            Assert.Equal(0.05, structured.Duration);
-            Assert.Single(structured.Logs);
-            Assert.Equal("step 1", structured.Logs[0].Message);
+            string text = GetResultText(result);
+            Assert.Contains("step 1", text);
+            Assert.Contains("42", text);
         }
         finally
         {
@@ -504,18 +528,12 @@ public class ToolFormattingTests
             var result = await tools.UnityEvalAsync("return GameObject.Find(\"Missing\").name;");
 
             Assert.True(result.IsError);
+            Assert.Single(result.Content);
             string text = GetResultText(result);
             Assert.StartsWith("Logs:", text);
             Assert.Contains("[Error] Failed to locate target", text);
             Assert.Contains("Error:", text);
             Assert.Contains("NullReferenceException:", text);
-
-            Assert.Equal(2, result.Content.Count);
-            var jsonBlock = (TextContentBlock)result.Content[1];
-            var structured = JsonSerializer.Deserialize<StructuredEvalResult>(jsonBlock.Text);
-            Assert.NotNull(structured);
-            Assert.False(structured.Success);
-            Assert.Equal("NullReferenceException: Object reference not set to an instance of an object", structured.Message);
         }
         finally
         {
@@ -814,13 +832,48 @@ public class ToolFormattingTests
         }
     }
 
-    private static T? GetStructuredResult<T>(CallToolResult result) where T : class
+    [Fact]
+    public async Task UnityStop_WhenGuiModeAndNotForced_ReturnsRefusalErrorMessage()
     {
-        if (result.Content.Count > 1 && result.Content[1] is TextContentBlock block)
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
         {
-            return JsonSerializer.Deserialize<T>(block.Text);
+            pm.Running = true;
+            pm.Mode = "GUI";
+            pm.StopSuccess = true;
+
+            var result = await tools.UnityStopAsync(force: false);
+
+            Assert.True(result.IsError);
+            Assert.Equal("Refusing to stop Unity: The active Unity Editor is running in interactive GUI mode. Stopping it may lose unsaved user changes. Set 'force: true' to stop it anyway.", GetResultText(result));
+            Assert.True(pm.Running);
         }
-        return null;
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task UnityStop_WhenGuiModeAndForced_StopsSuccessfully()
+    {
+        var (tempDir, pm, client, tools) = CreateTestContext();
+        try
+        {
+            pm.Running = true;
+            pm.Mode = "GUI";
+            pm.StopSuccess = true;
+
+            var result = await tools.UnityStopAsync(force: true);
+
+            Assert.False(result.IsError);
+            Assert.Equal("Stopped.", GetResultText(result));
+            Assert.False(pm.Running);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
     }
 
     // ==========================================
@@ -859,34 +912,15 @@ public class ToolFormattingTests
             var result = await tools.UnityRunTestsAsync();
 
             Assert.True(result.IsError);
-            Assert.Equal(2, result.Content.Count);
+            Assert.Single(result.Content);
 
             string humanText = GetResultText(result);
             Assert.Contains("Tests Failed: 1 failed, 7 passed, 2 skipped.", humanText);
             Assert.Contains("• MySuite.Test_AssertFailure (0.250s)", humanText);
             Assert.Contains("Location: [Assets/Tests/Editor/DummyTest.cs:42](file:///", humanText);
-
-            var structured = GetStructuredResult<StructuredTestRunResult>(result);
-            Assert.NotNull(structured);
-            Assert.False(structured.Success);
-            Assert.Equal(7, structured.PassCount);
-            Assert.Equal(1, structured.FailCount);
-            Assert.Equal(2, structured.SkipCount);
-            Assert.Equal(10, structured.TotalCount);
-            Assert.Equal(1.85, structured.Duration);
-            Assert.Equal("Failed", structured.ResultState);
-            Assert.Single(structured.Failures);
-
-            var f = structured.Failures[0];
-            Assert.Equal("Test_AssertFailure", f.Name);
-            Assert.Equal("MySuite.Test_AssertFailure", f.FullName);
-            Assert.Equal(0.25, f.Duration);
-            Assert.Equal("Expected 10 but got 5", f.Message);
-            Assert.Equal("Assets/Tests/Editor/DummyTest.cs", f.FilePath);
-            Assert.Equal(42, f.LineNumber);
-            Assert.NotNull(f.FileUri);
-            Assert.StartsWith("file:///", f.FileUri);
-            Assert.EndsWith("#L42", f.FileUri);
+            Assert.Contains("#L42)", humanText);
+            Assert.Contains("Message: Expected 10 but got 5", humanText);
+            Assert.Contains("Stack trace:", humanText);
         }
         finally
         {
@@ -911,29 +945,12 @@ public class ToolFormattingTests
             var result = await tools.UnityRefreshAsync();
 
             Assert.True(result.IsError);
-            Assert.Equal(2, result.Content.Count);
+            Assert.Single(result.Content);
 
-            var structured = GetStructuredResult<StructuredRefreshResult>(result);
-            Assert.NotNull(structured);
-            Assert.False(structured.Success);
-            Assert.False(structured.Interrupted);
-            Assert.Equal(2, structured.Diagnostics.Count);
-
-            var d0 = structured.Diagnostics[0];
-            Assert.Equal("Assets/Scripts/Game.cs", d0.File);
-            Assert.Equal(12, d0.Line);
-            Assert.Equal(4, d0.Column);
-            Assert.Equal("error", d0.Severity);
-            Assert.Equal("CS0103", d0.Code);
-            Assert.Equal("The name 'player' does not exist in the current context", d0.Message);
-
-            var d1 = structured.Diagnostics[1];
-            Assert.Equal("Assets/Scripts/Util.cs", d1.File);
-            Assert.Equal(88, d1.Line);
-            Assert.Equal(16, d1.Column);
-            Assert.Equal("warning", d1.Severity);
-            Assert.Equal("CS0219", d1.Code);
-            Assert.Equal("The variable 'temp' is assigned but its value is never used", d1.Message);
+            string text = GetResultText(result);
+            Assert.Contains("Assets/Scripts/Game.cs(12,4): error CS0103: The name 'player' does not exist in the current context", text);
+            Assert.Contains("Assets/Scripts/Util.cs(88,16): warning CS0219: The variable 'temp' is assigned but its value is never used", text);
+            Assert.Contains("Error: Unity compilation failed.", text);
         }
         finally
         {
@@ -957,20 +974,11 @@ public class ToolFormattingTests
             var result = await tools.UnityRefreshAsync(clean: true);
 
             Assert.True(result.IsError);
-            Assert.Equal(2, result.Content.Count);
+            Assert.Single(result.Content);
 
-            var structured = GetStructuredResult<StructuredRefreshResult>(result);
-            Assert.NotNull(structured);
-            Assert.False(structured.Success);
-            Assert.Single(structured.Diagnostics);
-
-            var d = structured.Diagnostics[0];
-            Assert.Equal("Assets/Scripts/RecompileTest.cs", d.File);
-            Assert.Equal(5, d.Line);
-            Assert.Equal(10, d.Column);
-            Assert.Equal("error", d.Severity);
-            Assert.Equal("CS1002", d.Code);
-            Assert.Equal("; expected", d.Message);
+            string text = GetResultText(result);
+            Assert.Contains("Assets/Scripts/RecompileTest.cs(5,10): error CS1002: ; expected", text);
+            Assert.Contains("Error: Unity recompilation failed.", text);
         }
         finally
         {
@@ -1115,7 +1123,7 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
     // ==========================================
 
     [Theory]
-    [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. All tools auto-refresh pending changes before executing; do not call unity_refresh beforehand.")]
+    [InlineData("unity_refresh", "Refreshes AssetDatabase and returns compiler diagnostics. Fast (<200ms) when unchanged. Use to verify compilation after editing scripts. Note: unity_run_tests and unity_eval automatically refresh pending changes beforehand, so calling unity_refresh immediately before those tools is unnecessary.")]
     [InlineData("unity_eval", "Evaluates C# code in-memory against the active Unity Editor to query scene state, GameObjects, components, and project data. Accepts raw multiline C# top-level statements (and 'using' directives). Do not wrap code in a class, method, or namespace. No default namespaces are pre-imported; include all required 'using' directives in the snippet. Top-level 'await' is supported. Use 'return <value>;' to return data; void statements and 'return;' complete naturally without returning a value.")]
     [InlineData("unity_run_tests", "Runs EditMode/PlayMode tests with failure diagnostics.")]
     public void UnityTools_Methods_HaveExpectedRefinedDescriptions(string toolName, string expectedDescription)
@@ -1164,6 +1172,18 @@ Assets/Scripts/Enemy.cs(42,5): warning CS0219: The variable 'bar' is assigned bu
         var descAttr = cleanParam.GetCustomAttribute<DescriptionAttribute>();
         Assert.NotNull(descAttr);
         Assert.Contains("forces a full clean rebuild", descAttr.Description);
+    }
+
+    [Fact]
+    public void UnityTools_UnityStop_ForceParameter_HasAccurateDescription()
+    {
+        var stopMethod = typeof(UnityTools).GetMethod(nameof(UnityTools.UnityStopAsync));
+        Assert.NotNull(stopMethod);
+        var forceParam = stopMethod.GetParameters().FirstOrDefault(p => p.Name == "force");
+        Assert.NotNull(forceParam);
+        var descAttr = forceParam.GetCustomAttribute<DescriptionAttribute>();
+        Assert.NotNull(descAttr);
+        Assert.Contains("forces termination even if Unity is running as an interactive GUI Editor", descAttr.Description);
     }
 
     [Fact]

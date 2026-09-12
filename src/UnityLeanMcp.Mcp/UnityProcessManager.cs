@@ -766,7 +766,7 @@ public class UnityProcessManager : IUnityProcessManager
         return reader.ReadToEnd();
     }
 
-    public virtual async Task<bool> StopUnityAsync(CancellationToken cancellationToken = default)
+    public virtual async Task<bool> StopUnityAsync(bool force = false, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -774,6 +774,13 @@ public class UnityProcessManager : IUnityProcessManager
             {
                 PurgeOperationState();
                 return true;
+            }
+
+            string mode = GetUnityMode(pid);
+            if (mode == "GUI" && !force)
+            {
+                _logger.LogWarning("Refusing to stop Unity GUI Editor with PID {Pid} without force flag.", pid);
+                return false;
             }
 
             int? targetPid = pid;
@@ -822,4 +829,6 @@ public class UnityProcessManager : IUnityProcessManager
             PurgeOperationState();
         }
     }
+
+    public Task<bool> StopUnityAsync(CancellationToken cancellationToken) => StopUnityAsync(false, cancellationToken);
 }

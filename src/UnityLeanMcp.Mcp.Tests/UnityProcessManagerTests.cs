@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -472,6 +472,39 @@ public class UnityProcessManagerTests
         {
             try { if (!proc1.HasExited) proc1.Kill(true); } catch { }
             try { if (!proc2.HasExited) proc2.Kill(true); } catch { }
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task StopUnityAsync_WhenGuiModeAndNotForced_RefusesToStopAndReturnsFalse()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "unity_pm_test_gui_stop_" + Guid.NewGuid().ToString("N"));
+        string tempSubDir = Path.Combine(tempDir, "Temp");
+        Directory.CreateDirectory(tempSubDir);
+
+        using var proc = StartDummyProcess();
+        string lockFilePath = Path.Combine(tempSubDir, "UnityLockfile");
+        using var lockStream = File.Open(lockFilePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+
+        try
+        {
+            var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance)
+            {
+                ProcessProvider = () => new[] { proc }
+            };
+
+            // When running without PID file, it is detected as GUI mode
+            Assert.Equal("GUI", procManager.GetUnityMode());
+
+            bool stopped = await procManager.StopUnityAsync(force: false);
+
+            Assert.False(stopped);
+            Assert.False(proc.HasExited, "proc should NOT have been killed when force is false.");
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(true); } catch { }
             try { Directory.Delete(tempDir, true); } catch { }
         }
     }
