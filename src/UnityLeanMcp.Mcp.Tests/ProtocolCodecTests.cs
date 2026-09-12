@@ -1,7 +1,8 @@
-﻿using Xunit;
+using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Unit")]
 public class ProtocolCodecTests
 {
     [Fact]

@@ -1,10 +1,11 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
 [Collection("UnityIntegration")]
+[Trait("Category", "UnityIntegration")]
 public class TestFrameworkTests
 {
     private readonly UnityIntegrationFixture _fixture;
@@ -17,9 +18,7 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestEverythingPasses_RunsEditModeTestsSuccessfully()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
 
         Assert.False(result.IsError, result.Text);
@@ -30,7 +29,7 @@ public class TestFrameworkTests
     public async Task TestCompileErrorsAndWarnings_FailsOnScriptCompileError()
     {
         await using var _ = await _fixture.UseFixtureAsync("TestCompileErrorsAndWarnings");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
 
         var result = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
 
@@ -41,10 +40,12 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestCompileWarningsAndPass_RunsTestsDespiteCompilerWarnings()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestCompileWarningsAndPass");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
-        var result = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        var client = _fixture.SharedClient;
+        var result = await client.CallToolAsync("unity_run_tests", new
+        {
+            mode = "editmode",
+            filter = "PassWithWarningTest"
+        });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("Tests Passed:", result.Text);
@@ -53,10 +54,12 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestNoWarningsAndFailures_ReportsFailedAssertionsAndStackTraces()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestNoWarningsAndFailures");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
-        var result = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        var client = _fixture.SharedClient;
+        var result = await client.CallToolAsync("unity_run_tests", new
+        {
+            mode = "editmode",
+            filter = "FailTest"
+        });
 
         Assert.True(result.IsError);
         Assert.Contains("Tests Failed:", result.Text);
@@ -66,10 +69,12 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestNoWarningsAndSkipped_ReportsSkippedTests()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestNoWarningsAndSkipped");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
-        var result = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        var client = _fixture.SharedClient;
+        var result = await client.CallToolAsync("unity_run_tests", new
+        {
+            mode = "editmode",
+            filter = "IgnoreTest"
+        });
 
         Assert.False(result.IsError, result.Text);
         Assert.Contains("skipped", result.Text, StringComparison.OrdinalIgnoreCase);
@@ -78,9 +83,7 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestFilterCategory_ExcludesOrIncludesCategories()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestFilterCategory");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_run_tests", new
         {
             mode = "editmode",
@@ -94,9 +97,7 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestFilterByName_RunsOnlyTargetedTest()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestFilterByName");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_run_tests", new
         {
             mode = "editmode",
@@ -110,9 +111,7 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestEverythingPasses_RunsAllTestsByDefault()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_run_tests");
 
         Assert.False(result.IsError, result.Text);
@@ -122,9 +121,7 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestEverythingPasses_RunsAllTestsExplicitly()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_run_tests", new { mode = "all" });
 
         Assert.False(result.IsError, result.Text);
@@ -134,10 +131,13 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestEverythingPasses_FailedOnlyWhenNoFailures_ReturnsNoFailedTestsFound()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestEverythingPasses");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
 
-        var initialRun = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        var initialRun = await client.CallToolAsync("unity_run_tests", new
+        {
+            mode = "editmode",
+            filter = "PassTest"
+        });
         Assert.False(initialRun.IsError, initialRun.Text);
 
         var failedRun = await client.CallToolAsync("unity_run_tests", new { failedOnly = true });
@@ -148,10 +148,13 @@ public class TestFrameworkTests
     [Fact]
     public async Task TestNoWarningsAndFailures_FailedOnlyRerunsFailedTests()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestNoWarningsAndFailures");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
 
-        var initialRun = await client.CallToolAsync("unity_run_tests", new { mode = "editmode" });
+        var initialRun = await client.CallToolAsync("unity_run_tests", new
+        {
+            mode = "editmode",
+            filter = "FailTest"
+        });
         Assert.True(initialRun.IsError);
         Assert.Contains("Failures:", initialRun.Text);
 

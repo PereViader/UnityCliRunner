@@ -10,6 +10,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Subsystem")]
 public class TestRunErrorAndIdleTests
 {
     private static (UnityClient client, UnityProcessManager procManager, TcpListener listener, string tempDir, Task serverTask) StartMockServer(

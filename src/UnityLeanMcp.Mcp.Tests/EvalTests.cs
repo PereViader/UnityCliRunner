@@ -5,6 +5,7 @@ using Xunit;
 namespace UnityLeanMcp.Mcp.Tests;
 
 [Collection("UnityIntegration")]
+[Trait("Category", "UnityIntegration")]
 public class EvalTests
 {
     private readonly UnityIntegrationFixture _fixture;
@@ -17,7 +18,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalSuccess_EvaluatesAdditionExpression()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "return 1 + 1;" });
 
         Assert.False(result.IsError, result.Text);
@@ -27,7 +28,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalExpression_EvaluatesMathfSqrt()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn Mathf.Sqrt(16f);" });
 
         Assert.False(result.IsError, result.Text);
@@ -37,7 +38,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalWithoutUsings_FailsToResolveUnimportedType()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         // Mathf is in UnityEngine; without 'using UnityEngine;', this must fail to compile
         var result = await client.CallToolAsync("unity_eval", new { code = "return Mathf.Sqrt(16f);" });
 
@@ -48,7 +49,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalSyntaxError_ReturnsCompilationFailure()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "this is invalid syntax @@" });
 
         Assert.True(result.IsError);
@@ -58,7 +59,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalMultiStatement_ExecutesMultipleStatementsAndReturnsValue()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "int a = 10; int b = 20; return a + b;" });
 
         Assert.False(result.IsError, result.Text);
@@ -68,7 +69,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalLiteralNewlines_HandlesMultiLineCodeBlock()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "int x = 10;\nint y = 20;\nreturn x + y;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -79,7 +80,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalVoidStatement_ExecutesWithoutError()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "UnityEngine.Debug.Log(42);" });
 
         Assert.False(result.IsError, result.Text);
@@ -89,7 +90,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalVoidMethod_ExecutesGCCollectWithoutError()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "System.GC.Collect();" });
 
         Assert.False(result.IsError, result.Text);
@@ -98,7 +99,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalConsoleLogs_CapturesLogsAndReturnValue()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "UnityEngine.Debug.Log(\"info log\"); UnityEngine.Debug.LogWarning(\"warn log\"); return 100;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -111,7 +112,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalNull_ReturnsNullWithoutError()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "return (object)null;" });
 
         Assert.False(result.IsError, result.Text);
@@ -121,7 +122,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalDestroyedObject_HandlesDestroyedUnityObjectGracefully()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using UnityEngine;\nGameObject go = new GameObject(\"TempObj\"); GameObject.DestroyImmediate(go); return go;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -132,7 +133,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalGameObject_InstantiatesAndReturnsGameObjectRepresentation()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn new GameObject(\"SampleEntity\");" });
 
         Assert.False(result.IsError, result.Text);
@@ -142,7 +143,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalCollection_ReturnsArrayElements()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "return new int[] { 10, 20, 30 };" });
 
         Assert.False(result.IsError, result.Text);
@@ -154,7 +155,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalException_ReportsUserExceptionMessage()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "throw new System.InvalidOperationException(\"test-eval-error\");" });
 
         Assert.True(result.IsError);
@@ -164,7 +165,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalAsync_TopLevelAwait_ReturnsValue()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "await System.Threading.Tasks.Task.Delay(50); return 42;" });
 
         Assert.False(result.IsError, result.Text);
@@ -174,7 +175,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalAsync_TopLevelAwait_Yield()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "await System.Threading.Tasks.Task.Yield(); return \"async-ok\";" });
 
         Assert.False(result.IsError, result.Text);
@@ -184,7 +185,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalAsync_ReturnsTaskGeneric()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "return System.Threading.Tasks.Task.FromResult(\"hello-task\");" });
 
         Assert.False(result.IsError, result.Text);
@@ -194,7 +195,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalAsync_VoidDelay()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "await System.Threading.Tasks.Task.Delay(50);" });
 
         Assert.False(result.IsError, result.Text);
@@ -203,7 +204,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalAsync_CapturesLogsAcrossFrames()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "UnityEngine.Debug.Log(\"before-await\"); await System.Threading.Tasks.Task.Delay(50); UnityEngine.Debug.Log(\"after-await\"); return \"done\";";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -216,7 +217,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalAsync_ExceptionInAsyncContinuation()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "await System.Threading.Tasks.Task.Delay(20); throw new System.InvalidOperationException(\"delayed-fail\");";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -227,7 +228,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalExplicitImports_ResolvesExpandedNamespaces()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         // Uses Path from System.IO, Image from UnityEngine.UI, UIBehaviour from UnityEngine.EventSystems, AnimatorController from UnityEditor.Animations
         string code = "using System.IO;\nusing UnityEngine.UI;\nusing UnityEngine.EventSystems;\nusing UnityEditor.Animations;\nreturn Path.Combine(\"dir\", \"file\") + \":\" + typeof(Image).Name + \":\" + typeof(UIBehaviour).Name + \":\" + typeof(AnimatorController).Name;";
         var result = await client.CallToolAsync("unity_eval", new { code });
@@ -242,7 +243,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalFormatting_Scene_ReturnsRicherFormat()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine.SceneManagement;\nreturn SceneManager.GetActiveScene();" });
 
         Assert.False(result.IsError, result.Text);
@@ -256,7 +257,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalFormatting_Transform_ReturnsTransformFormat()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn new GameObject(\"EvalTransformTest\").transform;" });
 
         Assert.False(result.IsError, result.Text);
@@ -266,7 +267,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalFormatting_ScriptableObject_ReturnsScriptableObjectFormat()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "using UnityEngine;\nreturn ScriptableObject.CreateInstance<ScriptableObject>();" });
 
         Assert.False(result.IsError, result.Text);
@@ -276,7 +277,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalIndentedReturn_ReturnsValue()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "bool condition = true;\nif (condition)\n{\n    return \"indented-result\";\n}\nelse\n{\n    return \"fallback\";\n}";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -287,7 +288,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalVoidEarlyReturn_ExecutesWithoutError()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "if (true) return; UnityEngine.Debug.Log(\"should not log\");";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -298,7 +299,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalVoidExplicitReturn_ExecutesWithoutError()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new { code = "return;" });
 
         Assert.False(result.IsError, result.Text);
@@ -308,7 +309,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalLambdaWithReturnInVoid_ExecutesWithoutError()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "var list = new System.Collections.Generic.List<int> { 1, 2 }.FindAll(x => { return x > 1; });";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -319,7 +320,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalLambdaWithVoidInValueReturn_ReturnsValue()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "System.Action a = () => { return; }; a(); return 42;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -330,7 +331,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalUsingDirective_ImportsNamespaceAndEvaluates()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using System.IO;\nreturn Path.GetExtension(\"sample.txt\");";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -341,7 +342,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalUsingStaticDirective_EvaluatesDirectMethod()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using static System.Math;\nreturn Sqrt(64.0);";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -352,7 +353,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalUsingAliasDirective_EvaluatesViaAlias()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using MyPath = System.IO.Path;\nreturn MyPath.GetFileName(\"folder/file.cs\");";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -363,7 +364,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalUsingDirective_WithVoidStatement()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using UnityEngine;\nDebug.Log(\"test using void log\");";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -374,7 +375,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalIDisposableUsingStatement_PreservedInsideMethod()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using (var reader = new System.IO.StringReader(\"disposable line\"))\n{\n    return reader.ReadLine();\n}";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -385,7 +386,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalIDisposableUsingDeclaration_PreservedInsideMethod()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "using var ms = new System.IO.MemoryStream(new byte[] { 1, 2, 3 });\nreturn ms.Length;";
         var result = await client.CallToolAsync("unity_eval", new { code });
 
@@ -396,7 +397,7 @@ public class EvalTests
     [Fact]
     public async Task TestEvalUnwrapJsonCode_WhenAccidentallyWrappedInJson()
     {
-        await using var client = new McpTestClient(_fixture.UnityRoot);
+        var client = _fixture.SharedClient;
         string code = "{\n  \"code\": \"using System.IO;\\nreturn Path.GetFileName(\\\"test/doc.pdf\\\");\"\n}";
         var result = await client.CallToolAsync("unity_eval", new { code });
 

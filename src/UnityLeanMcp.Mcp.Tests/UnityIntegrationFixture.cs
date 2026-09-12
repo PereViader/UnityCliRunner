@@ -19,9 +19,11 @@ public class UnityIntegrationFixture : IAsyncLifetime
     private string _backupDummyTestPath = null!;
     private string _backupDummyTestMetaPath = null!;
     private string _tempDir = null!;
+    private McpTestClient? _sharedClient;
 
     public string RepoRoot => _repoRoot;
     public string UnityRoot => _unityRoot;
+    public McpTestClient SharedClient => _sharedClient ?? throw new InvalidOperationException("Shared McpTestClient is not initialized.");
 
     public async Task InitializeAsync()
     {
@@ -52,10 +54,10 @@ public class UnityIntegrationFixture : IAsyncLifetime
             await PublishMcpServerAsync();
         }
 
-        // Ensure Unity is started and ready
-        await using var client = new McpTestClient(_unityRoot);
-        await client.InitializeAsync();
-        var startRes = await client.CallToolAsync("unity_refresh", timeout: TimeSpan.FromSeconds(120));
+        // Ensure Unity is started and ready using shared client
+        _sharedClient = new McpTestClient(_unityRoot);
+        await _sharedClient.InitializeAsync();
+        var startRes = await _sharedClient.CallToolAsync("unity_refresh", timeout: TimeSpan.FromSeconds(120));
         if (startRes.IsError)
         {
             throw new InvalidOperationException($"Failed to start Unity for integration tests: {startRes.Text}");
@@ -90,7 +92,7 @@ public class UnityIntegrationFixture : IAsyncLifetime
             Directory.CreateDirectory(Path.GetDirectoryName(_dummyTestPath)!);
             File.Copy(fixtureSource, _dummyTestPath, true);
             File.SetLastWriteTimeUtc(_dummyTestPath, DateTime.UtcNow);
-            await Task.Delay(500);
+            await Task.Delay(100);
         }
 
         return new DummyTestScope(this);
@@ -136,13 +138,15 @@ public class UnityIntegrationFixture : IAsyncLifetime
         catch { }
 
         // Stop Unity instance cleanly after all tests finish
-        try
+        if (_sharedClient != null)
         {
-            await using var client = new McpTestClient(_unityRoot);
-            await client.InitializeAsync();
-            await client.CallToolAsync("unity_stop", timeout: TimeSpan.FromSeconds(15));
+            try
+            {
+                await _sharedClient.CallToolAsync("unity_stop", timeout: TimeSpan.FromSeconds(15));
+                await _sharedClient.DisposeAsync();
+            }
+            catch { }
         }
-        catch { }
     }
 
     private sealed class DummyTestScope : IAsyncDisposable
@@ -163,9 +167,7 @@ public class UnityIntegrationFixture : IAsyncLifetime
 
             try
             {
-                await Task.Delay(500);
-                await using var client = new McpTestClient(_fixture.UnityRoot);
-                await client.CallToolAsync("unity_refresh");
+                await _fixture.SharedClient.CallToolAsync("unity_refresh");
             }
             catch { }
         }

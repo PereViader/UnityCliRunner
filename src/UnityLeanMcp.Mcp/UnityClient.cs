@@ -44,6 +44,12 @@ public class UnityClient : IUnityClient
     public int PollIntervalMs { get; set; } = 500;
 
     /// <summary>
+    /// Grace period to wait when an active foreign mutating operation is detected before failing fast. Defaults to 3 seconds.
+    /// </summary>
+    public TimeSpan BusyGracePeriod { get; set; } = TimeSpan.FromSeconds(3);
+
+
+    /// <summary>
     /// Returns current Editor connection state: Ready, Not Running, Compiling, Running Unreachable, Busy.
     /// </summary>
     public virtual async Task<string> GetStatusAsync(CancellationToken cancellationToken = default)
@@ -270,7 +276,7 @@ public class UnityClient : IUnityClient
             }
             else
             {
-                bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, TimeSpan.FromSeconds(3), cancellationToken);
+                bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, BusyGracePeriod, cancellationToken);
                 if (!cleared)
                 {
                     return new UnityRefreshResult
@@ -303,7 +309,7 @@ public class UnityClient : IUnityClient
             }
             else
             {
-                bool cleared = await WaitForActiveOperationGracePeriodAsync(initBusy.kind, initBusy.opId, progress, TimeSpan.FromSeconds(3), cancellationToken);
+                bool cleared = await WaitForActiveOperationGracePeriodAsync(initBusy.kind, initBusy.opId, progress, BusyGracePeriod, cancellationToken);
                 if (!cleared)
                 {
                     return new UnityRefreshResult
@@ -562,7 +568,7 @@ public class UnityClient : IUnityClient
                 }
                 else
                 {
-                    bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, TimeSpan.FromSeconds(3), cancellationToken);
+                    bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, BusyGracePeriod, cancellationToken);
                     if (!cleared)
                     {
                         return new UnityEvalResult
@@ -696,7 +702,7 @@ public class UnityClient : IUnityClient
                 }
                 else
                 {
-                    bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, TimeSpan.FromSeconds(3), cancellationToken);
+                    bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, BusyGracePeriod, cancellationToken);
                     if (!cleared)
                     {
                         return new UnityExecuteResult
@@ -845,7 +851,7 @@ public class UnityClient : IUnityClient
                 }
                 else
                 {
-                    bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, TimeSpan.FromSeconds(3), cancellationToken);
+                    bool cleared = await WaitForActiveOperationGracePeriodAsync(busyInfo.kind, busyInfo.opId, progress, BusyGracePeriod, cancellationToken);
                     if (!cleared)
                     {
                         return new UnityTestRunResult

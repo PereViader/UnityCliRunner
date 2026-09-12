@@ -10,6 +10,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Unit")]
 public class DecomposedComponentsTests
 {
     [Fact]

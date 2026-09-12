@@ -13,6 +13,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Subsystem")]
 public class TestRunProgressTests
 {
     [Fact]

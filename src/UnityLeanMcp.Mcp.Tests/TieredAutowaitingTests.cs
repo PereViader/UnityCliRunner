@@ -13,6 +13,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Subsystem")]
 public class TieredAutowaitingTests
 {
     [Theory]
@@ -206,7 +207,8 @@ public class TieredAutowaitingTests
             var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
             var client = new UnityClient(procManager, NullLogger<UnityClient>.Instance)
             {
-                PollIntervalMs = 50
+                PollIntervalMs = 20,
+                BusyGracePeriod = TimeSpan.FromMilliseconds(100)
             };
 
             var receivedProgress = new List<ProgressNotificationValue>();
@@ -566,7 +568,8 @@ public class TieredAutowaitingTests
             var procManager = new UnityProcessManager(tempDir, NullLogger<UnityProcessManager>.Instance);
             var client = new UnityClient(procManager, NullLogger<UnityClient>.Instance)
             {
-                PollIntervalMs = 50
+                PollIntervalMs = 20,
+                BusyGracePeriod = TimeSpan.FromMilliseconds(100)
             };
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));

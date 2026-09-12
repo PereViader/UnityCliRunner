@@ -11,6 +11,7 @@ using Xunit;
 namespace UnityLeanMcp.Mcp.Tests;
 
 [Collection("UnityIntegration")]
+[Trait("Category", "UnityIntegration")]
 public class LifecycleAndCompilationTests
 {
     private readonly UnityIntegrationFixture _fixture;
@@ -33,33 +34,27 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestRefresh_TriggersAssetDatabaseRefreshSuccessfully()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestRefresh");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_refresh");
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("AssetDatabase refresh completed with 0 errors.", result.Text);
+        Assert.Contains("AssetDatabase refresh completed with 0 errors", result.Text);
     }
 
     [Fact]
     public async Task TestRecompile_TriggersCleanScriptRecompilationSuccessfully()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestRecompile");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_refresh", new { clean = true });
 
         Assert.False(result.IsError, result.Text);
-        Assert.Contains("Clean script recompilation completed with 0 errors.", result.Text);
+        Assert.Contains("Clean script recompilation completed with 0 errors", result.Text);
     }
 
     [Fact]
     public async Task TestPollRefreshNonBlocking_PollsRefreshStateWithoutBlocking()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestPollRefreshNonBlocking");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new
         {
             code = "Tests.DummyExecuteClass.PollRefreshWhileBusy();"
@@ -71,10 +66,8 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestPollExecuteNonBlocking_PollsExecuteStateWithoutBlocking()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestPollExecuteNonBlocking");
         var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
         var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
-        await client.RefreshAsync();
 
 #pragma warning disable CS0618
         var result = await client.ExecuteMethodAsync("Tests.DummyExecuteClass.PollHandlersWhileBusy", null);
@@ -90,9 +83,7 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestBusyDetectionBeforeRefresh_RejectsConcurrentMutatingOperations()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestBusyDetectionBeforeRefresh");
-        await using var client = new McpTestClient(_fixture.UnityRoot);
-
+        var client = _fixture.SharedClient;
         var result = await client.CallToolAsync("unity_eval", new
         {
             code = "Tests.DummyExecuteClass.TestBusyDetection();"
@@ -134,10 +125,8 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestExecuteMethodException_DoesNotLeaveStoreBusy()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestExecuteFailure");
         var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
         var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
-        await client.RefreshAsync();
 
 #pragma warning disable CS0618
         var failResult = await client.ExecuteMethodAsync("Tests.DummyExecuteClass.FailMethod", null);
@@ -272,11 +261,7 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestCancelOperation_CancellableExecuteMethod_CancelsSuccessfully()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestExecuteCancellable");
         var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
-        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
-        await client.RefreshAsync();
-
         DeleteFileWithRetry(pm.OperationFile);
         int port = pm.ReadPortFile();
         Assert.True(port > 0, "Unity port should be valid.");
@@ -314,6 +299,7 @@ public class LifecycleAndCompilationTests
         }
         Assert.False(File.Exists(pm.OperationFile), "Operation file should be cleared when method execution cancels.");
 
+        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
         string status = await client.GetStatusAsync();
         Assert.Equal("Ready", status);
     }
@@ -321,11 +307,7 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestCancelOperation_NonCancellableExecuteMethod_ReturnsNotCancelable()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestExecuteCancellable");
         var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
-        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
-        await client.RefreshAsync();
-
         DeleteFileWithRetry(pm.OperationFile);
         int port = pm.ReadPortFile();
         Assert.True(port > 0, "Unity port should be valid.");
@@ -395,12 +377,10 @@ public class LifecycleAndCompilationTests
     [Fact]
     public async Task TestClientCancellation_ExecuteMethodWithCancellationToken_ThrowsAndUnwinds()
     {
-        await using var _ = await _fixture.UseFixtureAsync("TestExecuteCancellable");
         var pm = new UnityProcessManager(_fixture.UnityRoot, NullLogger<UnityProcessManager>.Instance);
-        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
-        await client.RefreshAsync();
-
         DeleteFileWithRetry(pm.OperationFile);
+
+        var client = new UnityClient(pm, NullLogger<UnityClient>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
 

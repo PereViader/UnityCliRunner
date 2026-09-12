@@ -8,6 +8,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "UnityIntegration")]
 public class McpProtocolTests
 {
     private static string GetRepoRoot()

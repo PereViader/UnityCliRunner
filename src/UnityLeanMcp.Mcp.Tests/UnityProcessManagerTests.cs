@@ -12,6 +12,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Unit")]
 public class UnityProcessManagerTests
 {
     private static Process StartDummyProcess()

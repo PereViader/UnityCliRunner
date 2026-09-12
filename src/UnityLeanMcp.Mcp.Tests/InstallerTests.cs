@@ -6,6 +6,7 @@ using Xunit;
 
 namespace UnityLeanMcp.Mcp.Tests;
 
+[Trait("Category", "Unit")]
 public class InstallerTests
 {
     private static string FindRepositoryRoot(string assetsPath)
